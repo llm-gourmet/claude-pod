@@ -16,7 +16,7 @@ This phase transforms the stub hook (exit 0) and stub validator (accept all) fro
 ## Implementation Decisions
 
 ### Hook Response Format
-- **D-01:** Hook communicates with Claude Code via JSON on stdout. Exit 0 = allow (with optional JSON), exit 2 = block (JSON with `{"error": "reason"}`). This matches the Claude Code PreToolUse hook protocol.
+- **D-01:** Hook communicates with Claude Code via JSON on stdout. Exit 0 for all responses. Allow = exit 0 (empty or JSON). Block = exit 0 with JSON `{"permissionDecision": "deny", "reason": "..."}`. This matches the verified Claude Code PreToolUse hook protocol (exit 2 sends to stderr, not structured).
 - **D-02:** Hook reads tool call payload from stdin as JSON, extracts tool name and arguments.
 
 ### Domain Extraction Strategy
@@ -30,7 +30,7 @@ This phase transforms the stub hook (exit 0) and stub validator (accept all) fro
 - **D-08:** Read-only GET requests to non-whitelisted domains are allowed without call-ID registration (per CALL-04). They still go through the hook but skip the validator registration step.
 
 ### Call-ID Management
-- **D-09:** Hook generates UUIDs via `uuidgen` and registers with validator at `http://validator:8088/register` including call-ID, target domain, and timestamp.
+- **D-09:** Hook generates UUIDs via `uuidgen` and registers with validator at `http://127.0.0.1:8088/register` including call-ID, target domain, and timestamp. (Uses localhost because shared network namespace via `network_mode: service:claude` makes container hostname unreachable.)
 - **D-10:** Validator stores call-IDs in SQLite with columns: call_id, domain, created_at, expires_at, used (boolean). WAL mode for concurrent access.
 - **D-11:** Call-IDs expire after 10 seconds (per project constraint). Background cleanup thread sweeps expired entries.
 - **D-12:** Call-IDs are single-use — once validated, marked as used and cannot be reused.
