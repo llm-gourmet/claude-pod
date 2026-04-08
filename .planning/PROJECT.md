@@ -17,6 +17,9 @@ No secret ever leaves the isolated environment uncontrolled — every outbound c
 - [x] File permissions model: hooks and config are root-owned and read-only, workspace is user-writable — *Validated in Phase 01: docker-infrastructure*
 - [x] Anthropic proxy that intercepts all Claude-to-Anthropic traffic, redacts known secret values, and replaces them with placeholders — *Validated in Phase 03: secret-redaction*
 - [x] Proxy restores placeholders to real values in Anthropic responses so Claude can use them in tool calls — *Validated in Phase 03: secret-redaction*
+- [x] Installer script with dependency checking, auth setup (API key or OAuth token), workspace configuration, and CLI shortcut — *Validated in Phase 04: installation-platform*
+- [x] OAuth token authentication as primary auth method — *Validated in Phase 04: installation-platform*
+- [x] Support for Linux (native) and WSL2 — *Validated in Phase 04: installation-platform*
 
 ### Active
 
@@ -26,10 +29,6 @@ No secret ever leaves the isolated environment uncontrolled — every outbound c
 - [ ] SQLite-based call validator with HTTP registration endpoint and iptables integration for network-level enforcement
 - [ ] Call-IDs are single-use and time-limited (10-second expiry)
 
-- [ ] Installer script with dependency checking, auth setup (API key or OAuth token), workspace configuration, and CLI shortcut
-
-- [ ] OAuth token authentication as primary auth method
-- [ ] Support for Linux (native) and WSL2
 - [ ] Integration tests that verify blocked/allowed call scenarios end-to-end in Docker
 
 ### Out of Scope
@@ -89,4 +88,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-09 after Phase 03 completion — Secret redaction proxy validated*
+*Last updated: 2026-04-09 after Phase 04 completion — Installer and platform support validated*
