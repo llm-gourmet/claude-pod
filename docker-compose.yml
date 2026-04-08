@@ -23,8 +23,6 @@ services:
     depends_on:
       proxy:
         condition: service_started
-      validator:
-        condition: service_started
 
   proxy:
     build: ./proxy
@@ -41,13 +39,15 @@ services:
   validator:
     build: ./validator
     container_name: claude-validator
+    network_mode: "service:claude"
+    cap_add:
+      - NET_ADMIN
     volumes:
       - ./config/whitelist.json:/etc/claude-secure/whitelist.json:ro
       - validator-db:/data
-    networks:
-      - claude-internal
-    cap_add:
-      - NET_ADMIN
+    depends_on:
+      claude:
+        condition: service_started
 
 networks:
   claude-internal:

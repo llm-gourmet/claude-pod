@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 # Install iptables for Phase 2 (not used in Phase 1 stub)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends iptables && \
+    apt-get install -y --no-install-recommends iptables iproute2 dnsutils && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
