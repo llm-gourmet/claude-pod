@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|WebFetch|WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/etc/claude-secure/hooks/pre-tool-use.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
