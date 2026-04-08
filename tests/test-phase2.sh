@@ -200,11 +200,9 @@ fi
 # =========================================================================
 # CALL-07b: iptables allows traffic to proxy
 # =========================================================================
-# The proxy is on claude-internal network; claude reaches it via Docker DNS name.
-# However, DNS is set to 127.0.0.1 in docker-compose. Try by resolved IP from iptables rules.
-# Alternatively, test that the ANTHROPIC_BASE_URL (proxy:8080) is reachable.
-# Since DNS may not work, use the proxy IP from iptables rules.
-PROXY_IP=$(docker exec claude-secure iptables -L OUTPUT -n 2>/dev/null | grep '8080' | awk '{print $5}' | head -1)
+# iptables is in the validator container (has NET_ADMIN), but rules apply to the
+# shared namespace. Get proxy IP from iptables rules via the validator container.
+PROXY_IP=$(docker exec claude-validator iptables -L OUTPUT -n 2>/dev/null | grep '8080' | awk '{print $5}' | head -1)
 if [ -n "$PROXY_IP" ]; then
   RESULT=$(docker exec claude-secure curl -s --connect-timeout 3 "http://${PROXY_IP}:8080/" 2>&1 || true)
   if [ -n "$RESULT" ]; then
@@ -213,8 +211,8 @@ if [ -n "$PROXY_IP" ]; then
     report "CALL-07b" "iptables allows traffic to proxy" 1
   fi
 else
-  # Fallback: try localhost proxy or just check iptables has a proxy rule
-  if docker exec claude-secure iptables -L OUTPUT -n 2>/dev/null | grep -q 'ACCEPT.*8080'; then
+  # Fallback: verify iptables has a proxy ACCEPT rule
+  if docker exec claude-validator iptables -L OUTPUT -n 2>/dev/null | grep -q 'ACCEPT.*8080'; then
     report "CALL-07b" "iptables allows traffic to proxy" 0
   else
     report "CALL-07b" "iptables allows traffic to proxy" 1

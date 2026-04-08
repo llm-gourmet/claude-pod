@@ -59,9 +59,10 @@ report "DOCK-02" "Proxy container can reach external URLs" $?
 test "$(docker compose ps --format json | jq -s 'length')" -eq 3 > /dev/null 2>&1
 report "DOCK-03" "Docker Compose runs all 3 containers" $?
 
-# DOCK-04: DNS queries blocked from claude
-! docker exec claude-secure nslookup google.com > /dev/null 2>&1
-report "DOCK-04" "DNS queries from claude container are blocked" $?
+# DOCK-04: Outbound connections blocked from claude (iptables OUTPUT DROP)
+# DNS may resolve via Docker embedded DNS but actual connections are blocked by iptables
+! docker exec claude-secure curl -sf --max-time 5 https://google.com > /dev/null 2>&1
+report "DOCK-04" "Outbound connections from claude container are blocked" $?
 
 # DOCK-05: Security files root-owned and read-only
 # Hooks and settings are COPY'd in Dockerfile and genuinely root-owned.

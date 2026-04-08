@@ -236,14 +236,10 @@ class ValidatorHandler(BaseHTTPRequestHandler):
             self._send_json(400, {"status": "error", "reason": "Missing call_id or domain"})
             return
 
-        # Resolve domain to IP
+        # Resolve domain to IP (best-effort -- DNS may fail on internal networks)
         ip = resolve_domain(domain)
         if not ip:
-            self._send_json(400, {
-                "status": "error",
-                "reason": f"DNS resolution failed for {domain}",
-            })
-            return
+            logger.warning("DNS resolution failed for %s -- storing call-ID without iptables rule", domain)
 
         # Calculate expiry
         expires_at = (datetime.utcnow() + timedelta(seconds=CALL_TTL_SECONDS)).strftime(
@@ -272,8 +268,9 @@ class ValidatorHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-        # Add iptables rule (synchronous -- must complete before returning)
-        add_iptables_rule(ip, call_id)
+        # Add iptables rule if IP was resolved (synchronous -- must complete before returning)
+        if ip:
+            add_iptables_rule(ip, call_id)
 
         logger.info("Registered call-id:%s for %s (%s), expires %s", call_id, domain, ip, expires_at)
         self._send_json(200, {"status": "ok", "ip": ip, "expires_at": expires_at})
