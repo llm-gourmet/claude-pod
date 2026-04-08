@@ -80,8 +80,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [x] 03-01-PLAN.md — Implement secret-redacting proxy and configure auth env vars in docker-compose
-- [ ] 03-02-PLAN.md — Integration tests for all SECR requirements
+- [ ] 04-01-PLAN.md — Installer script (install.sh) and CLI wrapper (bin/claude-secure)
+- [ ] 04-02-PLAN.md — Integration tests for all INST and PLAT requirements
 
 ### Phase 5: Integration Testing
 **Goal**: Every security claim made by claude-secure is verified by automated tests that run in the actual Docker environment
@@ -95,8 +95,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Implement secret-redacting proxy and configure auth env vars in docker-compose
-- [ ] 03-02-PLAN.md — Integration tests for all SECR requirements
+- [ ] 05-01-PLAN.md — TBD
+- [ ] 05-02-PLAN.md — TBD
 
 ## Progress
 
@@ -108,5 +108,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. Docker Infrastructure | 0/2 | Planning complete | - |
 | 2. Call Validation | 0/3 | Planning complete | - |
 | 3. Secret Redaction | 2/2 | Complete   | 2026-04-08 |
-| 4. Installation & Platform | 0/TBD | Not started | - |
+| 4. Installation & Platform | 0/2 | Planning complete | - |
 | 5. Integration Testing | 0/TBD | Not started | - |
