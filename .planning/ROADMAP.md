@@ -50,7 +50,7 @@ Plans:
 
 Plans:
 - [x] 02-01-PLAN.md -- Docker Compose shared namespace + full validator service (SQLite, iptables)
-- [ ] 02-02-PLAN.md -- PreToolUse hook implementation (domain extraction, whitelist, call-ID registration)
+- [x] 02-02-PLAN.md -- PreToolUse hook implementation (domain extraction, whitelist, call-ID registration)
 - [ ] 02-03-PLAN.md -- Integration tests for all CALL requirements
 
 ### Phase 3: Secret Redaction

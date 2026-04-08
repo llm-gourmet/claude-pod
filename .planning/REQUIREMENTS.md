@@ -24,11 +24,11 @@
 
 ### Call Validation
 
-- [ ] **CALL-01**: PreToolUse hook intercepts all Bash, WebFetch, and WebSearch tool calls before execution
-- [ ] **CALL-02**: Hook extracts target URLs/domains from tool call payloads (curl, wget commands, direct URL arguments)
-- [ ] **CALL-03**: Hook blocks outbound payloads (POST/PUT/PATCH, request bodies, auth headers) to non-whitelisted domains
-- [ ] **CALL-04**: Hook allows read-only GET requests to non-whitelisted domains without registration
-- [ ] **CALL-05**: Hook generates a unique call-ID and registers it with the validator before allowing whitelisted calls
+- [x] **CALL-01**: PreToolUse hook intercepts all Bash, WebFetch, and WebSearch tool calls before execution
+- [x] **CALL-02**: Hook extracts target URLs/domains from tool call payloads (curl, wget commands, direct URL arguments)
+- [x] **CALL-03**: Hook blocks outbound payloads (POST/PUT/PATCH, request bodies, auth headers) to non-whitelisted domains
+- [x] **CALL-04**: Hook allows read-only GET requests to non-whitelisted domains without registration
+- [x] **CALL-05**: Hook generates a unique call-ID and registers it with the validator before allowing whitelisted calls
 - [x] **CALL-06**: Validator stores call-IDs in SQLite with domain, expiry timestamp, and single-use flag
 - [x] **CALL-07**: iptables rules on the claude container block all outbound traffic except to proxy and validator services
 
@@ -111,11 +111,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SECR-03 | Phase 3 | Pending |
 | SECR-04 | Phase 3 | Pending |
 | SECR-05 | Phase 3 | Pending |
-| CALL-01 | Phase 2 | Pending |
-| CALL-02 | Phase 2 | Pending |
-| CALL-03 | Phase 2 | Pending |
-| CALL-04 | Phase 2 | Pending |
-| CALL-05 | Phase 2 | Pending |
+| CALL-01 | Phase 2 | Complete |
+| CALL-02 | Phase 2 | Complete |
+| CALL-03 | Phase 2 | Complete |
+| CALL-04 | Phase 2 | Complete |
+| CALL-05 | Phase 2 | Complete |
 | CALL-06 | Phase 2 | Complete |
 | CALL-07 | Phase 2 | Complete |
 | WHIT-01 | Phase 1 | Complete |
