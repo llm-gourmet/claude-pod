@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: Docker Infrastructure** - Isolated container topology with dual networks, hardened claude container, and whitelist config
 - [ ] **Phase 2: Call Validation** - Hook scripts intercept tool calls, validator service gates network access via call-IDs and iptables
-- [ ] **Phase 3: Secret Redaction** - Buffered proxy redacts secrets from Anthropic-bound traffic and restores placeholders in responses
+- [x] **Phase 3: Secret Redaction** - Buffered proxy redacts secrets from Anthropic-bound traffic and restores placeholders in responses (completed 2026-04-08)
 - [ ] **Phase 4: Installation & Platform** - Installer script, CLI shortcut, and verified Linux/WSL2 support
 - [ ] **Phase 5: Integration Testing** - End-to-end tests proving all security claims hold under real conditions
 
@@ -62,11 +62,11 @@ Plans:
   2. When Anthropic's response contains a placeholder, the proxy restores it to the real secret value (scoped to auth/controlled contexts only)
   3. The proxy correctly forwards API key or OAuth token authentication to Anthropic
   4. Changing the whitelist.json file takes effect on the next request without restarting any container
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 
 Plans:
 - [x] 03-01-PLAN.md — Implement secret-redacting proxy and configure auth env vars in docker-compose
-- [ ] 03-02-PLAN.md — Integration tests for all SECR requirements
+- [x] 03-02-PLAN.md — Integration tests for all SECR requirements
 
 ### Phase 4: Installation & Platform
 **Goal**: A developer can install claude-secure with a single script and launch it with a single command on Linux or WSL2
@@ -80,7 +80,7 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Implement secret-redacting proxy and configure auth env vars in docker-compose
+- [x] 03-01-PLAN.md — Implement secret-redacting proxy and configure auth env vars in docker-compose
 - [ ] 03-02-PLAN.md — Integration tests for all SECR requirements
 
 ### Phase 5: Integration Testing
@@ -107,6 +107,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. Docker Infrastructure | 0/2 | Planning complete | - |
 | 2. Call Validation | 0/3 | Planning complete | - |
-| 3. Secret Redaction | 0/TBD | Not started | - |
+| 3. Secret Redaction | 2/2 | Complete   | 2026-04-08 |
 | 4. Installation & Platform | 0/TBD | Not started | - |
 | 5. Integration Testing | 0/TBD | Not started | - |
