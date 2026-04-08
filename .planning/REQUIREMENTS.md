@@ -29,8 +29,8 @@
 - [ ] **CALL-03**: Hook blocks outbound payloads (POST/PUT/PATCH, request bodies, auth headers) to non-whitelisted domains
 - [ ] **CALL-04**: Hook allows read-only GET requests to non-whitelisted domains without registration
 - [ ] **CALL-05**: Hook generates a unique call-ID and registers it with the validator before allowing whitelisted calls
-- [ ] **CALL-06**: Validator stores call-IDs in SQLite with domain, expiry timestamp, and single-use flag
-- [ ] **CALL-07**: iptables rules on the claude container block all outbound traffic except to proxy and validator services
+- [x] **CALL-06**: Validator stores call-IDs in SQLite with domain, expiry timestamp, and single-use flag
+- [x] **CALL-07**: iptables rules on the claude container block all outbound traffic except to proxy and validator services
 
 ### Whitelist Configuration
 
@@ -116,8 +116,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CALL-03 | Phase 2 | Pending |
 | CALL-04 | Phase 2 | Pending |
 | CALL-05 | Phase 2 | Pending |
-| CALL-06 | Phase 2 | Pending |
-| CALL-07 | Phase 2 | Pending |
+| CALL-06 | Phase 2 | Complete |
+| CALL-07 | Phase 2 | Complete |
 | WHIT-01 | Phase 1 | Complete |
 | WHIT-02 | Phase 1 | Complete |
 | WHIT-03 | Phase 1 | Complete |

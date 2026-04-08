@@ -49,7 +49,7 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md -- Docker Compose shared namespace + full validator service (SQLite, iptables)
+- [x] 02-01-PLAN.md -- Docker Compose shared namespace + full validator service (SQLite, iptables)
 - [ ] 02-02-PLAN.md -- PreToolUse hook implementation (domain extraction, whitelist, call-ID registration)
 - [ ] 02-03-PLAN.md -- Integration tests for all CALL requirements
 
