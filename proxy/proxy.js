@@ -100,10 +100,12 @@ const server = http.createServer((req, res) => {
     const headers = prepareHeaders(req.headers, Buffer.byteLength(redactedBody));
     headers['host'] = url.host;
 
-    // Forward to Anthropic
-    const upstreamReq = https.request({
+    // Forward to upstream (Anthropic or test mock)
+    const isHttps = url.protocol === 'https:';
+    const transport = isHttps ? https : http;
+    const upstreamReq = transport.request({
       hostname: url.hostname,
-      port: 443,
+      port: url.port || (isHttps ? 443 : 80),
       path: url.pathname + url.search,
       method: req.method,
       headers
