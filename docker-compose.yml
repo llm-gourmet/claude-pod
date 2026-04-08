@@ -28,6 +28,11 @@ services:
     environment:
       - REAL_ANTHROPIC_BASE_URL=https://api.anthropic.com
       - WHITELIST_PATH=/etc/claude-secure/whitelist.json
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - STRIPE_KEY=${STRIPE_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     volumes:
       - ./config/whitelist.json:/etc/claude-secure/whitelist.json:ro
     networks:
