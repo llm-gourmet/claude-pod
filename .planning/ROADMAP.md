@@ -46,7 +46,12 @@ Plans:
   3. A whitelisted outbound call succeeds only after the hook registers a call-ID with the validator
   4. A call-ID that has already been used cannot be reused (single-use enforcement)
   5. Network traffic from the claude container without a valid call-ID registration is dropped by iptables
-**Plans**: TBD
+**Plans:** 3 plans
+
+Plans:
+- [ ] 02-01-PLAN.md -- Docker Compose shared namespace + full validator service (SQLite, iptables)
+- [ ] 02-02-PLAN.md -- PreToolUse hook implementation (domain extraction, whitelist, call-ID registration)
+- [ ] 02-03-PLAN.md -- Integration tests for all CALL requirements
 
 ### Phase 3: Secret Redaction
 **Goal**: Secrets in Claude's LLM context are never sent to Anthropic in cleartext, and Claude can still use real secret values in authorized tool calls
@@ -89,7 +94,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Docker Infrastructure | 0/2 | Planning complete | - |
-| 2. Call Validation | 0/TBD | Not started | - |
+| 2. Call Validation | 0/3 | Planning complete | - |
 | 3. Secret Redaction | 0/TBD | Not started | - |
 | 4. Installation & Platform | 0/TBD | Not started | - |
 | 5. Integration Testing | 0/TBD | Not started | - |
