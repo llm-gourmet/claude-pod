@@ -30,7 +30,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. The proxy container can reach external URLs while the claude container cannot
   4. Hook scripts and whitelist config inside the claude container are root-owned and cannot be modified by the claude user
   5. A valid whitelist.json exists mapping secret placeholders to env var names and allowed domains, with a readonly_domains section
-**Plans**: TBD
+**Plans:** 2 plans
+
+Plans:
+- [ ] 01-01-PLAN.md -- Docker infrastructure: whitelist config, Dockerfiles, docker-compose.yml, stub services, build and verify topology
+- [ ] 01-02-PLAN.md -- Integration tests: test script verifying all 9 requirements, run and confirm all pass
 
 ### Phase 2: Call Validation
 **Goal**: Every outbound tool call from Claude Code is intercepted, checked against the domain allowlist, and only allowed through the network if registered with a valid single-use call-ID
@@ -84,7 +88,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Docker Infrastructure | 0/TBD | Not started | - |
+| 1. Docker Infrastructure | 0/2 | Planning complete | - |
 | 2. Call Validation | 0/TBD | Not started | - |
 | 3. Secret Redaction | 0/TBD | Not started | - |
 | 4. Installation & Platform | 0/TBD | Not started | - |
