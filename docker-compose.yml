@@ -9,6 +9,11 @@ services:
       - ANTHROPIC_BASE_URL=http://proxy:8080
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-dummy}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - DISABLE_TELEMETRY=1
+      - DISABLE_AUTOUPDATER=1
+      - DISABLE_ERROR_REPORTING=1
+      - CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+      - NODE_TLS_REJECT_UNAUTHORIZED=0
     volumes:
       - workspace:/workspace
       - ./config/whitelist.json:/etc/claude-secure/whitelist.json:ro
@@ -36,8 +41,12 @@ services:
     volumes:
       - ./config/whitelist.json:/etc/claude-secure/whitelist.json:ro
     networks:
-      - claude-internal
-      - claude-external
+      claude-internal:
+        aliases:
+          - api.anthropic.com
+          - statsig.anthropic.com
+          - sentry.anthropic.com
+      claude-external:
 
   validator:
     build: ./validator

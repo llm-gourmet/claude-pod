@@ -28,5 +28,18 @@ RUN chown root:root /etc/claude-secure/settings.json && \
     ln -sf /etc/claude-secure/settings.json /home/claude/.claude/settings.json && \
     chown -R claude:claude /home/claude/.claude
 
+# Pre-set onboarding flag so Claude Code doesn't try to reach api.anthropic.com
+# directly on first startup (bypasses ANTHROPIC_BASE_URL -- see GitHub #26935)
+RUN echo '{"hasCompletedOnboarding":true}' > /home/claude/.claude.json && \
+    chown claude:claude /home/claude/.claude.json
+
+# Disable telemetry and auto-updater to prevent direct connections to
+# statsig.anthropic.com / sentry / update servers that bypass ANTHROPIC_BASE_URL
+# and fail with EAI_AGAIN in the network-isolated container (GitHub #36998, #2481)
+ENV DISABLE_TELEMETRY=1
+ENV DISABLE_AUTOUPDATER=1
+ENV DISABLE_ERROR_REPORTING=1
+ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+
 USER claude
 WORKDIR /workspace

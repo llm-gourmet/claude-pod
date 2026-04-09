@@ -138,8 +138,24 @@ const server = http.createServer((req, res) => {
 });
 
 const PORT = process.env.PROXY_PORT || 8080;
+const TLS_PORT = 443;
 console.log('Whitelist path: ' + WHITELIST_PATH);
 console.log('Auth: ' + (process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'OAuth' : process.env.ANTHROPIC_API_KEY ? 'API key' : 'NONE'));
 server.listen(PORT, '0.0.0.0', () => {
   console.log('Proxy listening on :' + PORT);
 });
+
+// HTTPS listener for intercepted hardcoded calls to api.anthropic.com
+// (routed here via Docker network alias — Claude Code bypasses ANTHROPIC_BASE_URL for some calls)
+try {
+  const tlsOpts = {
+    key: fs.readFileSync('/app/key.pem'),
+    cert: fs.readFileSync('/app/cert.pem'),
+  };
+  const tlsServer = https.createServer(tlsOpts, server._events.request);
+  tlsServer.listen(TLS_PORT, '0.0.0.0', () => {
+    console.log('Proxy (TLS) listening on :' + TLS_PORT);
+  });
+} catch (err) {
+  console.warn('TLS listener not started (certs missing): ' + err.message);
+}

@@ -32,9 +32,13 @@ Four independent security layers work together so that any single layer failing 
                               |
                   +-----------+-----------+
                   |       proxy           |
-                  |  (Node.js, port 8080) |
+                  |  (Node.js)            |
+                  |  - HTTP :8080         |
+                  |  - HTTPS :443         |
                   |  - secret redaction   |
                   |  - buffered req/res   |
+                  |  - DNS alias:         |
+                  |    api.anthropic.com  |
                   +-----------+-----------+
                               |
                   +-----------+-----------+
@@ -148,18 +152,23 @@ To add a new secret, add an entry to the `secrets` array with a unique placehold
 
 ### claude Container
 
-- Base image: Ubuntu 22.04
+- Base image: Node.js 22 Slim
 - Runs the Claude Code CLI
 - All Linux capabilities dropped (`cap_drop: ALL`), `no-new-privileges` enforced
 - Workspace directory bind-mounted as a Docker volume
 - `ANTHROPIC_BASE_URL` points to the proxy (`http://proxy:8080`), so all API traffic routes through the redaction layer
+- `NODE_TLS_REJECT_UNAUTHORIZED=0` set to accept the proxy's self-signed certificate for intercepted HTTPS calls
+- Telemetry, auto-updater, and error reporting disabled to prevent non-essential external connections
+- Onboarding flag pre-set (`hasCompletedOnboarding`) to skip startup checks that bypass `ANTHROPIC_BASE_URL`
 - PreToolUse hook installed at `/etc/claude-secure/` (root-owned, read-only)
 - Connected only to the `claude-internal` network (no external access)
 
 ### proxy Container
 
-- Base image: Node.js 22 Alpine
+- Base image: Node.js 22 Slim
 - Zero npm dependencies -- uses only Node.js stdlib (`http`, `https`, `fs`)
+- Listens on HTTP port 8080 (for `ANTHROPIC_BASE_URL` traffic) and HTTPS port 443 with a self-signed certificate (for intercepted hardcoded calls)
+- Registered as a Docker network alias for `api.anthropic.com`, `statsig.anthropic.com`, and `sentry.anthropic.com` on the internal network -- Claude Code's hardcoded external calls resolve to the proxy instead of failing
 - Buffers entire request body, performs longest-first secret replacement, forwards to `api.anthropic.com`
 - Buffers entire response, restores placeholders to real values, returns to Claude
 - Strips `Accept-Encoding` to prevent compressed responses that cannot be scanned
