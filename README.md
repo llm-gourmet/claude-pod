@@ -97,11 +97,17 @@ claude-secure
 # Stop all containers
 claude-secure stop
 
-# Show container status
+# Show container status and Claude Code version
 claude-secure status
 
-# Pull latest source and rebuild images
+# Pull latest source, rebuild images, and update CLI wrapper
 claude-secure update
+
+# Rebuild claude image with latest Claude Code from npm (--no-cache)
+claude-secure upgrade
+
+# Show all available commands
+claude-secure help
 ```
 
 ## Configuration

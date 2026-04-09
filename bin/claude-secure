@@ -43,11 +43,33 @@ case "${1:-}" in
     ;;
   upgrade)
     echo "Upgrading Claude Code to latest version..."
-    docker compose build --no-cache claude
+    docker compose build --no-cache --pull claude
+    echo ""
     echo "Upgrade complete. Restart with: claude-secure"
     ;;
   update)
-    cd "$APP_DIR" && git pull && docker compose build
+    echo "Pulling latest changes..."
+    cd "$APP_DIR" && git pull
+    echo "Rebuilding images..."
+    docker compose build
+    # Update CLI wrapper if source changed
+    CLI_INSTALLED="$(command -v claude-secure)"
+    CLI_SOURCE="$APP_DIR/bin/claude-secure"
+    if [ -f "$CLI_SOURCE" ] && ! diff -q "$CLI_SOURCE" "$CLI_INSTALLED" >/dev/null 2>&1; then
+      echo "CLI wrapper changed, updating..."
+      if [ -w "$(dirname "$CLI_INSTALLED")" ]; then
+        cp "$CLI_SOURCE" "$CLI_INSTALLED"
+        chmod 755 "$CLI_INSTALLED"
+      elif command -v sudo >/dev/null 2>&1; then
+        sudo cp "$CLI_SOURCE" "$CLI_INSTALLED"
+        sudo chmod 755 "$CLI_INSTALLED"
+      else
+        echo "WARNING: Could not update CLI at $CLI_INSTALLED (no write access)"
+        echo "Run manually: sudo cp $CLI_SOURCE $CLI_INSTALLED"
+      fi
+    fi
+    echo ""
+    echo "Update complete. Restart with: claude-secure"
     ;;
   help|--help|-h)
     echo "Usage: claude-secure [command]"
@@ -56,7 +78,7 @@ case "${1:-}" in
     echo "  (none)     Start containers and open Claude Code session"
     echo "  status     Show container status and Claude Code version"
     echo "  stop       Stop all containers"
-    echo "  update     Pull latest claude-secure and rebuild"
+    echo "  update     Pull latest claude-secure and rebuild all images"
     echo "  upgrade    Rebuild claude image with latest Claude Code (--no-cache)"
     echo "  help       Show this help message"
     ;;
