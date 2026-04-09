@@ -96,6 +96,6 @@ case "${1:-}" in
   *)
     cleanup_containers
     docker compose up -d
-    docker compose exec -it claude claude
+    docker compose exec -it claude claude --dangerously-skip-permissions
     ;;
 esac
