@@ -106,6 +106,9 @@ setup_directories() {
 setup_auth() {
   if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
     echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" > "$CONFIG_DIR/.env"
+    echo "" >> "$CONFIG_DIR/.env"
+    echo "# Add secrets below (must match env_var in whitelist.json)" >> "$CONFIG_DIR/.env"
+    echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$CONFIG_DIR/.env"
     chmod 600 "$CONFIG_DIR/.env"
     log_info "Using ANTHROPIC_API_KEY from environment"
     return
@@ -113,6 +116,9 @@ setup_auth() {
 
   if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
     echo "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}" > "$CONFIG_DIR/.env"
+    echo "" >> "$CONFIG_DIR/.env"
+    echo "# Add secrets below (must match env_var in whitelist.json)" >> "$CONFIG_DIR/.env"
+    echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$CONFIG_DIR/.env"
     chmod 600 "$CONFIG_DIR/.env"
     log_info "Using CLAUDE_CODE_OAUTH_TOKEN from environment"
     return
@@ -131,6 +137,9 @@ setup_auth() {
       read -rsp "API key: " key
       echo ""
       echo "ANTHROPIC_API_KEY=${key}" > "$CONFIG_DIR/.env"
+      echo "" >> "$CONFIG_DIR/.env"
+      echo "# Add secrets below (must match env_var in whitelist.json)" >> "$CONFIG_DIR/.env"
+      echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$CONFIG_DIR/.env"
       log_info "API key saved"
       ;;
     *)
@@ -138,6 +147,9 @@ setup_auth() {
       read -rsp "OAuth token: " token
       echo ""
       echo "CLAUDE_CODE_OAUTH_TOKEN=${token}" > "$CONFIG_DIR/.env"
+      echo "" >> "$CONFIG_DIR/.env"
+      echo "# Add secrets below (must match env_var in whitelist.json)" >> "$CONFIG_DIR/.env"
+      echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$CONFIG_DIR/.env"
       log_info "OAuth token saved"
       ;;
   esac
