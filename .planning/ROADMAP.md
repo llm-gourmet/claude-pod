@@ -163,3 +163,21 @@ Plans:
 
 Plans:
 - [x] 08-01-PLAN.md -- Expand Claude container Dockerfile with dev tools (git, build-essential, python3, ripgrep, fd-find)
+
+### Phase 9: Multi-Instance Support for claude-secure
+
+**Goal:** Multiple independent claude-secure environments run simultaneously, each with its own workspace, secrets, whitelist, and container set, targeted via `--instance NAME` on all CLI commands
+**Requirements**: MULTI-01, MULTI-02, MULTI-03, MULTI-04, MULTI-05, MULTI-06, MULTI-07, MULTI-08, MULTI-09
+**Depends on:** Phase 8
+**Success Criteria** (what must be TRUE):
+  1. Running `claude-secure --instance foo` and `claude-secure --instance bar` simultaneously creates two fully isolated container sets
+  2. Each instance has its own whitelist.json, .env, and workspace path
+  3. Log files are instance-prefixed in shared logs directory (e.g., `foo-hook.jsonl`, `bar-hook.jsonl`)
+  4. Existing single-instance setups auto-migrate to instance `default` on first run
+  5. `claude-secure list` shows all instances with running/stopped status
+**Plans:** 3 plans
+
+Plans:
+- [ ] 09-01-PLAN.md -- Docker Compose and service changes: remove container_name, add LOG_PREFIX/WHITELIST_PATH parameterization
+- [ ] 09-02-PLAN.md -- CLI refactor: --instance flag, migration, list/remove commands, installer update
+- [ ] 09-03-PLAN.md -- Integration tests for all MULTI requirements

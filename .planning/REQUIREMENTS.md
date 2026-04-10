@@ -68,6 +68,18 @@
 - [x] **TOOL-03**: Claude container includes fast search tools: ripgrep (rg), fd-find (fdfind)
 - [x] **TOOL-04**: All new tools are accessible by the non-root claude user and do not break existing tools or security model
 
+### Multi-Instance Support
+
+- [ ] **MULTI-01**: All CLI commands except `list` and `help` require `--instance NAME` flag
+- [ ] **MULTI-02**: Instance names are validated as DNS-safe (lowercase alphanumeric and hyphens, starting with letter or digit)
+- [ ] **MULTI-03**: Existing single-instance setups auto-migrate to instance named `default` on first run after upgrade
+- [ ] **MULTI-04**: Each instance gets isolated Docker networks and volumes via COMPOSE_PROJECT_NAME
+- [ ] **MULTI-05**: Each instance has its own whitelist.json, .env, and config.sh in `~/.claude-secure/instances/{name}/`
+- [ ] **MULTI-06**: Log files use shared `~/.claude-secure/logs/` directory with instance-name prefix (e.g., `myapp-hook.jsonl`)
+- [ ] **MULTI-07**: `claude-secure list` shows table with instance name, running/stopped status, and workspace path
+- [ ] **MULTI-08**: Instance auto-created on first use with workspace prompt, whitelist template copy, and auth setup
+- [ ] **MULTI-09**: Global config.sh contains only APP_DIR and PLATFORM; instance-specific config in per-instance directory
+
 ## v2 Requirements
 
 ### Streaming
@@ -99,7 +111,6 @@
 | Browser-based secret entry | Expands attack surface; JSON config file is simpler and auditable |
 | OAuth token auto-refresh | Acceptable to refresh manually for MVP; Phase 3 comfort feature |
 | `claude-secure config` CLI | Editing JSON directly is fine for technical users; Phase 3 |
-| Multi-project/workspace support | One project at a time for MVP; Phase 3 |
 
 ## Traceability
 
@@ -146,12 +157,21 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TOOL-02 | Phase 8 | Complete |
 | TOOL-03 | Phase 8 | Complete |
 | TOOL-04 | Phase 8 | Complete |
+| MULTI-01 | Phase 9 | Pending |
+| MULTI-02 | Phase 9 | Pending |
+| MULTI-03 | Phase 9 | Pending |
+| MULTI-04 | Phase 9 | Pending |
+| MULTI-05 | Phase 9 | Pending |
+| MULTI-06 | Phase 9 | Pending |
+| MULTI-07 | Phase 9 | Pending |
+| MULTI-08 | Phase 9 | Pending |
+| MULTI-09 | Phase 9 | Pending |
 
 **Coverage:**
-- v1 requirements: 32 total
-- Mapped to phases: 32
+- v1 requirements: 41 total
+- Mapped to phases: 41
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-08*
-*Last updated: 2026-04-10 after Phase 8 scope update*
+*Last updated: 2026-04-10 after Phase 9 multi-instance requirements added*
