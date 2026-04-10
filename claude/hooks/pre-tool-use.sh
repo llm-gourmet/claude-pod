@@ -15,7 +15,9 @@ INPUT=$(cat)
 # --- Logging ---
 
 log() {
-  echo "[$(date -Iseconds)] $*" >> "$LOG_FILE" 2>/dev/null || true
+  if [ "${LOG_HOOK:-0}" = "1" ]; then
+    echo "[$(date -Iseconds)] $*" >> "$LOG_FILE" 2>/dev/null || true
+  fi
 }
 
 log_json() {

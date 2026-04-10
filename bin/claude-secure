@@ -160,6 +160,8 @@ case "$CMD" in
   *)
     # Ensure log directory exists before docker compose up (pitfall 5)
     mkdir -p "$LOG_DIR"
+    # 777 required: three containers write as different UIDs (claude:1001, node:1000, root:0)
+    chmod 777 "$LOG_DIR"
     cleanup_containers
     docker compose up -d
     docker compose exec -it claude claude --dangerously-skip-permissions

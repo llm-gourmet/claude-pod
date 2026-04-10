@@ -98,7 +98,8 @@ setup_directories() {
   # If container UID mismatch causes write failures, the CLI wrapper's
   # mkdir -p at launch time can adjust permissions as needed.
   mkdir -p "$CONFIG_DIR/logs"
-  chmod 755 "$CONFIG_DIR/logs"
+  # 777 required: three containers write as different UIDs (claude:1001, node:1000, root:0)
+  chmod 777 "$CONFIG_DIR/logs"
   log_info "Created logs directory: $CONFIG_DIR/logs"
 }
 
