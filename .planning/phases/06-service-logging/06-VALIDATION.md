@@ -18,17 +18,17 @@ created: 2026-04-10
 | Property | Value |
 |----------|-------|
 | **Framework** | bash + docker compose (integration tests) |
-| **Config file** | tests/test-logging.sh (Wave 0 installs) |
-| **Quick run command** | `docker compose exec claude bash /app/tests/test-logging.sh --quick` |
-| **Full suite command** | `docker compose exec claude bash /app/tests/test-logging.sh` |
+| **Config file** | tests/test-phase6.sh (Wave 0 installs) |
+| **Quick run command** | `docker compose exec claude bash /app/tests/test-phase6.sh --quick` |
+| **Full suite command** | `docker compose exec claude bash /app/tests/test-phase6.sh` |
 | **Estimated runtime** | ~15 seconds |
 
 ---
 
 ## Sampling Rate
 
-- **After every task commit:** Run `docker compose exec claude bash /app/tests/test-logging.sh --quick`
-- **After every plan wave:** Run `docker compose exec claude bash /app/tests/test-logging.sh`
+- **After every task commit:** Run `docker compose exec claude bash /app/tests/test-phase6.sh --quick`
+- **After every plan wave:** Run `docker compose exec claude bash /app/tests/test-phase6.sh`
 - **Before `/gsd:verify-work`:** Full suite must be green
 - **Max feedback latency:** 15 seconds
 
@@ -50,7 +50,7 @@ created: 2026-04-10
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test-logging.sh` — integration test script for logging features
+- [ ] `tests/test-phase6.sh` — integration test script for logging features
 - [ ] Log directory creation in CLI wrapper
 
 *Existing Docker test infrastructure covers container-level testing.*
