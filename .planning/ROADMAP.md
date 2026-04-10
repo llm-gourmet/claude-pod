@@ -162,4 +162,4 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 08-01-PLAN.md -- Expand Claude container Dockerfile with dev tools (git, build-essential, python3, ripgrep, fd-find)
+- [x] 08-01-PLAN.md -- Expand Claude container Dockerfile with dev tools (git, build-essential, python3, ripgrep, fd-find)

@@ -63,10 +63,10 @@
 
 ### Container Tooling
 
-- [ ] **TOOL-01**: Claude container includes core dev tools: git, build-essential, ca-certificates, openssh-client, wget
-- [ ] **TOOL-02**: Claude container includes Python ecosystem: python3, python3-pip, python3-venv
-- [ ] **TOOL-03**: Claude container includes fast search tools: ripgrep (rg), fd-find (fdfind)
-- [ ] **TOOL-04**: All new tools are accessible by the non-root claude user and do not break existing tools or security model
+- [x] **TOOL-01**: Claude container includes core dev tools: git, build-essential, ca-certificates, openssh-client, wget
+- [x] **TOOL-02**: Claude container includes Python ecosystem: python3, python3-pip, python3-venv
+- [x] **TOOL-03**: Claude container includes fast search tools: ripgrep (rg), fd-find (fdfind)
+- [x] **TOOL-04**: All new tools are accessible by the non-root claude user and do not break existing tools or security model
 
 ## v2 Requirements
 
@@ -142,10 +142,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PLAT-01 | Phase 4 | Complete |
 | PLAT-02 | Phase 4 | Complete |
 | PLAT-03 | Phase 4 | Complete |
-| TOOL-01 | Phase 8 | Pending |
-| TOOL-02 | Phase 8 | Pending |
-| TOOL-03 | Phase 8 | Pending |
-| TOOL-04 | Phase 8 | Pending |
+| TOOL-01 | Phase 8 | Complete |
+| TOOL-02 | Phase 8 | Complete |
+| TOOL-03 | Phase 8 | Complete |
+| TOOL-04 | Phase 8 | Complete |
 
 **Coverage:**
 - v1 requirements: 32 total
