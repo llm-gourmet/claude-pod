@@ -45,6 +45,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - LOG_ANTHROPIC=${LOG_ANTHROPIC:-0}
+      - LOG_ANTHROPIC_BODIES=${LOG_ANTHROPIC_BODIES:-0}
     volumes:
       - ./config/whitelist.json:/etc/claude-secure/whitelist.json:ro
       - ${LOG_DIR:-./logs}:/var/log/claude-secure

@@ -49,6 +49,7 @@ cleanup_containers() {
 parse_log_flags() {
   LOG_HOOK=0
   LOG_ANTHROPIC=0
+  LOG_ANTHROPIC_BODIES=0
   LOG_IPTABLES=0
   REMAINING_ARGS=()
 
@@ -56,13 +57,14 @@ parse_log_flags() {
     case "$arg" in
       log:hook)       LOG_HOOK=1 ;;
       log:anthropic)  LOG_ANTHROPIC=1 ;;
+      log:bodies)     LOG_ANTHROPIC=1; LOG_ANTHROPIC_BODIES=1 ;;
       log:iptables)   LOG_IPTABLES=1 ;;
       log:all)        LOG_HOOK=1; LOG_ANTHROPIC=1; LOG_IPTABLES=1 ;;
       *)              REMAINING_ARGS+=("$arg") ;;
     esac
   done
 
-  export LOG_HOOK LOG_ANTHROPIC LOG_IPTABLES
+  export LOG_HOOK LOG_ANTHROPIC LOG_ANTHROPIC_BODIES LOG_IPTABLES
 }
 
 # Parse log flags from all arguments
@@ -156,9 +158,10 @@ case "$CMD" in
     echo ""
     echo "Log flags (append to any command):"
     echo "  log:hook       Enable hook script logging"
-    echo "  log:anthropic  Enable proxy logging"
+    echo "  log:anthropic  Enable proxy logging (metadata only)"
+    echo "  log:bodies     Enable proxy logging with full request/response bodies (post-redaction)"
     echo "  log:iptables   Enable validator/iptables logging"
-    echo "  log:all        Enable all logging"
+    echo "  log:all        Enable all logging (metadata, no bodies)"
     ;;
   *)
     # Ensure log directory exists before docker compose up (pitfall 5)

@@ -165,14 +165,14 @@ Append log flags to any `claude-secure` command:
 ```bash
 # Enable specific service logging
 claude-secure log:hook         # Enable hook script logging
-claude-secure log:anthropic    # Enable proxy logging
+claude-secure log:anthropic    # Enable proxy logging (metadata only)
+claude-secure log:bodies       # Enable proxy logging with full request/response bodies
 claude-secure log:iptables     # Enable validator/iptables logging
 
 # Enable all logging at once
-claude-secure log:all
+claude-secure log:all          # Enable all metadata logging (no bodies)
 
 # Flags combine with commands
-claude-secure log:all          # Start with all logging enabled
 claude-secure log:hook log:anthropic  # Enable hook + proxy only
 ```
 
@@ -211,9 +211,26 @@ Log files are stored at `~/.claude-secure/logs/`:
 - `anthropic.jsonl` -- Proxy request metadata (method, path, status, duration, redaction count)
 - `iptables.jsonl` -- Validator call-ID registration and iptables rule events
 
+### Body Logging
+
+The `log:bodies` flag enables full request/response body logging for traffic to `api.anthropic.com`. Bodies are logged **after redaction**, so secrets appear as placeholders (e.g., `REDACTED_GITHUB_TOKEN`), not real values. This lets you inspect exactly what Anthropic receives.
+
+```bash
+# Start with body logging
+claude-secure log:bodies
+
+# Tail and pretty-print the payloads
+tail -f ~/.claude-secure/logs/anthropic.jsonl | jq .
+
+# Extract just the last message sent to Anthropic
+tail -f ~/.claude-secure/logs/anthropic.jsonl | jq 'select(.request_body) | {path, request_body: (.request_body | fromjson | .messages[-1])}'
+```
+
+Body logs can be large. Use `log:bodies` only for targeted debugging or security audits, not in regular sessions. The `log:all` flag intentionally excludes bodies.
+
 ### Security Note
 
-Proxy logs never include request or response bodies. Since bodies may contain secrets before redaction, only metadata (HTTP method, path, status code, duration, and redaction count) is logged. This ensures that enabling logging does not create a secondary channel for secret exposure.
+By default, proxy logs never include request or response bodies -- only metadata (HTTP method, path, status code, duration, and redaction count). The `log:bodies` flag opts in to body logging, which is safe because bodies are captured after the redaction layer has replaced all secrets with placeholders.
 
 ## Architecture Details
 

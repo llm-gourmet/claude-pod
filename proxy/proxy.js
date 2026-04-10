@@ -10,6 +10,7 @@ const warnedEnvVars = new Set();
 
 const LOG_PATH = '/var/log/claude-secure/anthropic.jsonl';
 const LOG_ENABLED = process.env.LOG_ANTHROPIC === '1';
+const LOG_BODIES = process.env.LOG_ANTHROPIC_BODIES === '1';
 
 function logJson(level, msg, extra) {
   if (!LOG_ENABLED) return;
@@ -190,7 +191,12 @@ const server = http.createServer((req, res) => {
 
         res.writeHead(upstreamRes.statusCode, resHeaders);
         res.end(restoredBody);
-        logJson('info', 'Forwarded request to upstream', { method: req.method, path: url.pathname, redacted: redactMap.length, status: upstreamRes.statusCode, duration_ms: Date.now() - startTime });
+        const logExtra = { method: req.method, path: url.pathname, redacted: redactMap.length, status: upstreamRes.statusCode, duration_ms: Date.now() - startTime };
+        if (LOG_BODIES) {
+          logExtra.request_body = redactedBody;
+          logExtra.response_body = responseBody;
+        }
+        logJson('info', 'Forwarded request to upstream', logExtra);
       });
     });
 
