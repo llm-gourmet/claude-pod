@@ -5,6 +5,8 @@ services:
     stdin_open: true
     tty: true
     command: ["sleep", "infinity"]
+    env_file:
+      - ${SECRETS_FILE:-/dev/null}
     environment:
       - ANTHROPIC_BASE_URL=http://proxy:8080
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-dummy}

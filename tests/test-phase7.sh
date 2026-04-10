@@ -110,15 +110,16 @@ test "$dc_check" -eq 0 -a "$env_check" -eq 0
 report "ENV-02" "New secret works without docker-compose.yml edit" $?
 
 # =========================================================================
-# ENV-03: Claude container does NOT have secret env vars
+# ENV-03: Claude container HAS secret env vars (needed for tools like gh, git)
+# Secrets are safe because proxy redacts them before sending to Anthropic
 # =========================================================================
 claude_env=$(docker compose exec -T claude env 2>/dev/null)
-! echo "$claude_env" | grep -q 'TEST_SECRET_ALPHA'
-alpha_clean=$?
-! echo "$claude_env" | grep -q 'GITHUB_TOKEN'
-github_clean=$?
-test "$alpha_clean" -eq 0 -a "$github_clean" -eq 0
-report "ENV-03" "Claude container has no secret env vars" $?
+echo "$claude_env" | grep -q 'TEST_SECRET_ALPHA'
+alpha_present=$?
+echo "$claude_env" | grep -q 'GITHUB_TOKEN'
+github_present=$?
+test "$alpha_present" -eq 0 -a "$github_present" -eq 0
+report "ENV-03" "Claude container has secret env vars for tooling" $?
 
 # =========================================================================
 # ENV-04: Proxy has secrets and whitelist for redaction
