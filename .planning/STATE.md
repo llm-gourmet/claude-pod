@@ -112,10 +112,11 @@ Recent decisions affecting current work:
 | 260409-2jp | Write a README.md for the claude-secure project | 2026-04-08 | 8fc85b6 | [260409-2jp-write-a-readme-md-for-the-claude-secure-](./quick/260409-2jp-write-a-readme-md-for-the-claude-secure-/) |
 | 260409-fof | Add Claude Code version update mechanism | 2026-04-09 | e780bf4 | [260409-fof-add-claude-code-version-update-mechanism](./quick/260409-fof-add-claude-code-version-update-mechanism/) |
 | 260410-fjy | Update README with logging features and verify update instructions | 2026-04-10 | c332c78 | [260410-fjy-update-readme-with-logging-features-and-](./quick/260410-fjy-update-readme-with-logging-features-and-/) |
+| 260410-ic4 | Log redacted secret mappings in anthropic proxy | 2026-04-10 | b77f0cc | [260410-ic4-log-redacted-secret-mappings-in-anthropi](./quick/260410-ic4-log-redacted-secret-mappings-in-anthropi/) |
 
 ## Session Continuity
 
-Last session: 2026-04-10T10:39:57.979Z
-Last activity: 2026-04-10 - Completed quick task 260410-fjy: Update README with logging features
-Stopped at: Completed 07-02-PLAN.md
+Last session: 2026-04-10T11:14:29Z
+Last activity: 2026-04-10 - Completed quick task 260410-ic4: Log redacted secret mappings in anthropic proxy
+Stopped at: Completed quick task 260410-ic4
 Resume file: None
