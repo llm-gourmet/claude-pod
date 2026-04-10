@@ -17,6 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Secret Redaction** - Buffered proxy redacts secrets from Anthropic-bound traffic and restores placeholders in responses (completed 2026-04-08)
 - [ ] **Phase 4: Installation & Platform** - Installer script, CLI shortcut, and verified Linux/WSL2 support
 - [ ] **Phase 5: Integration Testing** - End-to-end tests proving all security claims hold under real conditions
+- [ ] **Phase 6: Service Logging** - Per-service logging (hook, proxy, iptables) with unified host-side log file
 
 ## Phase Details
 
@@ -110,3 +111,23 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 3. Secret Redaction | 2/2 | Complete   | 2026-04-08 |
 | 4. Installation & Platform | 0/2 | Planning complete | - |
 | 5. Integration Testing | 0/TBD | Not started | - |
+| 6. Service Logging | 0/3 | Planning complete | - |
+
+### Phase 6: Service Logging
+
+**Goal:** The `claude-secure` CLI supports `log:hook`, `log:anthropic`, and `log:iptables` flags that enable per-service structured JSON logging to a unified host-side log directory
+**Requirements**: LOG-01, LOG-02, LOG-03, LOG-04, LOG-05, LOG-06, LOG-07
+**Depends on:** Phase 4
+**Success Criteria** (what must be TRUE):
+  1. Running `claude-secure log:hook` enables hook script logging to `~/.claude-secure/logs/hook.jsonl`
+  2. Running `claude-secure log:anthropic` enables proxy logging to `~/.claude-secure/logs/anthropic.jsonl`
+  3. Running `claude-secure log:iptables` enables validator logging to `~/.claude-secure/logs/iptables.jsonl`
+  4. Log entries are structured JSON with ts, svc, level, and msg fields
+  5. No log files are created when logging flags are not passed
+  6. `claude-secure logs` tails all log files in real-time
+**Plans:** 3 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — Service logging: add structured JSON logging to hook, proxy, and validator with docker-compose env vars and volume mounts
+- [ ] 06-02-PLAN.md — CLI integration: log flag parsing, LOG_DIR export, logs subcommand, installer log directory
+- [ ] 06-03-PLAN.md — Integration tests for all LOG requirements
