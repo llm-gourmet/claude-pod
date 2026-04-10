@@ -91,6 +91,15 @@ setup_directories() {
   mkdir -p "$CONFIG_DIR"
   chmod 700 "$CONFIG_DIR"
   log_info "Created config directory: $CONFIG_DIR"
+
+  # Create logs directory for service logging (LOG_DIR in docker-compose)
+  # chmod 755: owner has full access, others can read/traverse.
+  # Container processes write via the bind mount where Docker maps UIDs.
+  # If container UID mismatch causes write failures, the CLI wrapper's
+  # mkdir -p at launch time can adjust permissions as needed.
+  mkdir -p "$CONFIG_DIR/logs"
+  chmod 755 "$CONFIG_DIR/logs"
+  log_info "Created logs directory: $CONFIG_DIR/logs"
 }
 
 setup_auth() {
