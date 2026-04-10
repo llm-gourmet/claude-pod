@@ -7,9 +7,9 @@ stopped_at: Completed 07-01-PLAN.md
 last_updated: "2026-04-10T10:35:54.841Z"
 last_activity: 2026-04-10
 progress:
-  total_phases: 6
+  total_phases: 8
   completed_phases: 5
-  total_plans: 12
+  total_plans: 14
   completed_plans: 12
   percent: 100
 ---
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-09)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** Phase 04 — installation-platform
+**Current focus:** Phase 07 — env-file-strategy-and-secret-loading-for-claude-secure
 
 ## Current Position
 
-Phase: 06
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-04-10
+Phase: 07 (env-file-strategy-and-secret-loading-for-claude-secure) — EXECUTING
+Plan: 1 of 2
+Status: Executing Phase 07
+Last activity: 2026-04-10 -- Phase 07 execution started
 
 Progress: [████████████████████] 2/2 plans (100%)
 
@@ -87,6 +87,11 @@ Recent decisions affecting current work:
 - [Phase 04]: Source guard in install.sh for testability; whitelist symlink for user customization; set -a auto-export in CLI wrapper
 - [Phase 04]: 12 tests covering 9 requirement IDs with subshell isolation and temp dir cleanup
 - [Phase 07]: env_file fallback to /dev/null when SECRETS_FILE unset for graceful degradation
+
+### Roadmap Evolution
+
+- Phase 7 added: Env-file strategy and secret loading for claude-secure
+- Phase 8 added: Container tooling — full dev environment for claude-secure
 
 ### Pending Todos
 
