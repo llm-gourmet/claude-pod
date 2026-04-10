@@ -128,6 +128,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 **Plans:** 3 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — Service logging: add structured JSON logging to hook, proxy, and validator with docker-compose env vars and volume mounts
-- [ ] 06-02-PLAN.md — CLI integration: log flag parsing, LOG_DIR export, logs subcommand, installer log directory
-- [ ] 06-03-PLAN.md — Integration tests for all LOG requirements
+- [x] 06-01-PLAN.md — Service logging: add structured JSON logging to hook, proxy, and validator with docker-compose env vars and volume mounts
+- [x] 06-02-PLAN.md — CLI integration: log flag parsing, LOG_DIR export, logs subcommand, installer log directory
+- [x] 06-03-PLAN.md — Integration tests for all LOG requirements
