@@ -96,10 +96,12 @@ Recent decisions affecting current work:
 
 - Phase 7 added: Env-file strategy and secret loading for claude-secure
 - Phase 8 added: Container tooling — full dev environment for claude-secure
+- Phase 9 added: Multi-Instance Support for claude-secure
 
 ### Pending Todos
 
 - **iptables packet-level logging**: Add iptables `-j LOG` rules for DROP/ACCEPT and poll `dmesg`/`/proc/kmsg` from validator background thread to capture actual packet allow/block events into `iptables.jsonl`. Currently only HTTP-level events (registration, validation) are logged — silent drops at the network layer are invisible.
+- **Remove unused .env file**: The root `.env` file is not used — project uses `.claude-secret/.env` on the host. Check references and delete.
 
 ### Blockers/Concerns
 
