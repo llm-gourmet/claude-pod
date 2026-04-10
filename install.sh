@@ -79,10 +79,14 @@ check_existing() {
       log_info "Installation cancelled."
       exit 0
     fi
-    # Backup existing .env
+    # Backup existing .env (check both old root-level and new instance location)
     if [ -f "$CONFIG_DIR/.env" ]; then
       cp "$CONFIG_DIR/.env" "$CONFIG_DIR/.env.backup.$(date +%s)"
-      log_info "Backed up existing .env"
+      log_info "Backed up existing root-level .env"
+    fi
+    if [ -f "$CONFIG_DIR/instances/default/.env" ]; then
+      cp "$CONFIG_DIR/instances/default/.env" "$CONFIG_DIR/instances/default/.env.backup.$(date +%s)"
+      log_info "Backed up existing default instance .env"
     fi
   fi
 }
@@ -91,6 +95,10 @@ setup_directories() {
   mkdir -p "$CONFIG_DIR"
   chmod 700 "$CONFIG_DIR"
   log_info "Created config directory: $CONFIG_DIR"
+
+  # Create instances directory for multi-instance support
+  mkdir -p "$CONFIG_DIR/instances"
+  log_info "Created instances directory: $CONFIG_DIR/instances"
 
   # Create logs directory for service logging (LOG_DIR in docker-compose)
   # chmod 755: owner has full access, others can read/traverse.
@@ -104,22 +112,25 @@ setup_directories() {
 }
 
 setup_auth() {
+  local env_file="$CONFIG_DIR/instances/default/.env"
+  mkdir -p "$CONFIG_DIR/instances/default"
+
   if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-    echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" > "$CONFIG_DIR/.env"
-    echo "" >> "$CONFIG_DIR/.env"
-    echo "# Add secrets below (must match env_var in whitelist.json)" >> "$CONFIG_DIR/.env"
-    echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$CONFIG_DIR/.env"
-    chmod 600 "$CONFIG_DIR/.env"
+    echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" > "$env_file"
+    echo "" >> "$env_file"
+    echo "# Add secrets below (must match env_var in whitelist.json)" >> "$env_file"
+    echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$env_file"
+    chmod 600 "$env_file"
     log_info "Using ANTHROPIC_API_KEY from environment"
     return
   fi
 
   if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-    echo "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}" > "$CONFIG_DIR/.env"
-    echo "" >> "$CONFIG_DIR/.env"
-    echo "# Add secrets below (must match env_var in whitelist.json)" >> "$CONFIG_DIR/.env"
-    echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$CONFIG_DIR/.env"
-    chmod 600 "$CONFIG_DIR/.env"
+    echo "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}" > "$env_file"
+    echo "" >> "$env_file"
+    echo "# Add secrets below (must match env_var in whitelist.json)" >> "$env_file"
+    echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$env_file"
+    chmod 600 "$env_file"
     log_info "Using CLAUDE_CODE_OAUTH_TOKEN from environment"
     return
   fi
@@ -136,25 +147,25 @@ setup_auth() {
     2)
       read -rsp "API key: " key
       echo ""
-      echo "ANTHROPIC_API_KEY=${key}" > "$CONFIG_DIR/.env"
-      echo "" >> "$CONFIG_DIR/.env"
-      echo "# Add secrets below (must match env_var in whitelist.json)" >> "$CONFIG_DIR/.env"
-      echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$CONFIG_DIR/.env"
+      echo "ANTHROPIC_API_KEY=${key}" > "$env_file"
+      echo "" >> "$env_file"
+      echo "# Add secrets below (must match env_var in whitelist.json)" >> "$env_file"
+      echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$env_file"
       log_info "API key saved"
       ;;
     *)
       echo "Run 'claude setup-token' first to get your OAuth token."
       read -rsp "OAuth token: " token
       echo ""
-      echo "CLAUDE_CODE_OAUTH_TOKEN=${token}" > "$CONFIG_DIR/.env"
-      echo "" >> "$CONFIG_DIR/.env"
-      echo "# Add secrets below (must match env_var in whitelist.json)" >> "$CONFIG_DIR/.env"
-      echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$CONFIG_DIR/.env"
+      echo "CLAUDE_CODE_OAUTH_TOKEN=${token}" > "$env_file"
+      echo "" >> "$env_file"
+      echo "# Add secrets below (must match env_var in whitelist.json)" >> "$env_file"
+      echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$env_file"
       log_info "OAuth token saved"
       ;;
   esac
 
-  chmod 600 "$CONFIG_DIR/.env"
+  chmod 600 "$env_file"
 }
 
 setup_workspace() {
@@ -166,10 +177,15 @@ setup_workspace() {
 
   mkdir -p "$ws_path"
 
-  # Write config (app_dir written later by copy_app_files)
+  # Write global config (APP_DIR written later by copy_app_files)
   cat > "$CONFIG_DIR/config.sh" <<CONF
-WORKSPACE_PATH="$ws_path"
 PLATFORM="$PLATFORM"
+CONF
+
+  # Write instance config (WORKSPACE_PATH is per-instance)
+  mkdir -p "$CONFIG_DIR/instances/default"
+  cat > "$CONFIG_DIR/instances/default/config.sh" <<CONF
+WORKSPACE_PATH="$ws_path"
 CONF
 
   log_info "Workspace: $ws_path"
@@ -192,8 +208,9 @@ copy_app_files() {
   # Append APP_DIR to config.sh
   echo "APP_DIR=\"$app_dir\"" >> "$CONFIG_DIR/config.sh"
 
-  # Whitelist lives at config/whitelist.json in the repo (single source of truth).
-  # Docker Compose mounts it directly — no copy needed.
+  # Copy whitelist template to default instance
+  cp "$app_dir/config/whitelist.json" "$CONFIG_DIR/instances/default/whitelist.json"
+  log_info "Copied whitelist template to default instance"
 }
 
 build_images() {
@@ -245,7 +262,7 @@ main() {
 
   echo ""
   log_info "Installation complete!"
-  log_info "Run 'claude-secure' to start."
+  log_info "Run 'claude-secure --instance default' to start."
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
