@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
+status: executing
 stopped_at: Completed 06-01-PLAN.md and 06-02-PLAN.md (Wave 1)
-last_updated: "2026-04-10T07:06:56.464Z"
-last_activity: 2026-04-08
+last_updated: "2026-04-10T07:07:00.000Z"
+last_activity: 2026-04-10 -- Phase 06 Wave 1 complete
 progress:
-  total_phases: 5
+  total_phases: 6
   completed_phases: 4
-  total_plans: 9
+  total_plans: 12
   completed_plans: 9
   percent: 100
 ---
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-09)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** Phase 04 — installation-platform
+**Current focus:** Phase 06 — service-logging
 
 ## Current Position
 
-Phase: 5
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-04-08
+Phase: 06 (service-logging) — EXECUTING
+Plan: 1 of 3
+Status: Executing Phase 06
+Last activity: 2026-04-10 -- Phase 06 execution started
 
 Progress: [████████████████████] 2/2 plans (100%)
 
@@ -61,11 +61,8 @@ Progress: [████████████████████] 2/2 pla
 | Phase 03-secret-redaction P02 | 3min | 2 tasks | 2 files |
 | Phase 04 P01 | 2min | 2 tasks | 2 files |
 | Phase 04 P02 | 2min | 1 tasks | 1 files |
-<<<<<<< HEAD
 | Phase 06-service-logging P01 | 3min | 3 tasks | 4 files |
-=======
 | Phase 06-service-logging P02 | 1min | 2 tasks | 2 files |
->>>>>>> worktree-agent-a10fdac9
 
 ## Accumulated Context
 
@@ -90,15 +87,16 @@ Recent decisions affecting current work:
 - [Phase 03-secret-redaction]: Protocol-aware transport in proxy (http vs https) for testability; mock upstream pattern via node one-liner inside container
 - [Phase 04]: Source guard in install.sh for testability; whitelist symlink for user customization; set -a auto-export in CLI wrapper
 - [Phase 04]: 12 tests covering 9 requirement IDs with subshell isolation and temp dir cleanup
-<<<<<<< HEAD
 - [Phase 06-service-logging]: JSONL structured logging with env-var toggle pattern (LOG_*=1), jq -nc for shell JSON, Python logging.Handler subclass for validator
-=======
 - [Phase 06-service-logging]: chmod 755 for logs directory (not 777) for security-conscious default
->>>>>>> worktree-agent-a10fdac9
 
 ### Pending Todos
 
 None yet.
+
+### Roadmap Evolution
+
+- Phase 6 added: Service Logging — per-service logging (hook, proxy, iptables) with unified host-side log file
 
 ### Blockers/Concerns
 
@@ -115,13 +113,7 @@ None yet.
 
 ## Session Continuity
 
-<<<<<<< HEAD
-Last session: 2026-04-10T07:06:56.461Z
-Last activity: 2026-04-09 - Completed quick task 260409-fof: Add Claude Code version update mechanism
-Stopped at: Completed 06-01-PLAN.md
-=======
-Last session: 2026-04-10T07:05:39.339Z
-Last activity: 2026-04-09 - Completed quick task 260409-fof: Add Claude Code version update mechanism
-Stopped at: Completed 06-02-PLAN.md
->>>>>>> worktree-agent-a10fdac9
+Last session: 2026-04-10T07:07:00.000Z
+Last activity: 2026-04-10 - Phase 06 Wave 1 complete (06-01, 06-02)
+Stopped at: Completed Wave 1 (06-01-PLAN.md, 06-02-PLAN.md)
 Resume file: None
