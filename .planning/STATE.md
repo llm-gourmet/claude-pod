@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed quick-260409-fof
-last_updated: "2026-04-08T23:54:14.106Z"
-last_activity: 2026-04-08
+status: executing
+stopped_at: Completed quick-260410-fjy
+last_updated: "2026-04-10T09:14:13.000Z"
+last_activity: 2026-04-10
 progress:
   total_phases: 5
   completed_phases: 4
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-04-09)
 
 ## Current Position
 
-Phase: 5
+Phase: 06
 Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-04-08
+Status: Ready to execute
+Last activity: 2026-04-10
 
 Progress: [████████████████████] 2/2 plans (100%)
 
@@ -88,7 +88,7 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
-None yet.
+- **iptables packet-level logging**: Add iptables `-j LOG` rules for DROP/ACCEPT and poll `dmesg`/`/proc/kmsg` from validator background thread to capture actual packet allow/block events into `iptables.jsonl`. Currently only HTTP-level events (registration, validation) are logged — silent drops at the network layer are invisible.
 
 ### Blockers/Concerns
 
