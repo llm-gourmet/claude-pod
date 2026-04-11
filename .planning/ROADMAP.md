@@ -63,7 +63,7 @@ Plans:
 
 Plans:
 - [x] 13-01-PLAN.md — Test scaffold + spawn arg parsing + ephemeral project naming
-- [ ] 13-02-PLAN.md — Execution lifecycle + output envelope + max-turns
+- [x] 13-02-PLAN.md — Execution lifecycle + output envelope + max-turns
 - [ ] 13-03-PLAN.md — Prompt template resolution and variable substitution
 
 ### Phase 14: Webhook Listener
@@ -140,7 +140,7 @@ Phases execute in numeric order: 12 -> 13 -> 14 -> 15 -> 16 -> 17
 | 10. Automate Pre-push Tests | v1.0 | 2/2 | Complete | 2026-04-10 |
 | 11. Milestone Cleanup | v1.0 | 1/1 | Complete | 2026-04-11 |
 | 12. Profile System | v2.0 | 0/2 | Complete    | 2026-04-11 |
-| 13. Headless CLI Path | v2.0 | 1/3 | In Progress|  |
+| 13. Headless CLI Path | v2.0 | 2/3 | In Progress|  |
 | 14. Webhook Listener | v2.0 | 0/? | Not started | - |
 | 15. Event Handlers | v2.0 | 0/? | Not started | - |
 | 16. Result Channel | v2.0 | 0/? | Not started | - |
