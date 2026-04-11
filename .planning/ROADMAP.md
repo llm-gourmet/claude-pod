@@ -192,3 +192,14 @@ Plans:
 Plans:
 - [x] 10-01-PLAN.md -- Migrate test scripts to docker compose exec, create test-map.json and test.env
 - [x] 10-02-PLAN.md -- Rewrite pre-push hook with smart test selection, test instance lifecycle, and failure summary
+
+### Phase 11: Milestone Cleanup
+
+**Goal:** Close audit gaps — fix test-map.json coverage, update REQUIREMENTS.md traceability, document /validate endpoint as debug-only
+**Requirements**: TEST-01, TEST-02, TEST-03, TEST-04, TEST-05
+**Depends on:** Phase 10
+**Gap Closure:** Closes gaps from v1.0 audit
+**Plans:** 0/TBD
+
+Plans:
+- [ ] 11-01-PLAN.md -- TBD
