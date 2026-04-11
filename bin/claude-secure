@@ -1,119 +1,132 @@
 #!/bin/bash
 set -euo pipefail
 
-CONFIG_DIR="$HOME/.claude-secure"
-
-# Verify installation
-if [ ! -f "$CONFIG_DIR/config.sh" ]; then
-  echo "ERROR: claude-secure not installed. Run install.sh first." >&2
-  exit 1
+# Source-only mode: load function definitions without executing main logic.
+# Used by tests: __CLAUDE_SECURE_SOURCE_ONLY=1 source bin/claude-secure
+if [ -z "${__CLAUDE_SECURE_SOURCE_ONLY:-}" ]; then
+  __CLAUDE_SECURE_SOURCE_ONLY=0
 fi
 
-# Load global config (APP_DIR, PLATFORM only)
-# shellcheck source=/dev/null
-source "$CONFIG_DIR/config.sh"
+CONFIG_DIR="${CONFIG_DIR:-$HOME/.claude-secure}"
 
-# Auto-migrate single-instance layout to multi-instance (D-04)
-migrate_if_needed() {
-  if [ -f "$CONFIG_DIR/.env" ] && [ ! -d "$CONFIG_DIR/instances" ]; then
-    echo "Migrating single-instance config to multi-instance layout..."
-    mkdir -p "$CONFIG_DIR/instances/default"
-    mv "$CONFIG_DIR/.env" "$CONFIG_DIR/instances/default/.env"
-    # Copy whitelist from app source (it was a docker mount, not stored in CONFIG_DIR)
-    cp "$APP_DIR/config/whitelist.json" "$CONFIG_DIR/instances/default/whitelist.json"
-    # Extract WORKSPACE_PATH into instance config, keep APP_DIR+PLATFORM in global
-    grep '^WORKSPACE_PATH=' "$CONFIG_DIR/config.sh" > "$CONFIG_DIR/instances/default/config.sh" || true
-    local tmp
-    tmp=$(mktemp)
-    grep -v '^WORKSPACE_PATH=' "$CONFIG_DIR/config.sh" > "$tmp"
-    mv "$tmp" "$CONFIG_DIR/config.sh"
-    echo "Migration complete. Your existing setup is now instance 'default'."
-    echo "Use: claude-secure --instance default"
-  fi
+# Temp files to clean up on exit (superuser mode merged configs)
+_CLEANUP_FILES=()
+
+cleanup() {
+  for f in "${_CLEANUP_FILES[@]}"; do
+    rm -f "$f"
+  done
 }
-migrate_if_needed
+trap cleanup EXIT
 
-# Parse --instance flag before anything else (D-01, D-03)
-INSTANCE=""
-ARGS=()
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --instance)
-      if [ -z "${2:-}" ]; then
-        echo "ERROR: --instance requires a name" >&2; exit 1
-      fi
-      INSTANCE="$2"; shift 2 ;;
-    *) ARGS+=("$1"); shift ;;
-  esac
-done
+# =========================================================================
+# Function definitions
+# =========================================================================
 
-# list and help don't need --instance
-FIRST_ARG="${ARGS[0]:-}"
-if [ "$FIRST_ARG" != "list" ] && [ "$FIRST_ARG" != "help" ] && [ "$FIRST_ARG" != "--help" ] && [ "$FIRST_ARG" != "-h" ]; then
-  if [ -z "$INSTANCE" ]; then
-    echo "ERROR: --instance NAME is required for all commands except 'list' and 'help'" >&2
-    echo "Usage: claude-secure --instance NAME [command] [flags]" >&2
-    exit 1
-  fi
-fi
-
-# Validate instance name (D-02)
-validate_instance_name() {
+validate_profile_name() {
   local name="$1"
   if [[ ! "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
-    echo "ERROR: Instance name must be DNS-safe (lowercase alphanumeric and hyphens, must start with letter or digit)" >&2
-    exit 1
+    echo "ERROR: Profile name must be DNS-safe (lowercase alphanumeric and hyphens, must start with letter or digit)" >&2
+    return 1
   fi
   if [ ${#name} -gt 63 ]; then
-    echo "ERROR: Instance name must be 63 characters or less" >&2
-    exit 1
+    echo "ERROR: Profile name must be 63 characters or less" >&2
+    return 1
   fi
 }
 
-if [ -n "$INSTANCE" ]; then
-  validate_instance_name "$INSTANCE"
-fi
-
-# Instance directory
-INSTANCE_DIR="$CONFIG_DIR/instances/$INSTANCE"
-
-# Auto-create instance on first use (D-09)
-create_instance() {
+validate_profile() {
   local name="$1"
-  local idir="$CONFIG_DIR/instances/$name"
-  echo "Instance '$name' not found. Creating..."
+  local pdir="$CONFIG_DIR/profiles/$name"
+
+  if [ ! -d "$pdir" ]; then
+    echo "ERROR: Profile '$name' does not exist at $pdir" >&2
+    echo "Run: claude-secure --profile $name  (to create interactively)" >&2
+    return 1
+  fi
+  if [ ! -f "$pdir/profile.json" ]; then
+    echo "ERROR: Profile '$name' is missing profile.json" >&2
+    return 1
+  fi
+  if ! jq empty "$pdir/profile.json" 2>/dev/null; then
+    echo "ERROR: Profile '$name' has invalid profile.json (not valid JSON)" >&2
+    return 1
+  fi
+  local ws
+  ws=$(jq -r '.workspace // empty' "$pdir/profile.json")
+  if [ -z "$ws" ]; then
+    echo "ERROR: Profile '$name' profile.json missing required 'workspace' field" >&2
+    return 1
+  fi
+  if [ ! -d "$ws" ]; then
+    echo "ERROR: Profile '$name' workspace path does not exist: $ws" >&2
+    return 1
+  fi
+  if [ ! -f "$pdir/.env" ]; then
+    echo "ERROR: Profile '$name' is missing .env (auth credentials required)" >&2
+    return 1
+  fi
+  if [ ! -f "$pdir/whitelist.json" ]; then
+    echo "ERROR: Profile '$name' is missing whitelist.json" >&2
+    return 1
+  fi
+  if ! jq empty "$pdir/whitelist.json" 2>/dev/null; then
+    echo "ERROR: Profile '$name' has invalid whitelist.json (not valid JSON)" >&2
+    return 1
+  fi
+}
+
+create_profile() {
+  local name="$1"
+  local pdir="$CONFIG_DIR/profiles/$name"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+
+  echo "Creating profile '$name'..."
+
+  # Workspace
   read -rp "Workspace path [$HOME/claude-workspace-$name]: " ws_path
   ws_path="${ws_path:-$HOME/claude-workspace-$name}"
   ws_path="$(realpath -m "$ws_path")"
   mkdir -p "$ws_path"
-  mkdir -p "$idir"
-  echo "WORKSPACE_PATH=\"$ws_path\"" > "$idir/config.sh"
-  # Copy whitelist template from app
-  cp "$APP_DIR/config/whitelist.json" "$idir/whitelist.json"
-  # Copy auth from existing instance or prompt
+
+  # Build profile.json
+  jq -n --arg ws "$ws_path" '{"workspace": $ws}' > "$tmpdir/profile.json"
+
+  # Copy whitelist template
+  cp "$APP_DIR/config/whitelist.json" "$tmpdir/whitelist.json"
+
+  # Auth setup
   local existing_env=""
-  for d in "$CONFIG_DIR/instances"/*/; do
-    if [ -f "$d/.env" ] && [ "$d" != "$idir/" ]; then
-      existing_env="$d/.env"
-      break
-    fi
-  done
+  if [ -d "$CONFIG_DIR/profiles" ]; then
+    for d in "$CONFIG_DIR/profiles"/*/; do
+      if [ -f "$d/.env" ] && [ "$(cd "$d" && pwd)" != "$(cd "$tmpdir" && pwd)" ]; then
+        existing_env="$d/.env"
+        break
+      fi
+    done
+  fi
   if [ -n "$existing_env" ]; then
     read -rp "Copy auth credentials from $(basename "$(dirname "$existing_env")")? [Y/n]: " copy_auth
     if [[ "${copy_auth:-y}" =~ ^[Yy]$ ]]; then
-      cp "$existing_env" "$idir/.env"
-      echo "Auth credentials copied. Edit $idir/.env to customize secrets."
+      cp "$existing_env" "$tmpdir/.env"
+      echo "Auth credentials copied. Edit $pdir/.env to customize secrets."
     else
-      setup_instance_auth "$idir"
+      setup_profile_auth "$tmpdir"
     fi
   else
-    setup_instance_auth "$idir"
+    setup_profile_auth "$tmpdir"
   fi
-  echo "Instance '$name' created."
+
+  # Atomic move to final location
+  mkdir -p "$(dirname "$pdir")"
+  mv "$tmpdir" "$pdir"
+
+  echo "Profile '$name' created at $pdir"
 }
 
-setup_instance_auth() {
-  local idir="$1"
+setup_profile_auth() {
+  local dir="$1"
   echo "Choose authentication method:"
   echo "  1) OAuth token [recommended]"
   echo "  2) API key"
@@ -122,50 +135,158 @@ setup_instance_auth() {
   case "$auth_choice" in
     2)
       read -rsp "API key: " key; echo ""
-      echo "ANTHROPIC_API_KEY=${key}" > "$idir/.env"
+      echo "ANTHROPIC_API_KEY=${key}" > "$dir/.env"
       ;;
     *)
       echo "Run 'claude setup-token' first to get your OAuth token."
       read -rsp "OAuth token: " token; echo ""
-      echo "CLAUDE_CODE_OAUTH_TOKEN=${token}" > "$idir/.env"
+      echo "CLAUDE_CODE_OAUTH_TOKEN=${token}" > "$dir/.env"
       ;;
   esac
-  echo "" >> "$idir/.env"
-  echo "# Add secrets below (must match env_var in whitelist.json)" >> "$idir/.env"
-  echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$idir/.env"
-  chmod 600 "$idir/.env"
+  echo "" >> "$dir/.env"
+  echo "# Add secrets below (must match env_var in whitelist.json)" >> "$dir/.env"
+  echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$dir/.env"
+  chmod 600 "$dir/.env"
 }
 
-# Auto-create if instance specified but doesn't exist (skip for stop/remove/list/help)
-if [ -n "$INSTANCE" ] && [ ! -d "$INSTANCE_DIR" ]; then
-  if [ "$FIRST_ARG" = "stop" ] || [ "$FIRST_ARG" = "remove" ]; then
-    echo "ERROR: Instance '$INSTANCE' does not exist." >&2
-    exit 1
-  fi
-  create_instance "$INSTANCE"
-fi
+resolve_profile_by_repo() {
+  local target_repo="$1"
+  shopt -s nullglob
+  for pdir in "$CONFIG_DIR/profiles"/*/; do
+    [ -f "$pdir/profile.json" ] || continue
+    local repo
+    repo=$(jq -r '.repo // empty' "$pdir/profile.json")
+    if [ "$repo" = "$target_repo" ]; then
+      basename "$pdir"
+      shopt -u nullglob
+      return 0
+    fi
+  done
+  shopt -u nullglob
+  echo "ERROR: No profile found for repo '$target_repo'" >&2
+  return 1
+}
 
-# Load instance config and set env vars
-if [ -n "$INSTANCE" ]; then
-  # Load instance config (WORKSPACE_PATH)
-  # shellcheck source=/dev/null
-  source "$INSTANCE_DIR/config.sh"
+merge_whitelists() {
+  local merged='{"secrets":[],"readonly_domains":[]}'
+  shopt -s nullglob
+  for pdir in "$CONFIG_DIR/profiles"/*/; do
+    [ -f "$pdir/whitelist.json" ] || continue
+    merged=$(echo "$merged" | jq --slurpfile wl "$pdir/whitelist.json" '
+      .secrets += $wl[0].secrets
+      | .readonly_domains += ($wl[0].readonly_domains // [])
+      | .secrets |= unique_by(.env_var)
+      | .readonly_domains |= unique
+    ')
+  done
+  shopt -u nullglob
+  echo "$merged"
+}
 
-  # Load and auto-export instance secrets
-  set -a
-  # shellcheck source=/dev/null
-  source "$INSTANCE_DIR/.env"
-  set +a
+merge_env_files() {
+  local merged_env
+  merged_env=$(mktemp)
+  shopt -s nullglob
+  for pdir in "$CONFIG_DIR/profiles"/*/; do
+    [ -f "$pdir/.env" ] || continue
+    cat "$pdir/.env" >> "$merged_env"
+    echo "" >> "$merged_env"
+  done
+  shopt -u nullglob
+  echo "$merged_env"
+}
 
-  # Set compose and instance variables
-  export COMPOSE_PROJECT_NAME="claude-${INSTANCE}"
+load_profile_config() {
+  local name="$1"
+  local pdir="$CONFIG_DIR/profiles/$name"
+
+  WORKSPACE_PATH=$(jq -r '.workspace' "$pdir/profile.json")
+
+  export COMPOSE_PROJECT_NAME="claude-${name}"
   export COMPOSE_FILE="$APP_DIR/docker-compose.yml"
   export WORKSPACE_PATH
-  export SECRETS_FILE="$INSTANCE_DIR/.env"
-  export WHITELIST_PATH="$INSTANCE_DIR/whitelist.json"
+  export SECRETS_FILE="$pdir/.env"
+  export WHITELIST_PATH="$pdir/whitelist.json"
   export LOG_DIR="$CONFIG_DIR/logs"
-  export LOG_PREFIX="${INSTANCE}-"
-fi
+  export LOG_PREFIX="${name}-"
+
+  set -a
+  # shellcheck source=/dev/null
+  source "$pdir/.env"
+  set +a
+}
+
+load_superuser_config() {
+  # Default workspace
+  local default_ws="${DEFAULT_WORKSPACE:-}"
+  if [ -z "$default_ws" ]; then
+    read -rp "Default workspace for superuser mode [$HOME/claude-workspace]: " default_ws
+    default_ws="${default_ws:-$HOME/claude-workspace}"
+    default_ws="$(realpath -m "$default_ws")"
+    mkdir -p "$default_ws"
+    echo "DEFAULT_WORKSPACE=\"$default_ws\"" >> "$CONFIG_DIR/config.sh"
+  fi
+
+  # Merge whitelists to temp file
+  local merged_wl
+  merged_wl=$(mktemp)
+  merge_whitelists > "$merged_wl"
+  _CLEANUP_FILES+=("$merged_wl")
+
+  # Merge env files
+  local merged_env
+  merged_env=$(merge_env_files)
+  _CLEANUP_FILES+=("$merged_env")
+
+  export COMPOSE_PROJECT_NAME="claude-superuser"
+  export COMPOSE_FILE="$APP_DIR/docker-compose.yml"
+  export WORKSPACE_PATH="$default_ws"
+  export SECRETS_FILE="$merged_env"
+  export WHITELIST_PATH="$merged_wl"
+  export LOG_DIR="$CONFIG_DIR/logs"
+  export LOG_PREFIX="superuser-"
+
+  # Source merged env for docker compose variable substitution
+  if [ -s "$merged_env" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$merged_env"
+    set +a
+  fi
+}
+
+list_profiles() {
+  printf "%-20s %-35s %-10s %s\n" "PROFILE" "REPO" "STATUS" "WORKSPACE"
+  printf "%-20s %-35s %-10s %s\n" "-------" "----" "------" "---------"
+
+  if [ ! -d "$CONFIG_DIR/profiles" ]; then
+    echo "No profiles configured."
+    return
+  fi
+
+  shopt -s nullglob
+  local found=0
+  for pdir in "$CONFIG_DIR/profiles"/*/; do
+    found=1
+    local name repo ws status project
+    name=$(basename "$pdir")
+    repo=$(jq -r '.repo // "-"' "$pdir/profile.json" 2>/dev/null || echo "-")
+    ws=$(jq -r '.workspace // "-"' "$pdir/profile.json" 2>/dev/null || echo "-")
+    project="claude-${name}"
+    # Check running status
+    if docker compose ls --format json 2>/dev/null | jq -e ".[] | select(.Name == \"$project\")" >/dev/null 2>&1; then
+      status="running"
+    else
+      status="stopped"
+    fi
+    printf "%-20s %-35s %-10s %s\n" "$name" "$repo" "$status" "$ws"
+  done
+  shopt -u nullglob
+
+  if [ "$found" -eq 0 ]; then
+    echo "No profiles configured."
+  fi
+}
 
 # Use docker compose project-scoped cleanup instead of hardcoded names
 cleanup_containers() {
@@ -194,7 +315,78 @@ parse_log_flags() {
   export LOG_HOOK LOG_ANTHROPIC LOG_ANTHROPIC_BODIES LOG_IPTABLES
 }
 
-# Parse log flags from instance-scoped arguments
+# =========================================================================
+# Source-only guard: if sourced by tests, stop here
+# =========================================================================
+if [ "$__CLAUDE_SECURE_SOURCE_ONLY" = "1" ]; then
+  return 0 2>/dev/null || true
+fi
+
+# =========================================================================
+# Main execution
+# =========================================================================
+
+# Verify installation
+if [ ! -f "$CONFIG_DIR/config.sh" ]; then
+  echo "ERROR: claude-secure not installed. Run install.sh first." >&2
+  exit 1
+fi
+
+# Load global config (APP_DIR, PLATFORM, optionally DEFAULT_WORKSPACE)
+# shellcheck source=/dev/null
+source "$CONFIG_DIR/config.sh"
+
+# Parse --profile flag (replaces --instance)
+PROFILE=""
+ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --profile)
+      if [ -z "${2:-}" ]; then
+        echo "ERROR: --profile requires a name" >&2; exit 1
+      fi
+      PROFILE="$2"; shift 2 ;;
+    --instance)
+      echo "ERROR: --instance is no longer supported. Use --profile instead." >&2
+      exit 1 ;;
+    *) ARGS+=("$1"); shift ;;
+  esac
+done
+
+FIRST_ARG="${ARGS[0]:-}"
+
+# Validate profile name if provided
+if [ -n "$PROFILE" ]; then
+  validate_profile_name "$PROFILE"
+fi
+
+# Profile resolution
+if [ -n "$PROFILE" ]; then
+  PROFILE_DIR="$CONFIG_DIR/profiles/$PROFILE"
+  if [ -d "$PROFILE_DIR" ]; then
+    # Existing profile: validate before use
+    if [ "$FIRST_ARG" != "remove" ]; then
+      validate_profile "$PROFILE"
+    fi
+    load_profile_config "$PROFILE"
+  else
+    # Profile does not exist
+    if [ "$FIRST_ARG" = "stop" ] || [ "$FIRST_ARG" = "remove" ]; then
+      echo "ERROR: Profile '$PROFILE' does not exist." >&2
+      exit 1
+    fi
+    # Auto-create interactively
+    create_profile "$PROFILE"
+    load_profile_config "$PROFILE"
+  fi
+else
+  # No --profile: superuser mode (allowed for all commands)
+  if [ "$FIRST_ARG" != "list" ] && [ "$FIRST_ARG" != "help" ] && [ "$FIRST_ARG" != "--help" ] && [ "$FIRST_ARG" != "-h" ]; then
+    load_superuser_config
+  fi
+fi
+
+# Parse log flags
 parse_log_flags "${ARGS[@]}"
 
 # Use first non-log-flag argument as command
@@ -206,7 +398,6 @@ case "$CMD" in
     ;;
   status)
     docker compose ps
-    # Show Claude Code version if claude container is running
     if docker compose ps --status running --format '{{.Service}}' | grep -q '^claude$'; then
       echo ""
       echo "Claude Code version: $(docker compose exec -T claude claude --version 2>/dev/null || echo 'unknown')"
@@ -216,7 +407,7 @@ case "$CMD" in
     echo "Upgrading Claude Code to latest version..."
     docker compose build --no-cache --pull claude
     echo ""
-    echo "Upgrade complete. Restart with: claude-secure --instance $INSTANCE"
+    echo "Upgrade complete. Restart with: claude-secure --profile ${PROFILE:-NAME}"
     ;;
   update)
     echo "Pulling latest changes..."
@@ -240,51 +431,25 @@ case "$CMD" in
       fi
     fi
     echo ""
-    echo "Update complete. Restart with: claude-secure --instance $INSTANCE"
+    echo "Update complete. Restart with: claude-secure --profile ${PROFILE:-NAME}"
     ;;
   list)
-    printf "%-20s %-10s %s\n" "INSTANCE" "STATUS" "WORKSPACE"
-    printf "%-20s %-10s %s\n" "--------" "------" "---------"
-    # Get running compose projects
-    declare -A running_projects
-    while IFS= read -r line; do
-      name=$(echo "$line" | jq -r '.Name // empty' 2>/dev/null)
-      [ -n "$name" ] && running_projects["$name"]=1
-    done < <(docker compose ls --format json 2>/dev/null | jq -c '.[]?' 2>/dev/null)
-    # Show all configured instances
-    if [ -d "$CONFIG_DIR/instances" ]; then
-      for idir in "$CONFIG_DIR/instances"/*/; do
-        [ -d "$idir" ] || continue
-        name=$(basename "$idir")
-        ws=$(grep '^WORKSPACE_PATH=' "$idir/config.sh" 2>/dev/null | cut -d'"' -f2)
-        project="claude-${name}"
-        if [ -n "${running_projects[$project]:-}" ]; then
-          status="running"
-        else
-          status="stopped"
-        fi
-        printf "%-20s %-10s %s\n" "$name" "$status" "$ws"
-      done
-    else
-      echo "No instances configured."
-    fi
+    list_profiles
     ;;
   remove)
-    if [ -z "$INSTANCE" ]; then
-      echo "ERROR: --instance NAME is required for remove" >&2; exit 1
+    if [ -z "$PROFILE" ]; then
+      echo "ERROR: --profile NAME is required for remove" >&2; exit 1
     fi
-    echo "This will stop containers and delete config for instance '$INSTANCE'."
+    echo "This will stop containers and delete config for profile '$PROFILE'."
     read -rp "Are you sure? [y/N]: " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
       echo "Cancelled."; exit 0
     fi
-    # Stop containers
     docker compose down --remove-orphans 2>/dev/null || true
-    # Remove instance config
-    rm -rf "$INSTANCE_DIR"
-    echo "Instance '$INSTANCE' removed."
+    rm -rf "$CONFIG_DIR/profiles/$PROFILE"
+    echo "Profile '$PROFILE' removed."
     echo "Note: Docker volumes (workspace, validator-db) are preserved."
-    echo "Run 'docker volume ls | grep claude-${INSTANCE}' to see them."
+    echo "Run 'docker volume ls | grep claude-${PROFILE}' to see them."
     ;;
   logs)
     LOG_SVC="${REMAINING_ARGS[1]:-}"
@@ -294,39 +459,42 @@ case "$CMD" in
       iptables)   tail -f "$LOG_DIR/${LOG_PREFIX}iptables.jsonl" 2>/dev/null ;;
       clear)
         rm -f "$LOG_DIR/${LOG_PREFIX}"*.jsonl
-        echo "Logs cleared for instance '$INSTANCE'."
+        echo "Logs cleared for profile '${PROFILE:-superuser}'."
         ;;
       "")
         shopt -s nullglob
         LOG_FILES=("$LOG_DIR/${LOG_PREFIX}"*.jsonl)
         shopt -u nullglob
         if [ ${#LOG_FILES[@]} -eq 0 ]; then
-          echo "No log files found for instance '$INSTANCE'. Start services with log:* flags first."
+          echo "No log files found for profile '${PROFILE:-superuser}'. Start services with log:* flags first."
           exit 0
         fi
         tail -f "${LOG_FILES[@]}"
         ;;
       *)
         echo "Unknown log service: $LOG_SVC"
-        echo "Usage: claude-secure --instance NAME logs [hook|anthropic|iptables|clear]"
+        echo "Usage: claude-secure --profile NAME logs [hook|anthropic|iptables|clear]"
         exit 1
         ;;
     esac
     ;;
   help|--help|-h)
-    echo "Usage: claude-secure --instance NAME [command] [log flags]"
-    echo "       claude-secure list"
+    echo "Usage: claude-secure [--profile NAME] [command] [log flags]"
     echo ""
     echo "Commands:"
     echo "  (none)     Start containers and open Claude Code session"
     echo "  status     Show container status and Claude Code version"
-    echo "  stop       Stop all containers for this instance"
-    echo "  remove     Remove instance config (stops containers first)"
-    echo "  list       List all instances and their status"
+    echo "  stop       Stop all containers for this profile"
+    echo "  remove     Remove profile config (stops containers first)"
+    echo "  list       List all profiles and their status"
     echo "  logs       Tail log files (logs hook|anthropic|iptables|clear)"
     echo "  update     Pull latest claude-secure and rebuild all images"
     echo "  upgrade    Rebuild claude image with latest Claude Code (--no-cache)"
     echo "  help       Show this help message"
+    echo ""
+    echo "Modes:"
+    echo "  --profile NAME   Run scoped to a specific profile"
+    echo "  (no --profile)   Superuser mode: merged access to all profiles"
     echo ""
     echo "Log flags (append to any command):"
     echo "  log:hook       Enable hook script logging"
@@ -335,8 +503,8 @@ case "$CMD" in
     echo "  log:iptables   Enable validator/iptables logging"
     echo "  log:all        Enable all logging (metadata, no bodies)"
     echo ""
-    echo "Instance names must be DNS-safe (lowercase alphanumeric and hyphens)."
-    echo "New instances are auto-created on first use."
+    echo "Profile names must be DNS-safe (lowercase alphanumeric and hyphens)."
+    echo "New profiles are auto-created on first use."
     ;;
   *)
     mkdir -p "$LOG_DIR"
