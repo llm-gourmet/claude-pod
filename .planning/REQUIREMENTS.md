@@ -15,10 +15,10 @@ Requirements for headless agent mode. Each maps to roadmap phases.
 
 ### Headless Execution
 
-- [ ] **HEAD-01**: User can spawn a non-interactive Claude Code session via `claude-secure spawn --profile <name> --event <payload>`
+- [x] **HEAD-01**: User can spawn a non-interactive Claude Code session via `claude-secure spawn --profile <name> --event <payload>`
 - [ ] **HEAD-02**: Headless session uses `-p` with `--output-format json` and captures structured result (result, cost, duration, session_id)
 - [ ] **HEAD-03**: User can set per-profile `--max-turns` budget to limit execution scope
-- [ ] **HEAD-04**: Spawned instance is ephemeral -- containers are created, execute, and tear down automatically
+- [x] **HEAD-04**: Spawned instance is ephemeral -- containers are created, execute, and tear down automatically
 - [ ] **HEAD-05**: User can define prompt templates per profile with variable substitution (e.g. `{{ISSUE_TITLE}}`, `{{REPO_NAME}}`)
 
 ### Webhooks
@@ -81,10 +81,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROF-01 | Phase 12 | Pending |
 | PROF-02 | Phase 12 | Pending |
 | PROF-03 | Phase 12 | Pending |
-| HEAD-01 | Phase 13 | Pending |
+| HEAD-01 | Phase 13 | Complete |
 | HEAD-02 | Phase 13 | Pending |
 | HEAD-03 | Phase 13 | Pending |
-| HEAD-04 | Phase 13 | Pending |
+| HEAD-04 | Phase 13 | Complete |
 | HEAD-05 | Phase 13 | Pending |
 | HOOK-01 | Phase 14 | Pending |
 | HOOK-02 | Phase 14 | Pending |
