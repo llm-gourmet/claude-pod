@@ -1,7 +1,7 @@
 # Requirements: claude-secure
 
 **Defined:** 2026-04-11
-**Core Value:** No secret ever leaves the isolated environment uncontrolled — every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
+**Core Value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
 
 ## v2.0 Requirements
 
@@ -11,14 +11,14 @@ Requirements for headless agent mode. Each maps to roadmap phases.
 
 - [ ] **PROF-01**: User can create a profile with its own whitelist.json, .env, and workspace directory
 - [ ] **PROF-02**: User can map a GitHub repository URL to a profile so events route correctly
-- [ ] **PROF-03**: Profile resolution fails closed — missing or invalid profile blocks execution, never falls back to default
+- [ ] **PROF-03**: Profile resolution fails closed -- missing or invalid profile blocks execution, never falls back to default
 
 ### Headless Execution
 
 - [ ] **HEAD-01**: User can spawn a non-interactive Claude Code session via `claude-secure spawn --profile <name> --event <payload>`
 - [ ] **HEAD-02**: Headless session uses `-p` with `--output-format json` and captures structured result (result, cost, duration, session_id)
 - [ ] **HEAD-03**: User can set per-profile `--max-turns` budget to limit execution scope
-- [ ] **HEAD-04**: Spawned instance is ephemeral — containers are created, execute, and tear down automatically
+- [ ] **HEAD-04**: Spawned instance is ephemeral -- containers are created, execute, and tear down automatically
 - [ ] **HEAD-05**: User can define prompt templates per profile with variable substitution (e.g. `{{ISSUE_TITLE}}`, `{{REPO_NAME}}`)
 
 ### Webhooks
@@ -78,30 +78,30 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PROF-01 | — | Pending |
-| PROF-02 | — | Pending |
-| PROF-03 | — | Pending |
-| HEAD-01 | — | Pending |
-| HEAD-02 | — | Pending |
-| HEAD-03 | — | Pending |
-| HEAD-04 | — | Pending |
-| HEAD-05 | — | Pending |
-| HOOK-01 | — | Pending |
-| HOOK-02 | — | Pending |
-| HOOK-03 | — | Pending |
-| HOOK-04 | — | Pending |
-| HOOK-05 | — | Pending |
-| HOOK-06 | — | Pending |
-| HOOK-07 | — | Pending |
-| OPS-01 | — | Pending |
-| OPS-02 | — | Pending |
-| OPS-03 | — | Pending |
+| PROF-01 | Phase 12 | Pending |
+| PROF-02 | Phase 12 | Pending |
+| PROF-03 | Phase 12 | Pending |
+| HEAD-01 | Phase 13 | Pending |
+| HEAD-02 | Phase 13 | Pending |
+| HEAD-03 | Phase 13 | Pending |
+| HEAD-04 | Phase 13 | Pending |
+| HEAD-05 | Phase 13 | Pending |
+| HOOK-01 | Phase 14 | Pending |
+| HOOK-02 | Phase 14 | Pending |
+| HOOK-03 | Phase 15 | Pending |
+| HOOK-04 | Phase 15 | Pending |
+| HOOK-05 | Phase 15 | Pending |
+| HOOK-06 | Phase 14 | Pending |
+| HOOK-07 | Phase 15 | Pending |
+| OPS-01 | Phase 16 | Pending |
+| OPS-02 | Phase 16 | Pending |
+| OPS-03 | Phase 17 | Pending |
 
 **Coverage:**
 - v2.0 requirements: 18 total
-- Mapped to phases: 0
-- Unmapped: 18 ⚠️
+- Mapped to phases: 18
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-11*
-*Last updated: 2026-04-11 after initial definition*
+*Last updated: 2026-04-11 after roadmap creation*

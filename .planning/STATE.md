@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Headless Agent Mode
-status: defining_requirements
+status: roadmap_complete
 stopped_at: null
-last_updated: "2026-04-11T22:00:00.000Z"
+last_updated: "2026-04-11T23:00:00.000Z"
 last_activity: 2026-04-11
 progress:
-  total_phases: 0
+  total_phases: 6
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -21,20 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** v2.0 Headless Agent Mode — defining requirements
+**Current focus:** v2.0 Headless Agent Mode -- Phase 12 (Profile System) ready to plan
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-04-11 — Milestone v2.0 started
+Phase: 12 of 17 (Profile System) -- first phase of v2.0
+Plan: --
+Status: Ready to plan
+Last activity: 2026-04-11 -- Roadmap created for v2.0 milestone
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 0 (v2.0)
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -50,20 +52,6 @@ Last activity: 2026-04-11 — Milestone v2.0 started
 - Trend: -
 
 *Updated after each plan completion*
-| Phase 01 P01 | 4min | 3 tasks | 10 files |
-| Phase 01 P02 | 4min | 2 tasks | 1 files |
-| Phase 02-call-validation P01 | 2min | 2 tasks | 3 files |
-| Phase 02-call-validation P02 | 1min | 1 tasks | 1 files |
-| Phase 02-call-validation P03 | 10min | 2 tasks | 4 files |
-| Phase 03-secret-redaction P01 | 1min | 2 tasks | 2 files |
-| Phase 03-secret-redaction P02 | 3min | 2 tasks | 2 files |
-| Phase 04 P01 | 2min | 2 tasks | 2 files |
-| Phase 04 P02 | 2min | 1 tasks | 1 files |
-| Phase 07 P01 | 1min | 2 tasks | 3 files |
-| Phase 07 P02 | 2min | 1 tasks | 1 files |
-| Phase 08 P01 | 2min | 2 tasks | 1 files |
-| Phase 09 P03 | 2min | 1 tasks | 1 files |
-| Phase 11-milestone-cleanup P01 | 1min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -72,57 +60,24 @@ Last activity: 2026-04-11 — Milestone v2.0 started
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- [Roadmap]: Five phases following service dependency chain (infra -> validator -> proxy -> installer -> tests)
-- [Roadmap]: Phases 2 and 3 both depend on Phase 1 but are independent of each other
-- [Phase 01]: Node.js 22 LTS used instead of 20 (EOL April 2026)
-- [Phase 01]: Non-root claude user added (Claude Code refuses root execution)
-- [Phase 01]: Settings.json at /etc/claude-secure/ with symlink to avoid volume shadowing
-- [Phase 01]: Node.js used for proxy connectivity test (no curl in node:22-slim)
-- [Phase 01]: Whitelist read-only verified via Docker mount RW flag (bind-mount shows host UID)
-- [Phase 02-call-validation]: Shared network namespace via network_mode: service:claude for iptables enforcement
-- [Phase 02-call-validation]: iptables comment module with fallback for call-ID rule tracking
-- [Phase 02-call-validation]: Exit 0 with JSON permissionDecision deny for blocking (not exit 2) per verified Claude Code protocol
-- [Phase 02-call-validation]: Removed dns: 127.0.0.1 from docker-compose.yml -- internal network blocks external DNS forwarding, setting broke validator resolution
-- [Phase 02-call-validation]: Validator gracefully degrades when DNS fails: stores call-ID without iptables rule (defense-in-depth)
-- [Phase 03-secret-redaction]: readFileSync per request for whitelist hot-reload, longest-first replacement ordering, accept-encoding stripped to prevent compressed responses
-- [Phase 03-secret-redaction]: Protocol-aware transport in proxy (http vs https) for testability; mock upstream pattern via node one-liner inside container
-- [Phase 04]: Source guard in install.sh for testability; whitelist symlink for user customization; set -a auto-export in CLI wrapper
-- [Phase 04]: 12 tests covering 9 requirement IDs with subshell isolation and temp dir cleanup
-- [Phase 07]: env_file fallback to /dev/null when SECRETS_FILE unset for graceful degradation
-- [Phase 07]: Simpler ENV-04 test: verify proxy has secret + whitelist readable (full redaction tested by test-phase3.sh)
-- [Phase 08]: All 10 dev packages in single apt-get layer alongside existing 4 packages
-- [Phase 09]: DNS validation tested via regex extraction rather than sourcing full CLI
-- [Phase quick-260411-mre]: Replicated pre-push hook test execution pattern directly in run-tests.sh for manual use
-- [Phase 11-milestone-cleanup]: No logic changes to validator -- docstring-only update to /validate endpoint
-
-### Roadmap Evolution
-
-- Phase 7 added: Env-file strategy and secret loading for claude-secure
-- Phase 8 added: Container tooling — full dev environment for claude-secure
+- [Roadmap v2.0]: Six phases following dependency chain: Profile System -> Headless CLI + Webhook Listener (parallel) -> Event Handlers -> Result Channel -> Hardening
+- [Roadmap v2.0]: Phase 13 and 14 can proceed in parallel since both depend only on Phase 12
+- [Research]: Claude Code `-p` flag via `docker compose exec -T` is the only correct headless integration point (SDK bypasses security layers)
+- [Research]: Profile resolution must fail closed -- no fallback to default profile
+- [Research]: Known bug #7263 (empty output with large stdin) needs verification at Phase 13
 
 ### Pending Todos
 
-- **iptables packet-level logging**: Add iptables `-j LOG` rules for DROP/ACCEPT and poll `dmesg`/`/proc/kmsg` from validator background thread to capture actual packet allow/block events into `iptables.jsonl`. Currently only HTTP-level events (registration, validation) are logged — silent drops at the network layer are invisible.
+- **iptables packet-level logging**: Add iptables `-j LOG` rules for DROP/ACCEPT and poll `dmesg`/`/proc/kmsg` from validator background thread to capture actual packet allow/block events into `iptables.jsonl`.
 
 ### Blockers/Concerns
 
-- [Research]: Claude Code hook response schema may have changed since training data cutoff -- verify against current docs before Phase 2
-- [Research]: iptables backend on WSL2 varies by distro/kernel -- validate in installer preflight (Phase 4)
-- ~~[Research]: Bidirectional placeholder restoration must be scoped to auth contexts only to prevent covert channel~~ — Addressed in Phase 3: proxy does full bidirectional replacement with longest-first ordering
-
-### Quick Tasks Completed
-
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 260409-2jp | Write a README.md for the claude-secure project | 2026-04-08 | 8fc85b6 | [260409-2jp-write-a-readme-md-for-the-claude-secure-](./quick/260409-2jp-write-a-readme-md-for-the-claude-secure-/) |
-| 260409-fof | Add Claude Code version update mechanism | 2026-04-09 | e780bf4 | [260409-fof-add-claude-code-version-update-mechanism](./quick/260409-fof-add-claude-code-version-update-mechanism/) |
-| 260410-fjy | Update README with logging features and verify update instructions | 2026-04-10 | c332c78 | [260410-fjy-update-readme-with-logging-features-and-](./quick/260410-fjy-update-readme-with-logging-features-and-/) |
-| 260410-ic4 | Log redacted secret mappings in anthropic proxy | 2026-04-10 | b77f0cc | [260410-ic4-log-redacted-secret-mappings-in-anthropi](./quick/260410-ic4-log-redacted-secret-mappings-in-anthropi/) |
-| 260411-mre | Add run-tests.sh script and document testing | 2026-04-11 | dbb11c5 | [260411-mre-add-run-tests-script-and-document-testin](./quick/260411-mre-add-run-tests-script-and-document-testin/) |
+- [Research]: systemd in WSL2 requires `[boot] systemd=true` in `/etc/wsl.conf` -- installer should detect this (affects Phase 14)
+- [Research]: `--allowedTools` prefix match syntax needs empirical verification (affects Phase 13)
+- [Research]: Docker Compose `deploy.resources.limits` vs `mem_limit` -- verify with `docker inspect` (affects Phase 13)
 
 ## Session Continuity
 
-Last session: 2026-04-11T17:19:30.054Z
-Last activity: 2026-04-11 - Completed quick task 260411-mre: Add run-tests script and document testing in README
-Stopped at: Completed 11-01-PLAN.md
+Last session: 2026-04-11
+Stopped at: Roadmap created for v2.0 milestone
 Resume file: None
