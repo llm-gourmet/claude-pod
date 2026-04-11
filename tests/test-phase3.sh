@@ -41,9 +41,9 @@ cleanup() {
   echo ""
   echo "Cleaning up..."
   # Kill mock upstream if running
-  docker exec claude-proxy pkill -f "mock-upstream" 2>/dev/null || true
+  docker compose exec -T proxy pkill -f "mock-upstream" 2>/dev/null || true
   # Remove log file
-  docker exec claude-proxy rm -f /tmp/upstream-requests.log 2>/dev/null || true
+  docker compose exec -T proxy rm -f /tmp/upstream-requests.log 2>/dev/null || true
   # Bring down with override
   docker compose -f docker-compose.yml -f "$OVERRIDE_FILE" down > /dev/null 2>&1
   rm -f "$OVERRIDE_FILE"
@@ -83,7 +83,7 @@ docker compose -f docker-compose.yml -f "$OVERRIDE_FILE" up -d || { echo "FATAL:
 echo "Waiting for proxy container..."
 READY=false
 for i in $(seq 1 15); do
-  if docker exec claude-proxy node -e "process.exit(0)" 2>/dev/null; then
+  if docker compose exec -T proxy node -e "process.exit(0)" 2>/dev/null; then
     READY=true
     break
   fi
@@ -97,7 +97,7 @@ fi
 
 # Start mock upstream inside proxy container
 echo "Starting mock upstream server..."
-docker exec -d claude-proxy node -e '
+docker compose exec -d proxy node -e '
 const http = require("http");
 const fs = require("fs");
 const server = http.createServer((req, res) => {
@@ -121,7 +121,7 @@ process.title = "mock-upstream";
 # Wait for mock upstream to be ready
 MOCK_READY=false
 for i in $(seq 1 10); do
-  if docker exec claude-proxy test -f /tmp/mock-upstream-ready 2>/dev/null; then
+  if docker compose exec -T proxy test -f /tmp/mock-upstream-ready 2>/dev/null; then
     MOCK_READY=true
     break
   fi
@@ -140,7 +140,7 @@ echo ""
 # =========================================================================
 # SECR-01: Proxy intercepts Claude-to-Anthropic traffic
 # =========================================================================
-RESPONSE=$(docker exec claude-secure curl -s -w '\n%{http_code}' -X POST \
+RESPONSE=$(docker compose exec -T claude curl -s -w '\n%{http_code}' -X POST \
   http://proxy:8080/v1/messages \
   -H 'content-type: application/json' \
   -d '{"model":"test","messages":[{"role":"user","content":"hello"}]}' 2>&1)
@@ -155,14 +155,14 @@ fi
 # SECR-02: Secret values replaced with placeholders in outbound requests
 # =========================================================================
 # Send request containing real secret values
-docker exec claude-secure curl -s -X POST \
+docker compose exec -T claude curl -s -X POST \
   http://proxy:8080/v1/messages \
   -H 'content-type: application/json' \
   -d '{"model":"test","messages":[{"role":"user","content":"my github token is ghp_test_secret_value_12345 and stripe key is sk_test_stripe_secret_67890"}]}' > /dev/null 2>&1
 
 # Read what mock upstream received
 sleep 1
-UPSTREAM_LOG=$(docker exec claude-proxy cat /tmp/upstream-requests.log 2>/dev/null)
+UPSTREAM_LOG=$(docker compose exec -T proxy cat /tmp/upstream-requests.log 2>/dev/null)
 
 # Check that placeholders appear and real secrets do not
 SECR02_OK=1
@@ -177,14 +177,14 @@ report "SECR-02" "Secret values replaced with placeholders in outbound" $SECR02_
 # =========================================================================
 # SECR-02b: Multiple secrets redacted in single request
 # =========================================================================
-docker exec claude-proxy truncate -s 0 /tmp/upstream-requests.log 2>/dev/null
-docker exec claude-secure curl -s -X POST \
+docker compose exec -T proxy truncate -s 0 /tmp/upstream-requests.log 2>/dev/null
+docker compose exec -T claude curl -s -X POST \
   http://proxy:8080/v1/messages \
   -H 'content-type: application/json' \
   -d '{"model":"test","messages":[{"role":"user","content":"all secrets: ghp_test_secret_value_12345 sk_test_stripe_secret_67890 sk-test-openai-secret-abcde"}]}' > /dev/null 2>&1
 
 sleep 1
-UPSTREAM_LOG2=$(docker exec claude-proxy cat /tmp/upstream-requests.log 2>/dev/null)
+UPSTREAM_LOG2=$(docker compose exec -T proxy cat /tmp/upstream-requests.log 2>/dev/null)
 
 SECR02B_OK=1
 if echo "$UPSTREAM_LOG2" | grep -q 'PLACEHOLDER_GITHUB' && \
@@ -201,7 +201,7 @@ report "SECR-02b" "All three secrets redacted in single request" $SECR02B_OK
 # SECR-03: Placeholders restored to real values in responses
 # =========================================================================
 # The mock upstream returns placeholders in its response. The proxy should restore them.
-RESPONSE_BODY=$(docker exec claude-secure curl -s -X POST \
+RESPONSE_BODY=$(docker compose exec -T claude curl -s -X POST \
   http://proxy:8080/v1/messages \
   -H 'content-type: application/json' \
   -d '{"model":"test","messages":[{"role":"user","content":"hello"}]}' 2>&1)
@@ -222,7 +222,7 @@ report "SECR-03" "Placeholders restored to real values in responses" $SECR03_OK
 # =========================================================================
 # Baseline: secrets are being redacted (already proven by SECR-02)
 # Now remove the GITHUB entry from whitelist inside the proxy container
-docker exec claude-proxy sh -c 'cat /etc/claude-secure/whitelist.json' > /tmp/whitelist-backup.json 2>/dev/null
+docker compose exec -T proxy sh -c 'cat /etc/claude-secure/whitelist.json' > /tmp/whitelist-backup.json 2>/dev/null
 
 # The whitelist is mounted read-only. Copy it, modify, and override the WHITELIST_PATH.
 # Actually, the mount is :ro so we cannot modify it in place. Instead, we copy to a
@@ -241,16 +241,16 @@ cp config/whitelist-modified.json config/whitelist.json
 rm config/whitelist-modified.json
 
 # Clear upstream log
-docker exec claude-proxy truncate -s 0 /tmp/upstream-requests.log 2>/dev/null
+docker compose exec -T proxy truncate -s 0 /tmp/upstream-requests.log 2>/dev/null
 
 # Send request with github token -- should NOT be redacted anymore
-docker exec claude-secure curl -s -X POST \
+docker compose exec -T claude curl -s -X POST \
   http://proxy:8080/v1/messages \
   -H 'content-type: application/json' \
   -d '{"model":"test","messages":[{"role":"user","content":"token: ghp_test_secret_value_12345"}]}' > /dev/null 2>&1
 
 sleep 1
-UPSTREAM_LOG3=$(docker exec claude-proxy cat /tmp/upstream-requests.log 2>/dev/null)
+UPSTREAM_LOG3=$(docker compose exec -T proxy cat /tmp/upstream-requests.log 2>/dev/null)
 
 SECR04_OK=1
 # After removing entry, the real value should pass through unredacted
@@ -268,16 +268,16 @@ rm -f config/whitelist.json.bak
 # SECR-04b: Config hot-reload -- re-added secret is redacted again
 # =========================================================================
 # Clear upstream log
-docker exec claude-proxy truncate -s 0 /tmp/upstream-requests.log 2>/dev/null
+docker compose exec -T proxy truncate -s 0 /tmp/upstream-requests.log 2>/dev/null
 
 # Send request with github token -- should be redacted again (config restored)
-docker exec claude-secure curl -s -X POST \
+docker compose exec -T claude curl -s -X POST \
   http://proxy:8080/v1/messages \
   -H 'content-type: application/json' \
   -d '{"model":"test","messages":[{"role":"user","content":"token: ghp_test_secret_value_12345"}]}' > /dev/null 2>&1
 
 sleep 1
-UPSTREAM_LOG4=$(docker exec claude-proxy cat /tmp/upstream-requests.log 2>/dev/null)
+UPSTREAM_LOG4=$(docker compose exec -T proxy cat /tmp/upstream-requests.log 2>/dev/null)
 
 SECR04B_OK=1
 if echo "$UPSTREAM_LOG4" | grep -q 'PLACEHOLDER_GITHUB' && \
@@ -290,17 +290,17 @@ report "SECR-04b" "Config hot-reload: restored secret is redacted again" $SECR04
 # SECR-05: Auth credentials forwarded correctly
 # =========================================================================
 # Clear upstream log
-docker exec claude-proxy truncate -s 0 /tmp/upstream-requests.log 2>/dev/null
+docker compose exec -T proxy truncate -s 0 /tmp/upstream-requests.log 2>/dev/null
 
 # Send a request -- check what auth headers the mock upstream received
-docker exec claude-secure curl -s -X POST \
+docker compose exec -T claude curl -s -X POST \
   http://proxy:8080/v1/messages \
   -H 'content-type: application/json' \
   -H 'x-api-key: claude-dummy-key-999' \
   -d '{"model":"test","messages":[{"role":"user","content":"auth test"}]}' > /dev/null 2>&1
 
 sleep 1
-UPSTREAM_LOG5=$(docker exec claude-proxy cat /tmp/upstream-requests.log 2>/dev/null)
+UPSTREAM_LOG5=$(docker compose exec -T proxy cat /tmp/upstream-requests.log 2>/dev/null)
 
 SECR05_OK=1
 # Proxy should forward its own API key (test-proxy-api-key-xyz), not Claude's dummy key

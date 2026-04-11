@@ -201,7 +201,7 @@ report "PLAT-01" "All 3 containers start and run" $PLAT_RESULT
 # PLAT-02: Proxy is reachable from claude container
 # =========================================================================
 if [ $PLAT_RESULT -eq 0 ]; then
-  docker exec claude-secure curl -s -o /dev/null -w '%{http_code}' \
+  docker compose exec -T claude curl -s -o /dev/null -w '%{http_code}' \
     -X POST http://proxy:8080/v1/messages \
     -H 'content-type: application/json' \
     -d '{"model":"test","messages":[]}' 2>/dev/null | grep -qE '^[2345][0-9]{2}$'

@@ -72,7 +72,7 @@ docker compose up -d >/dev/null 2>&1 || { echo "FATAL: docker compose up failed"
 echo "Waiting for proxy container..."
 READY=false
 for i in $(seq 1 15); do
-  if docker exec claude-proxy node -e "process.exit(0)" 2>/dev/null; then
+  if docker compose exec -T proxy node -e "process.exit(0)" 2>/dev/null; then
     READY=true
     break
   fi
@@ -149,7 +149,7 @@ docker compose up -d >/dev/null 2>&1
 # Wait for proxy to be ready
 READY=false
 for i in $(seq 1 15); do
-  if docker exec claude-proxy node -e "process.exit(0)" 2>/dev/null; then
+  if docker compose exec -T proxy node -e "process.exit(0)" 2>/dev/null; then
     READY=true
     break
   fi

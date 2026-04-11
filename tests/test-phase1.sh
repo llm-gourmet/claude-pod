@@ -41,11 +41,11 @@ echo "Running tests..."
 echo ""
 
 # DOCK-01: Claude container has no direct internet
-! docker exec claude-secure curl -sf --max-time 5 https://api.anthropic.com > /dev/null 2>&1
+! docker compose exec -T claude curl -sf --max-time 5 https://api.anthropic.com > /dev/null 2>&1
 report "DOCK-01" "Claude container has no direct internet access" $?
 
 # DOCK-02: Proxy can reach external URLs (node used -- proxy image has no curl)
-docker exec claude-proxy node -e '
+docker compose exec -T proxy node -e '
   const https = require("https");
   const r = https.get("https://api.anthropic.com/v1", {timeout: 10000}, res => {
     process.exit(res.statusCode < 500 ? 0 : 1);
@@ -61,27 +61,27 @@ report "DOCK-03" "Docker Compose runs all 3 containers" $?
 
 # DOCK-04: Outbound connections blocked from claude (iptables OUTPUT DROP)
 # DNS may resolve via Docker embedded DNS but actual connections are blocked by iptables
-! docker exec claude-secure curl -sf --max-time 5 https://google.com > /dev/null 2>&1
+! docker compose exec -T claude curl -sf --max-time 5 https://google.com > /dev/null 2>&1
 report "DOCK-04" "Outbound connections from claude container are blocked" $?
 
 # DOCK-05: Security files root-owned and read-only
 # Hooks and settings are COPY'd in Dockerfile and genuinely root-owned.
 # Whitelist is bind-mounted (:ro flag enforces read-only at mount level; host UID visible inside).
 DOCK05_RESULT=0
-docker exec claude-secure stat -c '%U %a' /etc/claude-secure/hooks/pre-tool-use.sh 2>/dev/null | grep -q 'root 555' || DOCK05_RESULT=1
-docker exec claude-secure stat -c '%U %a' /etc/claude-secure/settings.json 2>/dev/null | grep -q 'root 444' || DOCK05_RESULT=1
-docker inspect claude-secure --format '{{json .Mounts}}' 2>/dev/null | jq '.[] | select(.Destination=="/etc/claude-secure/whitelist.json") | .RW' 2>/dev/null | grep -q 'false' || DOCK05_RESULT=1
+docker compose exec -T claude stat -c '%U %a' /etc/claude-secure/hooks/pre-tool-use.sh 2>/dev/null | grep -q 'root 555' || DOCK05_RESULT=1
+docker compose exec -T claude stat -c '%U %a' /etc/claude-secure/settings.json 2>/dev/null | grep -q 'root 444' || DOCK05_RESULT=1
+docker inspect $(docker compose ps -q claude) --format '{{json .Mounts}}' 2>/dev/null | jq '.[] | select(.Destination=="/etc/claude-secure/whitelist.json") | .RW' 2>/dev/null | grep -q 'false' || DOCK05_RESULT=1
 report "DOCK-05" "Security files are root-owned and read-only" $DOCK05_RESULT
 
 # DOCK-05b: Settings.json accessible via symlink (not shadowed by volume)
 # Symlink is at /home/claude/.claude/settings.json (non-root user, per Dockerfile)
-docker exec claude-secure cat /home/claude/.claude/settings.json 2>/dev/null | jq -e '.hooks.PreToolUse' > /dev/null 2>&1
+docker compose exec -T claude cat /home/claude/.claude/settings.json 2>/dev/null | jq -e '.hooks.PreToolUse' > /dev/null 2>&1
 report "DOCK-05b" "settings.json accessible via symlink (not volume-shadowed)" $?
 
 # DOCK-06: Capabilities dropped and no-new-privileges
 DOCK06_RESULT=0
-docker inspect claude-secure --format '{{.HostConfig.CapDrop}}' 2>/dev/null | grep -q ALL || DOCK06_RESULT=1
-docker inspect claude-secure --format '{{.HostConfig.SecurityOpt}}' 2>/dev/null | grep -q no-new-privileges || DOCK06_RESULT=1
+docker inspect $(docker compose ps -q claude) --format '{{.HostConfig.CapDrop}}' 2>/dev/null | grep -q ALL || DOCK06_RESULT=1
+docker inspect $(docker compose ps -q claude) --format '{{.HostConfig.SecurityOpt}}' 2>/dev/null | grep -q no-new-privileges || DOCK06_RESULT=1
 report "DOCK-06" "Claude container caps dropped, no-new-privileges set" $DOCK06_RESULT
 
 # WHIT-01: Whitelist has secrets with correct schema
@@ -93,7 +93,7 @@ jq -e 'has("readonly_domains")' config/whitelist.json > /dev/null 2>&1
 report "WHIT-02" "Whitelist has readonly_domains section" $?
 
 # WHIT-03: Whitelist is not writable inside container
-docker exec claude-secure test ! -w /etc/claude-secure/whitelist.json > /dev/null 2>&1
+docker compose exec -T claude test ! -w /etc/claude-secure/whitelist.json > /dev/null 2>&1
 report "WHIT-03" "Whitelist is read-only inside claude container" $?
 
 echo ""
