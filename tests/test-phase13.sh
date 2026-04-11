@@ -102,13 +102,13 @@ create_test_profile() {
 echo "--- HEAD-01: Spawn Argument Parsing ---"
 
 test_spawn_requires_profile() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
   if ! type do_spawn &>/dev/null; then
     echo "SKIP (do_spawn not yet implemented)"
     return 0
   fi
-  local tmpdir
-  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  _source_functions "$tmpdir"
 
   # Call do_spawn with PROFILE unset
   PROFILE="" REMAINING_ARGS=("spawn" "--event" '{"type":"test"}')
@@ -120,15 +120,15 @@ test_spawn_requires_profile() {
 run_test "HEAD-01a: spawn requires --profile" test_spawn_requires_profile
 
 test_spawn_requires_event() {
-  if ! type do_spawn &>/dev/null; then
-    echo "SKIP (do_spawn not yet implemented)"
-    return 0
-  fi
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
   create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
+  if ! type do_spawn &>/dev/null; then
+    echo "SKIP (do_spawn not yet implemented)"
+    return 0
+  fi
 
   # Call do_spawn with PROFILE set but no --event
   PROFILE="testprof" REMAINING_ARGS=("spawn")
@@ -140,15 +140,15 @@ test_spawn_requires_event() {
 run_test "HEAD-01b: spawn requires --event or --event-file" test_spawn_requires_event
 
 test_spawn_rejects_invalid_json() {
-  if ! type do_spawn &>/dev/null; then
-    echo "SKIP (do_spawn not yet implemented)"
-    return 0
-  fi
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
   create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
+  if ! type do_spawn &>/dev/null; then
+    echo "SKIP (do_spawn not yet implemented)"
+    return 0
+  fi
 
   PROFILE="testprof" REMAINING_ARGS=("spawn" "--event" "not json")
   local output
@@ -159,15 +159,15 @@ test_spawn_rejects_invalid_json() {
 run_test "HEAD-01c: spawn rejects invalid JSON in --event" test_spawn_rejects_invalid_json
 
 test_spawn_accepts_event_file() {
-  if ! type do_spawn &>/dev/null; then
-    echo "SKIP (do_spawn not yet implemented)"
-    return 0
-  fi
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
   create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
+  if ! type do_spawn &>/dev/null; then
+    echo "SKIP (do_spawn not yet implemented)"
+    return 0
+  fi
 
   local event_file="$tmpdir/event.json"
   echo '{"type":"issue-opened","issue":{"title":"Test"}}' > "$event_file"
@@ -184,15 +184,15 @@ test_spawn_accepts_event_file() {
 run_test "HEAD-01d: spawn accepts --event-file with valid JSON" test_spawn_accepts_event_file
 
 test_spawn_parses_prompt_template() {
-  if ! type do_spawn &>/dev/null; then
-    echo "SKIP (do_spawn not yet implemented)"
-    return 0
-  fi
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
   create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
+  if ! type do_spawn &>/dev/null; then
+    echo "SKIP (do_spawn not yet implemented)"
+    return 0
+  fi
 
   PROFILE="testprof" REMAINING_ARGS=("spawn" "--event" '{"type":"test"}' "--prompt-template" "custom")
   # do_spawn will fail at "not yet implemented" but PROMPT_TEMPLATE should be set
@@ -210,13 +210,13 @@ echo ""
 echo "--- HEAD-04: Ephemeral Lifecycle ---"
 
 test_spawn_project_name_format() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
   if ! type spawn_project_name &>/dev/null; then
     echo "SKIP (spawn_project_name not yet implemented)"
     return 0
   fi
-  local tmpdir
-  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  _source_functions "$tmpdir"
 
   local result
   result=$(spawn_project_name "myprofile")
@@ -226,13 +226,13 @@ test_spawn_project_name_format() {
 run_test "HEAD-04a: spawn project name matches cs-<profile>-<uuid8> format" test_spawn_project_name_format
 
 test_spawn_project_name_unique() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
   if ! type spawn_project_name &>/dev/null; then
     echo "SKIP (spawn_project_name not yet implemented)"
     return 0
   fi
-  local tmpdir
-  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  _source_functions "$tmpdir"
 
   local result1 result2
   result1=$(spawn_project_name "prof")
@@ -250,13 +250,13 @@ echo ""
 echo "--- HEAD-02: Output Envelope (stubs) ---"
 
 test_build_output_envelope() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
   if ! type build_output_envelope &>/dev/null; then
     echo "SKIP (build_output_envelope not yet implemented)"
     return 0
   fi
-  local tmpdir
-  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  _source_functions "$tmpdir"
 
   local result
   result=$(build_output_envelope "testprof" "issue-opened" '{"result":"ok"}')
@@ -313,15 +313,15 @@ echo ""
 echo "--- HEAD-05: Prompt Templates (stubs) ---"
 
 test_resolve_template_by_event_type() {
-  if ! type resolve_template &>/dev/null; then
-    echo "SKIP (resolve_template not yet implemented)"
-    return 0
-  fi
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
   create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
+  if ! type resolve_template &>/dev/null; then
+    echo "SKIP (resolve_template not yet implemented)"
+    return 0
+  fi
 
   mkdir -p "$tmpdir/.claude-secure/profiles/testprof/prompts"
   echo "Handle this issue: {{ISSUE_TITLE}}" > "$tmpdir/.claude-secure/profiles/testprof/prompts/issue-opened.md"
@@ -336,15 +336,15 @@ test_resolve_template_by_event_type() {
 run_test "HEAD-05a: resolve_template finds template by event type" test_resolve_template_by_event_type
 
 test_resolve_template_explicit_override() {
-  if ! type resolve_template &>/dev/null; then
-    echo "SKIP (resolve_template not yet implemented)"
-    return 0
-  fi
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
   create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
+  if ! type resolve_template &>/dev/null; then
+    echo "SKIP (resolve_template not yet implemented)"
+    return 0
+  fi
 
   mkdir -p "$tmpdir/.claude-secure/profiles/testprof/prompts"
   echo "Custom prompt: {{REPO_NAME}}" > "$tmpdir/.claude-secure/profiles/testprof/prompts/custom.md"
@@ -359,15 +359,15 @@ test_resolve_template_explicit_override() {
 run_test "HEAD-05b: resolve_template uses explicit override" test_resolve_template_explicit_override
 
 test_resolve_template_missing_fails() {
-  if ! type resolve_template &>/dev/null; then
-    echo "SKIP (resolve_template not yet implemented)"
-    return 0
-  fi
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
   create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
+  if ! type resolve_template &>/dev/null; then
+    echo "SKIP (resolve_template not yet implemented)"
+    return 0
+  fi
 
   PROFILE="testprof"
   resolve_template "nonexistent-event" "" && return 1
@@ -376,13 +376,13 @@ test_resolve_template_missing_fails() {
 run_test "HEAD-05c: resolve_template fails for missing template" test_resolve_template_missing_fails
 
 test_render_template_substitutes_vars() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
   if ! type render_template &>/dev/null; then
     echo "SKIP (render_template not yet implemented)"
     return 0
   fi
-  local tmpdir
-  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  _source_functions "$tmpdir"
 
   local template_file="$tmpdir/template.md"
   echo 'Review {{REPO_NAME}} on branch {{BRANCH}}' > "$template_file"
@@ -397,13 +397,13 @@ test_render_template_substitutes_vars() {
 run_test "HEAD-05d: render_template substitutes variables from event JSON" test_render_template_substitutes_vars
 
 test_render_template_handles_empty_vars() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
   if ! type render_template &>/dev/null; then
     echo "SKIP (render_template not yet implemented)"
     return 0
   fi
-  local tmpdir
-  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  _source_functions "$tmpdir"
 
   local template_file="$tmpdir/template.md"
   echo 'Issue: {{ISSUE_TITLE}}' > "$template_file"
@@ -426,15 +426,15 @@ echo ""
 echo "--- Dry Run ---"
 
 test_dry_run_flag_parsed() {
-  if ! type do_spawn &>/dev/null; then
-    echo "SKIP (do_spawn not yet implemented)"
-    return 0
-  fi
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
   create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
+  if ! type do_spawn &>/dev/null; then
+    echo "SKIP (do_spawn not yet implemented)"
+    return 0
+  fi
 
   PROFILE="testprof" REMAINING_ARGS=("spawn" "--event" '{"type":"test"}' "--dry-run")
   DRY_RUN=0

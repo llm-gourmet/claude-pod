@@ -315,6 +315,81 @@ parse_log_flags() {
   export LOG_HOOK LOG_ANTHROPIC LOG_ANTHROPIC_BODIES LOG_IPTABLES
 }
 
+spawn_project_name() {
+  local profile="$1"
+  local uuid8
+  uuid8=$(uuidgen | tr -d '-' | head -c 8 | tr '[:upper:]' '[:lower:]')
+  echo "cs-${profile}-${uuid8}"
+}
+
+spawn_cleanup() {
+  docker compose down -v --remove-orphans 2>/dev/null || true
+  for f in "${_CLEANUP_FILES[@]}"; do
+    rm -f "$f"
+  done
+}
+
+do_spawn() {
+  # Per D-04: --profile is required for spawn (enforced above by profile resolution)
+  if [ -z "$PROFILE" ]; then
+    echo "ERROR: --profile is required for spawn" >&2
+    echo "Usage: claude-secure spawn --profile <name> --event '<json>'" >&2
+    return 1
+  fi
+
+  # Parse spawn-specific flags from REMAINING_ARGS (skip first which is "spawn")
+  EVENT_JSON=""
+  EVENT_FILE=""
+  PROMPT_TEMPLATE=""
+  DRY_RUN=0
+  local i=1
+  while [ $i -lt ${#REMAINING_ARGS[@]} ]; do
+    case "${REMAINING_ARGS[$i]:-}" in
+      --event)          EVENT_JSON="${REMAINING_ARGS[$((i+1))]:-}"; i=$((i+2)) ;;
+      --event-file)     EVENT_FILE="${REMAINING_ARGS[$((i+1))]:-}"; i=$((i+2)) ;;
+      --prompt-template) PROMPT_TEMPLATE="${REMAINING_ARGS[$((i+1))]:-}"; i=$((i+2)) ;;
+      --dry-run)        DRY_RUN=1; i=$((i+1)) ;;
+      *)                i=$((i+1)) ;;
+    esac
+  done
+
+  # Load event from file if --event-file used (per D-02)
+  if [ -n "$EVENT_FILE" ] && [ -z "$EVENT_JSON" ]; then
+    if [ ! -f "$EVENT_FILE" ]; then
+      echo "ERROR: Event file not found: $EVENT_FILE" >&2
+      return 1
+    fi
+    EVENT_JSON=$(cat "$EVENT_FILE")
+  fi
+
+  # Validate event JSON is provided and valid
+  if [ -z "$EVENT_JSON" ]; then
+    echo "ERROR: --event or --event-file is required for spawn" >&2
+    echo "Usage: claude-secure spawn --profile <name> --event '<json>'" >&2
+    return 1
+  fi
+  if ! echo "$EVENT_JSON" | jq empty 2>/dev/null; then
+    echo "ERROR: Invalid JSON in --event" >&2
+    return 1
+  fi
+
+  # Generate ephemeral project name (per D-05)
+  COMPOSE_PROJECT_NAME=$(spawn_project_name "$PROFILE")
+  export COMPOSE_PROJECT_NAME
+
+  # Set cleanup trap (per D-07) - overrides the default cleanup trap
+  trap spawn_cleanup EXIT
+
+  # Read max_turns from profile.json (per D-08)
+  MAX_TURNS=$(jq -r '.max_turns // empty' "$CONFIG_DIR/profiles/$PROFILE/profile.json")
+
+  # TODO: Plan 02 implements execution lifecycle and output capture
+  # TODO: Plan 03 implements prompt template resolution and rendering
+
+  echo "ERROR: spawn execution not yet implemented (pending Plans 02/03)" >&2
+  return 1
+}
+
 # =========================================================================
 # Source-only guard: if sourced by tests, stop here
 # =========================================================================
@@ -490,6 +565,7 @@ case "$CMD" in
     echo "  logs       Tail log files (logs hook|anthropic|iptables|clear)"
     echo "  update     Pull latest claude-secure and rebuild all images"
     echo "  upgrade    Rebuild claude image with latest Claude Code (--no-cache)"
+    echo "  spawn      Run headless Claude Code session (requires --profile and --event)"
     echo "  help       Show this help message"
     echo ""
     echo "Modes:"
@@ -503,8 +579,17 @@ case "$CMD" in
     echo "  log:iptables   Enable validator/iptables logging"
     echo "  log:all        Enable all logging (metadata, no bodies)"
     echo ""
+    echo "Spawn flags (use with spawn command):"
+    echo "  --event '<json>'       Event payload as JSON string"
+    echo "  --event-file <path>    Event payload from file"
+    echo "  --prompt-template <n>  Override automatic template resolution"
+    echo "  --dry-run              Show resolved prompt without executing"
+    echo ""
     echo "Profile names must be DNS-safe (lowercase alphanumeric and hyphens)."
     echo "New profiles are auto-created on first use."
+    ;;
+  spawn)
+    do_spawn
     ;;
   *)
     mkdir -p "$LOG_DIR"
