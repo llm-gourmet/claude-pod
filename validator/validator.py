@@ -303,7 +303,16 @@ class ValidatorHandler(BaseHTTPRequestHandler):
         self._send_json(200, {"status": "ok", "ip": ip, "expires_at": expires_at})
 
     def _handle_validate(self):
-        """GET /validate?call_id=X -- check if a call-ID is valid and mark used."""
+        """GET /validate?call_id=X -- debug/observability endpoint.
+
+        Check if a call-ID is valid and mark it as used. This endpoint is
+        NOT part of the critical security path -- iptables rules are the
+        enforcement layer. This exists for debugging and observability:
+        operators can query it to inspect call-ID state without affecting
+        the security model.
+
+        Returns {"valid": true/false, "domain": "..."} as JSON.
+        """
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
         call_id = params.get("call_id", [None])[0]
