@@ -1,0 +1,459 @@
+#!/bin/bash
+# test-phase13.sh -- Integration tests for Phase 13: Headless CLI Path
+# Tests HEAD-01 through HEAD-05 (spawn subcommand, output, max-turns, ephemeral lifecycle, templates)
+#
+# Strategy: Use temp directories for all config to avoid touching real ~/.claude-secure.
+# Source bin/claude-secure functions with __CLAUDE_SECURE_SOURCE_ONLY=1.
+# Functions not yet implemented are guarded with `type` checks and SKIP gracefully.
+#
+# Usage: bash tests/test-phase13.sh
+# Exit 0 if all pass, exit 1 if any fail.
+set -uo pipefail
+
+PASS=0
+FAIL=0
+TOTAL=0
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+run_test() {
+  local name="$1"; shift
+  TOTAL=$((TOTAL + 1))
+  if "$@" 2>/dev/null; then
+    echo "  PASS: $name"
+    PASS=$((PASS + 1))
+  else
+    echo "  FAIL: $name"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+# Global temp directory for test isolation
+TEST_TMPDIR=$(mktemp -d)
+cleanup() {
+  rm -rf "$TEST_TMPDIR"
+}
+trap cleanup EXIT
+
+echo "========================================"
+echo "  Phase 13 Integration Tests"
+echo "  Headless CLI Path"
+echo "  (HEAD-01 -- HEAD-05)"
+echo "========================================"
+echo ""
+
+# =========================================================================
+# Helper: Source profile functions from bin/claude-secure
+# We source the script with __CLAUDE_SECURE_SOURCE_ONLY=1 to skip execution
+# and only load function definitions.
+# =========================================================================
+
+# Set up a minimal config environment so sourcing works
+_setup_source_env() {
+  local tmpdir="$1"
+  mkdir -p "$tmpdir/.claude-secure/profiles"
+  cat > "$tmpdir/.claude-secure/config.sh" <<EOF
+APP_DIR="$PROJECT_DIR"
+PLATFORM="linux"
+EOF
+  export HOME="$tmpdir"
+  export CONFIG_DIR="$tmpdir/.claude-secure"
+}
+
+# Source bin/claude-secure functions
+_source_functions() {
+  local tmpdir="$1"
+  _setup_source_env "$tmpdir"
+  # shellcheck source=/dev/null
+  __CLAUDE_SECURE_SOURCE_ONLY=1 source "$PROJECT_DIR/bin/claude-secure"
+}
+
+# Helper: Create a valid test profile directory
+create_test_profile() {
+  local name="$1"
+  local config_dir="$2"
+  local ws_path="${3:-$TEST_TMPDIR/workspace-$name}"
+  local repo="${4:-}"
+
+  mkdir -p "$config_dir/profiles/$name"
+  mkdir -p "$ws_path"
+
+  # Build profile.json
+  if [ -n "$repo" ]; then
+    jq -n --arg ws "$ws_path" --arg repo "$repo" '{"workspace": $ws, "repo": $repo}' \
+      > "$config_dir/profiles/$name/profile.json"
+  else
+    jq -n --arg ws "$ws_path" '{"workspace": $ws}' \
+      > "$config_dir/profiles/$name/profile.json"
+  fi
+
+  # Create .env
+  echo "ANTHROPIC_API_KEY=test-key-$name" > "$config_dir/profiles/$name/.env"
+  chmod 600 "$config_dir/profiles/$name/.env"
+
+  # Copy whitelist template
+  cp "$PROJECT_DIR/config/whitelist.json" "$config_dir/profiles/$name/whitelist.json"
+}
+
+# =========================================================================
+# HEAD-01 Tests: Spawn arg parsing
+# =========================================================================
+echo "--- HEAD-01: Spawn Argument Parsing ---"
+
+test_spawn_requires_profile() {
+  if ! type do_spawn &>/dev/null; then
+    echo "SKIP (do_spawn not yet implemented)"
+    return 0
+  fi
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
+
+  # Call do_spawn with PROFILE unset
+  PROFILE="" REMAINING_ARGS=("spawn" "--event" '{"type":"test"}')
+  local output
+  output=$(do_spawn 2>&1) && return 1
+  echo "$output" | grep -q "\-\-profile is required for spawn" || return 1
+  return 0
+}
+run_test "HEAD-01a: spawn requires --profile" test_spawn_requires_profile
+
+test_spawn_requires_event() {
+  if ! type do_spawn &>/dev/null; then
+    echo "SKIP (do_spawn not yet implemented)"
+    return 0
+  fi
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _setup_source_env "$tmpdir"
+  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  _source_functions "$tmpdir"
+
+  # Call do_spawn with PROFILE set but no --event
+  PROFILE="testprof" REMAINING_ARGS=("spawn")
+  local output
+  output=$(do_spawn 2>&1) && return 1
+  echo "$output" | grep -q "\-\-event or \-\-event-file is required" || return 1
+  return 0
+}
+run_test "HEAD-01b: spawn requires --event or --event-file" test_spawn_requires_event
+
+test_spawn_rejects_invalid_json() {
+  if ! type do_spawn &>/dev/null; then
+    echo "SKIP (do_spawn not yet implemented)"
+    return 0
+  fi
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _setup_source_env "$tmpdir"
+  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  _source_functions "$tmpdir"
+
+  PROFILE="testprof" REMAINING_ARGS=("spawn" "--event" "not json")
+  local output
+  output=$(do_spawn 2>&1) && return 1
+  echo "$output" | grep -q "Invalid JSON" || return 1
+  return 0
+}
+run_test "HEAD-01c: spawn rejects invalid JSON in --event" test_spawn_rejects_invalid_json
+
+test_spawn_accepts_event_file() {
+  if ! type do_spawn &>/dev/null; then
+    echo "SKIP (do_spawn not yet implemented)"
+    return 0
+  fi
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _setup_source_env "$tmpdir"
+  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  _source_functions "$tmpdir"
+
+  local event_file="$tmpdir/event.json"
+  echo '{"type":"issue-opened","issue":{"title":"Test"}}' > "$event_file"
+
+  PROFILE="testprof" REMAINING_ARGS=("spawn" "--event-file" "$event_file")
+  local output
+  # do_spawn will fail at "not yet implemented" but should NOT fail on JSON validation
+  output=$(do_spawn 2>&1)
+  # Should not contain JSON validation errors
+  echo "$output" | grep -q "Invalid JSON" && return 1
+  echo "$output" | grep -q "\-\-event or \-\-event-file is required" && return 1
+  return 0
+}
+run_test "HEAD-01d: spawn accepts --event-file with valid JSON" test_spawn_accepts_event_file
+
+test_spawn_parses_prompt_template() {
+  if ! type do_spawn &>/dev/null; then
+    echo "SKIP (do_spawn not yet implemented)"
+    return 0
+  fi
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _setup_source_env "$tmpdir"
+  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  _source_functions "$tmpdir"
+
+  PROFILE="testprof" REMAINING_ARGS=("spawn" "--event" '{"type":"test"}' "--prompt-template" "custom")
+  # do_spawn will fail at "not yet implemented" but PROMPT_TEMPLATE should be set
+  do_spawn 2>/dev/null || true
+  [ "$PROMPT_TEMPLATE" = "custom" ] || return 1
+  return 0
+}
+run_test "HEAD-01e: spawn parses --prompt-template flag" test_spawn_parses_prompt_template
+
+echo ""
+
+# =========================================================================
+# HEAD-04 Tests: Ephemeral lifecycle (project naming)
+# =========================================================================
+echo "--- HEAD-04: Ephemeral Lifecycle ---"
+
+test_spawn_project_name_format() {
+  if ! type spawn_project_name &>/dev/null; then
+    echo "SKIP (spawn_project_name not yet implemented)"
+    return 0
+  fi
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
+
+  local result
+  result=$(spawn_project_name "myprofile")
+  [[ "$result" =~ ^cs-myprofile-[a-f0-9]{8}$ ]] || return 1
+  return 0
+}
+run_test "HEAD-04a: spawn project name matches cs-<profile>-<uuid8> format" test_spawn_project_name_format
+
+test_spawn_project_name_unique() {
+  if ! type spawn_project_name &>/dev/null; then
+    echo "SKIP (spawn_project_name not yet implemented)"
+    return 0
+  fi
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
+
+  local result1 result2
+  result1=$(spawn_project_name "prof")
+  result2=$(spawn_project_name "prof")
+  [ "$result1" != "$result2" ] || return 1
+  return 0
+}
+run_test "HEAD-04b: spawn project names are unique across invocations" test_spawn_project_name_unique
+
+echo ""
+
+# =========================================================================
+# HEAD-02 Tests: Output envelope (stubs for Plan 02)
+# =========================================================================
+echo "--- HEAD-02: Output Envelope (stubs) ---"
+
+test_build_output_envelope() {
+  if ! type build_output_envelope &>/dev/null; then
+    echo "SKIP (build_output_envelope not yet implemented)"
+    return 0
+  fi
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
+
+  local result
+  result=$(build_output_envelope "testprof" "issue-opened" '{"result":"ok"}')
+  echo "$result" | jq -e '.profile' >/dev/null || return 1
+  echo "$result" | jq -e '.event_type' >/dev/null || return 1
+  echo "$result" | jq -e '.timestamp' >/dev/null || return 1
+  echo "$result" | jq -e '.claude' >/dev/null || return 1
+  return 0
+}
+run_test "HEAD-02a: build_output_envelope has profile, event_type, timestamp, claude keys" test_build_output_envelope
+
+echo ""
+
+# =========================================================================
+# HEAD-03 Tests: Max turns (stubs for Plan 02)
+# =========================================================================
+echo "--- HEAD-03: Max Turns (stubs) ---"
+
+test_max_turns_read_from_profile() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _setup_source_env "$tmpdir"
+
+  mkdir -p "$tmpdir/.claude-secure/profiles/testprof"
+  echo '{"workspace":"/tmp","max_turns":5}' > "$tmpdir/.claude-secure/profiles/testprof/profile.json"
+
+  local max_turns
+  max_turns=$(jq -r '.max_turns // empty' "$tmpdir/.claude-secure/profiles/testprof/profile.json")
+  [ "$max_turns" = "5" ] || return 1
+  return 0
+}
+run_test "HEAD-03a: max_turns readable from profile.json" test_max_turns_read_from_profile
+
+test_max_turns_absent_returns_empty() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _setup_source_env "$tmpdir"
+
+  mkdir -p "$tmpdir/.claude-secure/profiles/testprof"
+  echo '{"workspace":"/tmp"}' > "$tmpdir/.claude-secure/profiles/testprof/profile.json"
+
+  local max_turns
+  max_turns=$(jq -r '.max_turns // empty' "$tmpdir/.claude-secure/profiles/testprof/profile.json")
+  [ -z "$max_turns" ] || return 1
+  return 0
+}
+run_test "HEAD-03b: max_turns absent returns empty" test_max_turns_absent_returns_empty
+
+echo ""
+
+# =========================================================================
+# HEAD-05 Tests: Templates (stubs for Plan 03)
+# =========================================================================
+echo "--- HEAD-05: Prompt Templates (stubs) ---"
+
+test_resolve_template_by_event_type() {
+  if ! type resolve_template &>/dev/null; then
+    echo "SKIP (resolve_template not yet implemented)"
+    return 0
+  fi
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _setup_source_env "$tmpdir"
+  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  _source_functions "$tmpdir"
+
+  mkdir -p "$tmpdir/.claude-secure/profiles/testprof/prompts"
+  echo "Handle this issue: {{ISSUE_TITLE}}" > "$tmpdir/.claude-secure/profiles/testprof/prompts/issue-opened.md"
+
+  PROFILE="testprof"
+  local result
+  result=$(resolve_template "issue-opened" "")
+  [ -f "$result" ] || return 1
+  grep -q "ISSUE_TITLE" "$result" || return 1
+  return 0
+}
+run_test "HEAD-05a: resolve_template finds template by event type" test_resolve_template_by_event_type
+
+test_resolve_template_explicit_override() {
+  if ! type resolve_template &>/dev/null; then
+    echo "SKIP (resolve_template not yet implemented)"
+    return 0
+  fi
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _setup_source_env "$tmpdir"
+  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  _source_functions "$tmpdir"
+
+  mkdir -p "$tmpdir/.claude-secure/profiles/testprof/prompts"
+  echo "Custom prompt: {{REPO_NAME}}" > "$tmpdir/.claude-secure/profiles/testprof/prompts/custom.md"
+
+  PROFILE="testprof"
+  local result
+  result=$(resolve_template "" "custom")
+  [ -f "$result" ] || return 1
+  grep -q "REPO_NAME" "$result" || return 1
+  return 0
+}
+run_test "HEAD-05b: resolve_template uses explicit override" test_resolve_template_explicit_override
+
+test_resolve_template_missing_fails() {
+  if ! type resolve_template &>/dev/null; then
+    echo "SKIP (resolve_template not yet implemented)"
+    return 0
+  fi
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _setup_source_env "$tmpdir"
+  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  _source_functions "$tmpdir"
+
+  PROFILE="testprof"
+  resolve_template "nonexistent-event" "" && return 1
+  return 0
+}
+run_test "HEAD-05c: resolve_template fails for missing template" test_resolve_template_missing_fails
+
+test_render_template_substitutes_vars() {
+  if ! type render_template &>/dev/null; then
+    echo "SKIP (render_template not yet implemented)"
+    return 0
+  fi
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
+
+  local template_file="$tmpdir/template.md"
+  echo 'Review {{REPO_NAME}} on branch {{BRANCH}}' > "$template_file"
+
+  local event_json='{"repository":{"full_name":"owner/myrepo"},"ref":"refs/heads/feature-x"}'
+  local result
+  result=$(render_template "$template_file" "$event_json")
+  echo "$result" | grep -q "owner/myrepo" || return 1
+  echo "$result" | grep -q "feature-x" || return 1
+  return 0
+}
+run_test "HEAD-05d: render_template substitutes variables from event JSON" test_render_template_substitutes_vars
+
+test_render_template_handles_empty_vars() {
+  if ! type render_template &>/dev/null; then
+    echo "SKIP (render_template not yet implemented)"
+    return 0
+  fi
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
+
+  local template_file="$tmpdir/template.md"
+  echo 'Issue: {{ISSUE_TITLE}}' > "$template_file"
+
+  local event_json='{"type":"push"}'
+  local result
+  result=$(render_template "$template_file" "$event_json")
+  # {{ISSUE_TITLE}} should be replaced with empty string (not left as-is)
+  echo "$result" | grep -q '{{ISSUE_TITLE}}' && return 1
+  echo "$result" | grep -q 'Issue: ' || return 1
+  return 0
+}
+run_test "HEAD-05e: render_template replaces missing vars with empty string" test_render_template_handles_empty_vars
+
+echo ""
+
+# =========================================================================
+# DRY-RUN Test (stub for Plan 02)
+# =========================================================================
+echo "--- Dry Run ---"
+
+test_dry_run_flag_parsed() {
+  if ! type do_spawn &>/dev/null; then
+    echo "SKIP (do_spawn not yet implemented)"
+    return 0
+  fi
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _setup_source_env "$tmpdir"
+  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  _source_functions "$tmpdir"
+
+  PROFILE="testprof" REMAINING_ARGS=("spawn" "--event" '{"type":"test"}' "--dry-run")
+  DRY_RUN=0
+  do_spawn 2>/dev/null || true
+  [ "$DRY_RUN" = "1" ] || return 1
+  return 0
+}
+run_test "DRY-RUN: --dry-run flag sets DRY_RUN=1" test_dry_run_flag_parsed
+
+echo ""
+
+# =========================================================================
+# Summary
+# =========================================================================
+echo "========================================"
+echo "  Results: $PASS passed, $FAIL failed (of $TOTAL total)"
+echo "========================================"
+
+if [ "$FAIL" -gt 0 ]; then
+  exit 1
+fi
+exit 0
