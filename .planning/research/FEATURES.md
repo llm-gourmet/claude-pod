@@ -1,116 +1,206 @@
-# Feature Landscape
+# Feature Research
 
-**Domain:** Docker-based CLI security isolation for AI coding assistants
-**Researched:** 2026-04-08
-**Confidence:** MEDIUM (based on domain knowledge; WebSearch unavailable for verification)
+**Domain:** Headless/ephemeral CI agent mode for a security-isolated Claude Code wrapper
+**Researched:** 2026-04-11
+**Confidence:** MEDIUM-HIGH
 
-## Table Stakes
+## Feature Landscape
 
-Features users expect. Missing = product feels incomplete or untrustworthy.
+### Table Stakes (Users Expect These)
+
+Features that any headless agent mode must have. Missing these = the feature is broken or unusable.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| Docker network isolation | Without it, there is no security boundary -- the entire premise fails. Users choosing a security wrapper expect hard isolation, not software-only guardrails. | Medium | Docker Compose with `internal: true` networks. Well-understood pattern. Main complexity is bridging the proxy correctly. |
-| Secret redaction in LLM traffic | The primary threat model: secrets in `.env` files enter Claude's context and get sent to Anthropic. If the proxy does not strip them, users have zero protection against the most common leak vector. | High | Bidirectional: redact outbound, restore inbound. Must handle partial matches, encoding variants (base64, URL-encoded), and multi-line values. Phase 1 can do exact-match only. |
-| Domain allowlist / whitelist | Users need to control which external services Claude can reach. Without allowlists, the tool either blocks everything (unusable) or allows everything (insecure). A configurable allowlist is the minimum viable control surface. | Low | JSON config file mapping allowed domains. Simple to implement, critical for usability. |
-| PreToolUse hook interception | Claude Code's hook system is the only sanctioned integration point. Without hooking `Bash`, `WebFetch`, and `WebSearch` tool calls, there is no way to inspect and gate outbound requests before they execute. | Medium | Must parse tool call payloads, extract URLs/domains from bash commands (curl, wget, etc.), and make allow/deny decisions. Regex-based extraction is fragile but sufficient for MVP. |
-| Installer / setup script | Security tools that require manual multi-step setup get abandoned. Users expect `curl ... \| bash` or a single script that handles Docker check, container build, config generation, and Claude Code hook registration. | Medium | Must detect platform (Linux vs WSL2), check dependencies, set file permissions, and configure auth. The "last mile" that determines adoption. |
-| Call validation (call-ID registration) | Without validating that each outbound network call was authorized by the hook, a compromised or clever prompt could bypass the hook layer entirely (e.g., spawning a background process). The validator closes this gap. | High | HTTP registration endpoint + iptables rules. SQLite for call-ID storage. Single-use + time-limited tokens. This is the novel security layer. |
-| File permission hardening | If Claude (running as user) can modify the hook scripts, whitelist, or proxy config, it can disable its own security. Root-owned, read-only config is the baseline expectation for any security boundary. | Low | `chown root:root` + `chmod 444` on config/hooks. Simple but critical. Easy to forget during development. |
-| Platform support: Linux native + WSL2 | The target user (solo dev) commonly uses either native Linux or WSL2. Not supporting WSL2 eliminates a large portion of the target audience. | Medium | WSL2 has Docker Desktop or dockerd-in-WSL. iptables works in WSL2 but NFQUEUE does not -- the project already accounts for this. Test on both. |
+| Profile-based configuration (whitelist, .env, workspace per service) | Users managing multiple repos/services need isolated security contexts. Without this, a single whitelist leaks one service's secrets to another. | MEDIUM | Extends existing multi-instance pattern (`$CONFIG_DIR/instances/`). Each profile = directory with whitelist.json, .env, config.sh. Leverage existing `COMPOSE_PROJECT_NAME` isolation. |
+| Headless spawn with `-p` flag and `--dangerously-skip-permissions` | Claude Code's official headless mode. This is the documented way to run non-interactive tasks. Anything else would be fighting the tool. | LOW | Already used in existing CLI (`docker compose exec -it claude claude --dangerously-skip-permissions`). Change to `-p "prompt" --dangerously-skip-permissions --output-format json`. Drop `-it` for non-interactive. |
+| Ephemeral lifecycle (spawn, execute, teardown) | Headless agents that leave containers running waste resources and risk stale state. GitHub Actions, Copilot cloud agents, and every CI system uses ephemeral environments. | MEDIUM | `docker compose up -d && docker compose exec claude claude -p "..." && docker compose down`. Key: capture exit code and output before teardown. |
+| GitHub webhook signature verification (HMAC-SHA256) | Security product accepting unverified webhooks is a contradiction. GitHub sends `X-Hub-Signature-256` header with every delivery. All webhook receivers verify this. | LOW | `openssl dgst -sha256 -hmac "$WEBHOOK_SECRET"` against raw payload body, constant-time compare. Well-documented pattern in GitHub docs. |
+| Webhook event routing (Issue, Push, CI Failure) | Users expect different events to trigger different agent behaviors. A push-to-main handler should not run the same prompt as an issue handler. | MEDIUM | Parse `X-GitHub-Event` header + payload `action` field. Route to handler scripts: `handlers/issues.sh`, `handlers/push.sh`, `handlers/workflow_run.sh`. Each handler constructs the appropriate `-p` prompt. |
+| Structured output capture (JSON) | Headless mode output must be machine-parseable to extract results for reporting. Claude Code `--output-format json` returns `result`, `cost_usd`, `duration_ms`, `num_turns`, `session_id`. | LOW | Already supported by Claude Code. Use `--output-format json` and pipe through `jq`. |
+| Result reporting to documentation repo | The whole point of headless agents is producing output. Users need results written somewhere persistent and reviewable. A docs repo is the stated target. | MEDIUM | `git clone docs-repo`, write markdown report, `git add && git commit && git push`. Must handle: repo auth (deploy key or PAT in profile .env), conflict resolution (pull before push), and structured report format. |
+| Execution logging and audit trail | Security product must log what the agent did, what it cost, and whether it succeeded. Extends existing structured logging. | LOW | Existing `LOG_DIR` and JSONL logging infrastructure. Add event metadata (webhook ID, GitHub event type, commit SHA) to log entries. |
+| Concurrent execution safety | Multiple webhooks can arrive simultaneously. Two agents touching the same workspace = corruption. | MEDIUM | Each headless spawn gets a unique `COMPOSE_PROJECT_NAME` (e.g., `claude-headless-{event-id}`). Ephemeral workspace cloned fresh per run. No shared mutable state between runs. |
 
-## Differentiators
+### Differentiators (Competitive Advantage)
 
-Features that set the product apart from generic Docker isolation or manual security practices. Not expected, but valued.
+Features that distinguish claude-secure's headless mode from "just run `claude -p` in a GitHub Action."
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| Bidirectional secret placeholder system | Most redaction tools strip secrets one-way. Restoring placeholders in Anthropic responses so Claude can use real values in tool calls (e.g., `curl -H "Authorization: Bearer $API_KEY"`) is unique and enables practical workflows that pure redaction breaks. | High | Must maintain a per-request mapping of placeholder-to-secret. Handle edge cases: partial matches in code blocks, secrets that appear in non-sensitive contexts. |
-| Defense-in-depth architecture (4 layers) | Competitors use 1-2 layers. Having Docker isolation + hook validation + proxy redaction + network-level call validation provides genuine defense-in-depth. Each layer catches what others miss. Marketing gold and actual security. | High | Complexity is in the integration, not individual layers. Each layer must fail-closed: if the validator is down, all calls are blocked. |
-| Single-use time-limited call-IDs | Prevents replay attacks. Even if an attacker observes a valid call-ID, it expires in 10 seconds and cannot be reused. This is uncommon in developer tools and signals serious security thinking. | Medium | SQLite with TTL-based cleanup. Must handle clock skew in containers (use monotonic time or container-synced clocks). |
-| OAuth token as primary auth | Most Docker wrappers assume API key auth. Supporting OAuth (via `claude setup-token`) matches how subscription Claude Code users actually authenticate, reducing friction. | Medium | Must intercept and forward OAuth tokens correctly through the proxy. Token refresh is Phase 3 but basic flow must work. |
-| Hot-reload whitelist config | Proxy reads secrets fresh from config on each request. No container restart needed when adding/removing secrets or domains. This is a significant DX advantage for iterative development. | Low | Already designed into the architecture. Just avoid caching config in memory beyond a single request cycle. |
-| Structured audit logging | Recording every tool call, allow/deny decision, redaction event, and call-ID lifecycle creates a verifiable audit trail. Useful for security review, debugging, and understanding what Claude actually did. | Medium | JSON-structured logs to stdout/file. Phase 1: basic logging. Phase 3: dashboard/query tool. |
-| Integration test suite for security claims | A test suite that actually demonstrates blocked vs allowed calls in Docker gives users confidence the security works. Most security tools lack this -- users must trust the docs. | Medium | Docker-based tests that attempt exfiltration, verify redaction, test expired call-IDs. These double as regression tests. |
+| Security-isolated headless execution | The entire point of claude-secure. GitHub Actions runs Claude Code on a shared runner with full network access. claude-secure runs it in a network-isolated container where secrets are redacted from LLM context. No other headless Claude Code setup provides this. | LOW (already built) | The four-layer security architecture (Docker isolation, hook validation, proxy redaction, iptables enforcement) applies identically to headless mode. This is the core differentiator and it is already implemented. |
+| Per-profile security boundaries | Each service gets its own whitelist of allowed domains, its own secrets, its own workspace. Profile A's GitHub token cannot be seen by profile B's agent. | MEDIUM | Directory-based: `profiles/service-a/whitelist.json`, `profiles/service-a/.env`. Maps 1:1 to existing instance config pattern. The webhook listener routes events to the correct profile based on repo. |
+| Cost tracking per event | Claude Code returns `cost_usd` in JSON output. Aggregate by profile, event type, time period. Solo devs care about API costs. | LOW | Parse `cost_usd` from `--output-format json` output. Append to a costs.jsonl file per profile. Simple `jq` aggregation for reporting. |
+| Webhook replay / manual trigger | Re-run a failed event without waiting for GitHub to re-deliver. Useful for debugging handler prompts. | LOW | Store raw webhook payloads in `$LOG_DIR/webhooks/`. Add `claude-secure headless replay <event-id>` command. Feeds stored payload back through the handler. |
+| Prompt templates with variable substitution | Handler scripts construct prompts from templates with GitHub event data injected. Enables non-developer customization of agent behavior. | LOW | Template files in `profiles/service-a/prompts/issue.md` with `{{ISSUE_TITLE}}`, `{{ISSUE_BODY}}`, `{{REPO_NAME}}` placeholders. `envsubst` or simple `sed` replacement. |
+| Health monitoring and failure alerting | Webhook listener uptime, agent failure rate, last successful run. Solo dev needs to know if the system stopped working. | MEDIUM | systemd watchdog integration (`WatchdogSec=`), failure count tracking in SQLite or flat file, optional webhook to a notification service (Slack/Discord/email). |
 
-## Anti-Features
+### Anti-Features (Commonly Requested, Often Problematic)
 
-Features to explicitly NOT build. These would add complexity, expand attack surface, or mislead users about security guarantees.
-
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| Streaming SSE proxy support (Phase 1) | Streaming requires fundamentally different redaction logic -- you cannot redact a secret that arrives across multiple SSE chunks. Buffered mode is correct for security; streaming is a performance optimization that weakens the security model. | Use buffered request/response in Phase 1. Document the latency tradeoff. Streaming in Phase 2 only after chunk-aware redaction is designed. |
-| Automatic secret detection / scanning | Heuristic secret detection (regex for API key patterns, entropy analysis) produces false positives and false negatives. Users will either over-trust it or be annoyed by it. Explicit secret registration is more honest and reliable. | Require users to explicitly register secrets in the whitelist config. Clear ownership of what is protected. |
-| macOS support | Docker Desktop on macOS has different networking (no iptables, different bridge model). Supporting it doubles the test matrix and requires alternative network enforcement. The target user is Linux/WSL2. | Document as out of scope. If demand exists, add as a separate milestone with its own architecture. |
-| GUI / web dashboard (Phase 1) | A dashboard adds a web server to the security boundary, expanding attack surface. It also implies ongoing monitoring, which is not the use case (solo dev, ephemeral sessions). | CLI-first. Structured logs that can be queried with `jq`. Dashboard in Phase 3 if validated. |
-| Multi-tenant / multi-user support | This is a solo developer tool. Multi-user adds auth, RBAC, session isolation, and turns a simple wrapper into a platform. | Single-user. One workspace, one set of secrets, one Claude instance. |
-| NFQUEUE / kernel module packet inspection | WSL2 does not reliably support NFQUEUE. Requiring kernel modules makes installation fragile and platform-dependent. | iptables + HTTP validator achieves the same goal without kernel dependencies. Already decided in PROJECT.md. |
-| Secret detection in `@file` references | Claude can reference files via `@file` syntax. Scanning those for secrets before they reach Anthropic requires intercepting Claude Code's file reading, which is not exposed via hooks. | Document as known gap and accepted risk. Advise users not to `@file` sensitive configs. |
-| Automatic updates / self-updating | Auto-update mechanisms in security tools are themselves attack vectors. A compromised update channel could disable all protections. | Manual updates via git pull + rebuild. Version pinning. Users control when they update. |
-| Browser-based secret entry UI | Adding a web interface for entering secrets expands the attack surface and adds a dependency. | Secrets go in a JSON config file edited with any text editor. Simple, auditable, no extra attack surface. |
+| Feature | Why Requested | Why Problematic | Alternative |
+|---------|---------------|-----------------|-------------|
+| Auto-merge PRs created by agent | "Let the agent handle everything end-to-end" | Security product should never auto-merge code changes. Humans must review agent output. GitHub Copilot coding agent explicitly does not auto-merge. Industry-wide consensus for AI-generated code. | Write results to docs repo (read-only output). For code changes, create PRs that require human review. |
+| Real-time streaming webhook responses | "Show agent progress in GitHub issue comments as it works" | Streaming adds massive complexity (SSE/WebSocket from container to webhook listener to GitHub API). Claude Code's `stream-json` format exists but parsing it in real-time from Docker exec is fragile. Progress updates require GitHub API calls mid-execution. | Post a single summary comment when the agent completes. Include duration and cost. If users need progress, they can tail logs. |
+| Dynamic prompt editing via GitHub comments | "Let users refine the agent's task by commenting on the issue" | Turns a one-shot headless execution into an interactive conversation managed via webhook polling. Race conditions, state management, and security implications (any commenter can inject prompts). | One-shot execution with well-crafted prompt templates. If the result is wrong, fix the template and replay. |
+| Multi-repo orchestration from single webhook | "One event triggers agents across multiple repos" | Explosion of concurrent containers, complex dependency ordering, partial failure handling. Way beyond MVP scope. | One profile = one repo. If repos are related, use separate webhook subscriptions with separate profiles. |
+| Agent-to-agent communication | "Have the code review agent talk to the docs agent" | Claude Code's subagent/teammate model is designed for within-session delegation, not cross-container IPC. Building a message bus between ephemeral containers is infrastructure engineering, not security tooling. | Sequential execution: first agent writes output, second agent reads it as input. Chain via handler scripts. |
+| Persistent agent sessions (resume across events) | "Continue the conversation from the last push event" | Ephemeral is the point. Persistent sessions accumulate context window bloat, stale assumptions, and make security boundaries fuzzy. Claude Code's `--resume` exists but defeats the isolation model. | Fresh session per event. Include relevant context in the prompt (last commit messages, changed files). |
+| Web UI dashboard | "I want to see all events and results in a browser" | Massive scope expansion. Web framework, auth, frontend, hosting. Contradicts the solo-dev-on-a-server deployment model. | CLI commands (`claude-secure headless status`, `claude-secure headless logs`) and structured JSONL that tools like `jq` can query. |
 
 ## Feature Dependencies
 
 ```
-Docker Network Isolation
-  --> Anthropic Proxy (requires isolated network to force traffic through proxy)
-    --> Secret Redaction (runs inside proxy)
-    --> Placeholder Restoration (runs inside proxy)
-  --> Call Validator (requires isolated network to enforce iptables rules)
-    --> SQLite Call-ID Store (validator dependency)
-    --> iptables Rules (validator dependency)
+[Profile System]
+    |
+    +--requires--> [Existing Multi-Instance Infrastructure]
+    |                   (already built: COMPOSE_PROJECT_NAME, instance dirs)
+    |
+    +--enables--> [Webhook Event Routing]
+    |                 (routes events to correct profile based on repo)
+    |
+    +--enables--> [Headless Spawn]
+                      |
+                      +--requires--> [Existing Docker/Security Layers]
+                      |                   (already built: proxy, validator, hooks)
+                      |
+                      +--enables--> [Ephemeral Lifecycle]
+                      |                 (spawn + execute + teardown)
+                      |
+                      +--enables--> [Result Reporting]
+                                        |
+                                        +--requires--> [Structured Output Capture]
+                                        |                   (--output-format json)
+                                        |
+                                        +--writes-to--> [Documentation Repo]
 
-PreToolUse Hook
-  --> Call-ID Registration (hook registers call-IDs with validator before allowing calls)
-  --> Domain Allowlist Check (hook checks whitelist before allowing calls)
-  --> Call Validator (hook must register before validator will allow network traffic)
-
-Installer Script
-  --> Docker Network Isolation (installer sets up Docker Compose)
-  --> PreToolUse Hook (installer registers hooks with Claude Code)
-  --> File Permission Hardening (installer sets permissions)
-  --> Auth Configuration (installer configures OAuth/API key)
-
-Whitelist Config (JSON)
-  --> Secret Redaction (proxy reads secret values from config)
-  --> Domain Allowlist Check (hook reads allowed domains from config)
-  --> Placeholder Restoration (proxy reads placeholder mappings from config)
+[Webhook Listener]
+    |
+    +--requires--> [GitHub Signature Verification]
+    |
+    +--requires--> [Profile System]
+    |                   (to know which profile handles which repo)
+    |
+    +--triggers--> [Event Handlers]
+                       |
+                       +--constructs--> [Headless Spawn]
 ```
 
-## MVP Recommendation
+### Dependency Notes
 
-Prioritize (in order):
+- **Profile System requires Multi-Instance Infrastructure:** The existing `$CONFIG_DIR/instances/` pattern with per-instance whitelist.json, .env, and config.sh is the exact same pattern needed for profiles. Profiles are essentially "instances designed for headless use" with additional metadata (repo URL, event types to handle).
+- **Webhook Listener requires Profile System:** The listener must know which profile to activate when a webhook arrives for a specific repository. Profile config includes the repo-to-profile mapping.
+- **Headless Spawn requires existing security layers:** The proxy, validator, hooks, and Docker network isolation all work unchanged. Headless mode just changes how Claude Code is invoked inside the container (interactive to `-p` flag).
+- **Result Reporting requires Structured Output Capture:** The JSON output from Claude Code (`result`, `cost_usd`, `session_id`) is the raw material for the report written to the docs repo.
+- **Ephemeral Lifecycle enables concurrent execution:** Because each run creates and destroys its own container set, multiple events can execute in parallel without workspace conflicts.
 
-1. **Docker Compose with isolated network** -- foundational; everything else depends on this
-2. **Whitelist config format (JSON)** -- defines the data model that proxy and hook consume
-3. **Anthropic proxy with secret redaction + placeholder restoration** -- addresses the primary threat (secrets to Anthropic)
-4. **PreToolUse hook with domain checking + call-ID registration** -- addresses the secondary threat (exfiltration via tool calls)
-5. **Call validator with SQLite + iptables** -- closes the bypass gap (unauthorized network calls)
-6. **Installer script** -- adoption depends on setup UX
-7. **Integration tests for security claims** -- proves the system works, prevents regressions
+## MVP Definition
 
-Defer:
+### Launch With (v2.0)
 
-- **Streaming proxy:** Phase 2. Buffered mode is correct and simpler. Latency is acceptable for security.
-- **`@file` secret scanning:** Phase 2 enhancement. Known gap, low probability of accidental use.
-- **Audit log dashboard:** Phase 3. Structured JSON logs are sufficient for solo dev.
-- **OAuth token refresh:** Phase 3. Manual token refresh is acceptable short-term.
-- **`claude-secure config` CLI:** Phase 3. Editing JSON directly is fine for technical users.
-- **Multi-workspace support:** Phase 3. One project at a time is the MVP workflow.
+Minimum viable headless agent mode -- what is needed to validate the concept works.
 
-## Complexity Assessment
+- [ ] Profile system (profile directory with whitelist.json, .env, config.sh, handler configs) -- foundation for all other features
+- [ ] Webhook listener as systemd service (receive GitHub webhooks, verify HMAC-SHA256 signature) -- entry point for all automation
+- [ ] Event routing to handler scripts (Issues opened, Push to main, CI workflow_run failure) -- the three stated event types
+- [ ] Headless spawn (construct prompt from event data, run `claude -p` in security-isolated container) -- core execution
+- [ ] Ephemeral lifecycle (fresh workspace clone, execute, capture output, teardown containers) -- clean state per run
+- [ ] Result reporting (write markdown report to documentation repo, git push) -- output channel
+- [ ] Execution audit logging (event metadata, duration, cost, success/failure in JSONL) -- accountability
 
-| Feature Group | Estimated Complexity | Risk Level | Notes |
-|---------------|---------------------|------------|-------|
-| Docker Compose + networking | Medium | Low | Well-documented patterns. Main risk: WSL2 Docker networking edge cases. |
-| Anthropic proxy (redact/restore) | High | Medium | Bidirectional secret handling has subtle edge cases. Must handle request bodies, headers, and response bodies. Encoding variants add complexity. |
-| PreToolUse hook | Medium | Medium | Parsing bash commands for URLs is inherently fragile. Must handle pipes, subshells, variable expansion. Good-enough extraction is acceptable. |
-| Call validator + iptables | High | High | iptables rule management from a container is non-trivial. Must handle rule cleanup on shutdown. SQLite concurrency with short-lived call-IDs needs careful locking. |
-| Installer | Medium | Medium | Must handle many platform variations. WSL2 detection, Docker version checks, permission escalation. Error messages must be excellent. |
-| Integration tests | Medium | Low | Docker-in-Docker or sibling containers. Test design is straightforward; infrastructure setup takes time. |
+### Add After Validation (v2.x)
+
+Features to add once core headless mode is working and proven useful.
+
+- [ ] Cost tracking aggregation (per-profile, per-event-type summaries) -- trigger: after running for a week and wanting to understand costs
+- [ ] Webhook replay / manual trigger -- trigger: first time a handler prompt needs debugging
+- [ ] Prompt templates with variable substitution -- trigger: when handler scripts become unwieldy with inline prompts
+- [ ] Health monitoring with systemd watchdog -- trigger: first time the webhook listener silently dies
+- [ ] `claude-secure headless status` CLI command -- trigger: needing to check system state without SSH
+
+### Future Consideration (v3+)
+
+- [ ] Multi-event chaining (output of one event feeds into next) -- defer: need to validate single-event model first
+- [ ] PR creation for code change events (not just docs reporting) -- defer: requires careful security review of agent writing to source repos
+- [ ] Notification integrations (Slack/Discord on failure) -- defer: not needed for solo dev initially
+
+## Feature Prioritization Matrix
+
+| Feature | User Value | Implementation Cost | Priority | Depends On |
+|---------|------------|---------------------|----------|------------|
+| Profile system | HIGH | MEDIUM | P1 | Existing multi-instance |
+| Webhook listener (systemd) | HIGH | MEDIUM | P1 | None (host process) |
+| GitHub signature verification | HIGH | LOW | P1 | Webhook listener |
+| Event routing (3 event types) | HIGH | MEDIUM | P1 | Webhook listener, profiles |
+| Headless spawn (`-p` flag) | HIGH | LOW | P1 | Profile system, existing security layers |
+| Ephemeral lifecycle | HIGH | MEDIUM | P1 | Headless spawn |
+| Structured output capture | HIGH | LOW | P1 | Headless spawn |
+| Result reporting to docs repo | HIGH | MEDIUM | P1 | Structured output capture |
+| Execution audit logging | MEDIUM | LOW | P1 | Existing logging infra |
+| Concurrent execution safety | HIGH | MEDIUM | P1 | Ephemeral lifecycle |
+| Cost tracking | MEDIUM | LOW | P2 | Structured output capture |
+| Webhook replay | MEDIUM | LOW | P2 | Webhook listener, logging |
+| Prompt templates | MEDIUM | LOW | P2 | Event handlers |
+| Health monitoring | MEDIUM | MEDIUM | P2 | Webhook listener |
+| CLI status command | LOW | LOW | P3 | Logging, profiles |
+
+**Priority key:**
+- P1: Must have for v2.0 launch
+- P2: Should have, add in v2.x when triggered by real usage
+- P3: Nice to have, future consideration
+
+## Competitor Feature Analysis
+
+| Feature | GitHub Actions + Claude Code | GitHub Copilot Coding Agent | Buildkite + Claude Code | claude-secure Headless |
+|---------|------------------------------|----------------------------|-------------------------|------------------------|
+| Network isolation | None (shared runner) | None (GitHub-managed) | None (pipeline runner) | Full (Docker internal network, iptables, proxy redaction) |
+| Secret protection from LLM | None (secrets in env, visible to Claude) | Unknown (GitHub-managed) | None (secrets in env) | Proxy-level redaction of all secrets from LLM context |
+| Webhook trigger | Native (workflow dispatch) | Native (issue assignment) | Native (pipeline trigger) | Custom listener (systemd service) |
+| Per-repo config | workflow YAML per repo | AGENTS.md per repo | Pipeline YAML per repo | Profile directory per service (whitelist, secrets, workspace) |
+| Ephemeral environment | Yes (runner lifecycle) | Yes (GitHub-managed VM) | Yes (pipeline step) | Yes (Docker Compose up/down per event) |
+| Result output | GitHub Actions artifacts, PR comments | PR with changes | Pipeline artifacts | Markdown report to docs repo |
+| Cost visibility | GitHub billing (no per-run breakdown) | Included in Copilot subscription | Buildkite billing | Per-event cost from Claude Code JSON output |
+| Self-hosted | Possible (self-hosted runners) | No | Yes | Yes (designed for it) |
+
+**Key insight:** The competitive advantage is not in the webhook/event handling (that is commodity infrastructure). The advantage is running headless Claude Code with the same four-layer security isolation that interactive mode provides. No other solution redacts secrets from the LLM context in headless/CI scenarios.
+
+## Implementation Notes for Existing Infrastructure
+
+### What can be reused from v1.0
+
+| v1.0 Component | Reuse in v2.0 | Adaptation Needed |
+|----------------|---------------|-------------------|
+| `docker-compose.yml` | Directly | Add override file or env vars for headless command instead of `sleep infinity` + interactive exec |
+| Proxy (Node.js) | As-is | None -- buffered redaction works identically for headless requests |
+| Validator (Python + iptables) | As-is | None -- call-ID registration works identically |
+| PreToolUse hooks | As-is | None -- hook intercepts tool calls regardless of interactive/headless mode |
+| `bin/claude-secure` CLI | Extended | Add `headless` subcommand family alongside existing commands |
+| Multi-instance infra | Pattern reused | Profiles build on same directory structure, add repo mapping + handler config |
+| Structured logging | Extended | Add event metadata fields (webhook ID, event type, repo) |
+| Instance auto-creation | Pattern reused | Profiles need non-interactive creation (no `read -rp` prompts) |
+
+### What must be built new
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| Webhook listener | `webhook/` or host-level script | systemd service receiving HTTP POST from GitHub |
+| Event handlers | `handlers/issues.sh`, `handlers/push.sh`, `handlers/ci-failure.sh` | Parse event payload, construct prompt, invoke headless spawn |
+| Profile config schema | `profiles/*/` directories | Extended instance config with repo URL, event types, handler selection |
+| Headless spawn script | `bin/claude-secure-headless` or subcommand | Non-interactive: clone workspace, `docker compose up`, `claude -p`, capture output, teardown |
+| Result reporter | `lib/report.sh` | Clone docs repo, write report, commit and push |
+| Installer additions | `install.sh` | Webhook listener systemd unit installation, profile setup |
 
 ## Sources
 
-- Project context: `/home/igor9000/claude-secure/.planning/PROJECT.md`
-- Domain knowledge: Docker networking, iptables, Claude Code hooks system, container security patterns
-- Confidence note: WebSearch was unavailable. Findings are based on training data knowledge of Docker isolation patterns, AI coding assistant security concerns, and the specific project architecture described in PROJECT.md. The feature categorization is HIGH confidence for table stakes (well-established security patterns) and MEDIUM confidence for differentiators (competitive landscape could not be verified against current tools).
+- [Claude Code Headless Mode - Official Docs](https://code.claude.com/docs/en/headless) -- HIGH confidence, official Anthropic documentation
+- [Claude Code Permission Modes](https://code.claude.com/docs/en/permission-modes) -- HIGH confidence, official docs
+- [Anthropic Auto Mode Engineering Blog](https://www.anthropic.com/engineering/claude-code-auto-mode) -- HIGH confidence, official blog
+- [GitHub Agentic Workflows Technical Preview](https://github.blog/changelog/2026-02-13-github-agentic-workflows-are-now-in-technical-preview/) -- HIGH confidence, official GitHub
+- [GitHub Copilot Coding Agent](https://docs.github.com/copilot/concepts/agents/coding-agent/about-coding-agent) -- HIGH confidence, official GitHub docs
+- [GitHub Webhook Signature Verification](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries) -- HIGH confidence, official GitHub docs
+- [adnanh/webhook - lightweight webhook server](https://github.com/adnanh/webhook) -- HIGH confidence, widely-used open source tool
+- [Buildkite Claude Code Review Bot](https://github.com/buildkite-agentic-examples/github-code-review-bot) -- MEDIUM confidence, community example
+- [GitLab Copilot Coding Agent pattern](https://github.com/satomic/gitlab-copilot-coding-agent) -- MEDIUM confidence, community example
+
+---
+*Feature research for: claude-secure v2.0 headless agent mode*
+*Researched: 2026-04-11*
