@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
-milestone_name: Headless Agent Mode
-status: planning
-stopped_at: Phase 12 context gathered
-last_updated: "2026-04-11T20:44:24.290Z"
-last_activity: 2026-04-11 -- Roadmap created for v2.0 milestone
+milestone: v1.0
+milestone_name: milestone
+status: v1.0 milestone shipped 2026-04-11
+stopped_at: Completed 12-01-PLAN.md
+last_updated: "2026-04-11T21:21:24.066Z"
+last_activity: 2026-04-11
 progress:
-  total_phases: 6
+  total_phases: 1
   completed_phases: 0
   total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 100
 ---
 
 # Project State
@@ -21,22 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** v2.0 Headless Agent Mode -- Phase 12 (Profile System) ready to plan
+**Current focus:** Phase 12 -- profile-system (v2.0)
 
 ## Current Position
 
-Phase: 12 of 17 (Profile System) -- first phase of v2.0
-Plan: --
-Status: Ready to plan
-Last activity: 2026-04-11 -- Roadmap created for v2.0 milestone
+Phase: 12 (profile-system) -- EXECUTING
+Plan: 1 of 2 complete
+Status: Executing Phase 12
+Last activity: 2026-04-11 -- Completed 12-01
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█████░░░░░] 50% (1/2 plans)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 0 (v2.0)
+- Total plans completed: 0
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -52,6 +52,21 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: -
 
 *Updated after each plan completion*
+| Phase 01 P01 | 4min | 3 tasks | 10 files |
+| Phase 01 P02 | 4min | 2 tasks | 1 files |
+| Phase 02-call-validation P01 | 2min | 2 tasks | 3 files |
+| Phase 02-call-validation P02 | 1min | 1 tasks | 1 files |
+| Phase 02-call-validation P03 | 10min | 2 tasks | 4 files |
+| Phase 03-secret-redaction P01 | 1min | 2 tasks | 2 files |
+| Phase 03-secret-redaction P02 | 3min | 2 tasks | 2 files |
+| Phase 04 P01 | 2min | 2 tasks | 2 files |
+| Phase 04 P02 | 2min | 1 tasks | 1 files |
+| Phase 07 P01 | 1min | 2 tasks | 3 files |
+| Phase 07 P02 | 2min | 1 tasks | 1 files |
+| Phase 08 P01 | 2min | 2 tasks | 1 files |
+| Phase 09 P03 | 2min | 1 tasks | 1 files |
+| Phase 11-milestone-cleanup P01 | 1min | 3 tasks | 3 files |
+| Phase 12 P01 | 5min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -60,24 +75,59 @@ Progress: [░░░░░░░░░░] 0%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- [Roadmap v2.0]: Six phases following dependency chain: Profile System -> Headless CLI + Webhook Listener (parallel) -> Event Handlers -> Result Channel -> Hardening
-- [Roadmap v2.0]: Phase 13 and 14 can proceed in parallel since both depend only on Phase 12
-- [Research]: Claude Code `-p` flag via `docker compose exec -T` is the only correct headless integration point (SDK bypasses security layers)
-- [Research]: Profile resolution must fail closed -- no fallback to default profile
-- [Research]: Known bug #7263 (empty output with large stdin) needs verification at Phase 13
+- [Roadmap]: Five phases following service dependency chain (infra -> validator -> proxy -> installer -> tests)
+- [Roadmap]: Phases 2 and 3 both depend on Phase 1 but are independent of each other
+- [Phase 01]: Node.js 22 LTS used instead of 20 (EOL April 2026)
+- [Phase 01]: Non-root claude user added (Claude Code refuses root execution)
+- [Phase 01]: Settings.json at /etc/claude-secure/ with symlink to avoid volume shadowing
+- [Phase 01]: Node.js used for proxy connectivity test (no curl in node:22-slim)
+- [Phase 01]: Whitelist read-only verified via Docker mount RW flag (bind-mount shows host UID)
+- [Phase 02-call-validation]: Shared network namespace via network_mode: service:claude for iptables enforcement
+- [Phase 02-call-validation]: iptables comment module with fallback for call-ID rule tracking
+- [Phase 02-call-validation]: Exit 0 with JSON permissionDecision deny for blocking (not exit 2) per verified Claude Code protocol
+- [Phase 02-call-validation]: Removed dns: 127.0.0.1 from docker-compose.yml -- internal network blocks external DNS forwarding, setting broke validator resolution
+- [Phase 02-call-validation]: Validator gracefully degrades when DNS fails: stores call-ID without iptables rule (defense-in-depth)
+- [Phase 03-secret-redaction]: readFileSync per request for whitelist hot-reload, longest-first replacement ordering, accept-encoding stripped to prevent compressed responses
+- [Phase 03-secret-redaction]: Protocol-aware transport in proxy (http vs https) for testability; mock upstream pattern via node one-liner inside container
+- [Phase 04]: Source guard in install.sh for testability; whitelist symlink for user customization; set -a auto-export in CLI wrapper
+- [Phase 04]: 12 tests covering 9 requirement IDs with subshell isolation and temp dir cleanup
+- [Phase 07]: env_file fallback to /dev/null when SECRETS_FILE unset for graceful degradation
+- [Phase 07]: Simpler ENV-04 test: verify proxy has secret + whitelist readable (full redaction tested by test-phase3.sh)
+- [Phase 08]: All 10 dev packages in single apt-get layer alongside existing 4 packages
+- [Phase 09]: DNS validation tested via regex extraction rather than sourcing full CLI
+- [Phase quick-260411-mre]: Replicated pre-push hook test execution pattern directly in run-tests.sh for manual use
+- [Phase 11-milestone-cleanup]: No logic changes to validator -- docstring-only update to /validate endpoint
+- [Phase 12]: Source-only guard pattern (__CLAUDE_SECURE_SOURCE_ONLY) for test sourcing of bin/claude-secure
+- [Phase 12]: Profile validation uses return 1 (not exit 1) so functions are testable when sourced
+
+### Roadmap Evolution
+
+- Phase 7 added: Env-file strategy and secret loading for claude-secure
+- Phase 8 added: Container tooling — full dev environment for claude-secure
 
 ### Pending Todos
 
-- **iptables packet-level logging**: Add iptables `-j LOG` rules for DROP/ACCEPT and poll `dmesg`/`/proc/kmsg` from validator background thread to capture actual packet allow/block events into `iptables.jsonl`.
+- **iptables packet-level logging**: Add iptables `-j LOG` rules for DROP/ACCEPT and poll `dmesg`/`/proc/kmsg` from validator background thread to capture actual packet allow/block events into `iptables.jsonl`. Currently only HTTP-level events (registration, validation) are logged — silent drops at the network layer are invisible.
 
 ### Blockers/Concerns
 
-- [Research]: systemd in WSL2 requires `[boot] systemd=true` in `/etc/wsl.conf` -- installer should detect this (affects Phase 14)
-- [Research]: `--allowedTools` prefix match syntax needs empirical verification (affects Phase 13)
-- [Research]: Docker Compose `deploy.resources.limits` vs `mem_limit` -- verify with `docker inspect` (affects Phase 13)
+- [Research]: Claude Code hook response schema may have changed since training data cutoff -- verify against current docs before Phase 2
+- [Research]: iptables backend on WSL2 varies by distro/kernel -- validate in installer preflight (Phase 4)
+- ~~[Research]: Bidirectional placeholder restoration must be scoped to auth contexts only to prevent covert channel~~ — Addressed in Phase 3: proxy does full bidirectional replacement with longest-first ordering
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260409-2jp | Write a README.md for the claude-secure project | 2026-04-08 | 8fc85b6 | [260409-2jp-write-a-readme-md-for-the-claude-secure-](./quick/260409-2jp-write-a-readme-md-for-the-claude-secure-/) |
+| 260409-fof | Add Claude Code version update mechanism | 2026-04-09 | e780bf4 | [260409-fof-add-claude-code-version-update-mechanism](./quick/260409-fof-add-claude-code-version-update-mechanism/) |
+| 260410-fjy | Update README with logging features and verify update instructions | 2026-04-10 | c332c78 | [260410-fjy-update-readme-with-logging-features-and-](./quick/260410-fjy-update-readme-with-logging-features-and-/) |
+| 260410-ic4 | Log redacted secret mappings in anthropic proxy | 2026-04-10 | b77f0cc | [260410-ic4-log-redacted-secret-mappings-in-anthropi](./quick/260410-ic4-log-redacted-secret-mappings-in-anthropi/) |
+| 260411-mre | Add run-tests.sh script and document testing | 2026-04-11 | dbb11c5 | [260411-mre-add-run-tests-script-and-document-testin](./quick/260411-mre-add-run-tests-script-and-document-testin/) |
 
 ## Session Continuity
 
-Last session: 2026-04-11T20:44:24.286Z
-Stopped at: Phase 12 context gathered
-Resume file: .planning/phases/12-profile-system/12-CONTEXT.md
+Last session: 2026-04-11T21:21:24.064Z
+Last activity: 2026-04-11 - Completed quick task 260411-mre: Add run-tests script and document testing in README
+Stopped at: Completed 12-01-PLAN.md
+Resume file: None
