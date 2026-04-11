@@ -19,7 +19,7 @@ Requirements for headless agent mode. Each maps to roadmap phases.
 - [x] **HEAD-02**: Headless session uses `-p` with `--output-format json` and captures structured result (result, cost, duration, session_id)
 - [x] **HEAD-03**: User can set per-profile `--max-turns` budget to limit execution scope
 - [x] **HEAD-04**: Spawned instance is ephemeral -- containers are created, execute, and tear down automatically
-- [ ] **HEAD-05**: User can define prompt templates per profile with variable substitution (e.g. `{{ISSUE_TITLE}}`, `{{REPO_NAME}}`)
+- [x] **HEAD-05**: User can define prompt templates per profile with variable substitution (e.g. `{{ISSUE_TITLE}}`, `{{REPO_NAME}}`)
 
 ### Webhooks
 
@@ -85,7 +85,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HEAD-02 | Phase 13 | Complete |
 | HEAD-03 | Phase 13 | Complete |
 | HEAD-04 | Phase 13 | Complete |
-| HEAD-05 | Phase 13 | Pending |
+| HEAD-05 | Phase 13 | Complete |
 | HOOK-01 | Phase 14 | Pending |
 | HOOK-02 | Phase 14 | Pending |
 | HOOK-03 | Phase 15 | Pending |
