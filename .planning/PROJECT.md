@@ -33,7 +33,23 @@ No secret ever leaves the isolated environment uncontrolled — every outbound c
 
 ### Active
 
-(None — next milestone requirements TBD)
+- [ ] Profile system (profiles/service-A/) with own whitelist.json, .env, allowed domains, and workspace directory
+- [ ] Webhook listener as host process (systemd) receiving GitHub webhooks
+- [ ] Event handlers for Issues, Push to Main, CI Failure
+- [ ] Headless spawn: non-interactive Claude Code session per event (dangerously-skip-permissions)
+- [ ] Result channel: report written to separate documentation repo
+- [ ] Ephemeral instances: container teardown after task completion
+
+## Current Milestone: v2.0 Headless Agent Mode
+
+**Goal:** Event-driven, ephemeral claude-secure instances triggered via webhooks that autonomously handle tasks and write results to a documentation repo.
+
+**Target features:**
+- Profile system with per-service security context (whitelist, secrets, workspace)
+- Webhook listener as host process receiving GitHub events
+- Event handlers: Issues, Push to Main, CI Failure
+- Headless spawn with automatic teardown
+- Result reports written to dedicated documentation repo
 
 ### Out of Scope
 
@@ -95,4 +111,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-11 after v1.0 milestone completion*
+*Last updated: 2026-04-11 after v2.0 milestone start*

@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: MVP
-status: milestone_complete
-stopped_at: v1.0 milestone shipped
-last_updated: "2026-04-11T19:30:00.000Z"
+milestone: v2.0
+milestone_name: Headless Agent Mode
+status: defining_requirements
+stopped_at: null
+last_updated: "2026-04-11T22:00:00.000Z"
 last_activity: 2026-04-11
 progress:
-  total_phases: 11
-  completed_phases: 11
-  total_plans: 21
-  completed_plans: 21
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -21,16 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** v1.0 shipped — planning next milestone
+**Current focus:** v2.0 Headless Agent Mode — defining requirements
 
 ## Current Position
 
-Phase: All complete
-Plan: All complete
-Status: v1.0 milestone shipped 2026-04-11
-Last activity: 2026-04-11
-
-Progress: [████████████████████] 2/2 plans (100%)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-11 — Milestone v2.0 started
 
 ## Performance Metrics
 
