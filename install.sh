@@ -84,9 +84,9 @@ check_existing() {
       cp "$CONFIG_DIR/.env" "$CONFIG_DIR/.env.backup.$(date +%s)"
       log_info "Backed up existing root-level .env"
     fi
-    if [ -f "$CONFIG_DIR/instances/default/.env" ]; then
-      cp "$CONFIG_DIR/instances/default/.env" "$CONFIG_DIR/instances/default/.env.backup.$(date +%s)"
-      log_info "Backed up existing default instance .env"
+    if [ -f "$CONFIG_DIR/profiles/default/.env" ]; then
+      cp "$CONFIG_DIR/profiles/default/.env" "$CONFIG_DIR/profiles/default/.env.backup.$(date +%s)"
+      log_info "Backed up existing default profile .env"
     fi
   fi
 }
@@ -96,9 +96,9 @@ setup_directories() {
   chmod 700 "$CONFIG_DIR"
   log_info "Created config directory: $CONFIG_DIR"
 
-  # Create instances directory for multi-instance support
-  mkdir -p "$CONFIG_DIR/instances"
-  log_info "Created instances directory: $CONFIG_DIR/instances"
+  # Create profiles directory for profile-based configuration
+  mkdir -p "$CONFIG_DIR/profiles"
+  log_info "Created profiles directory: $CONFIG_DIR/profiles"
 
   # Create logs directory for service logging (LOG_DIR in docker-compose)
   # chmod 755: owner has full access, others can read/traverse.
@@ -112,8 +112,8 @@ setup_directories() {
 }
 
 setup_auth() {
-  local env_file="$CONFIG_DIR/instances/default/.env"
-  mkdir -p "$CONFIG_DIR/instances/default"
+  local env_file="$CONFIG_DIR/profiles/default/.env"
+  mkdir -p "$CONFIG_DIR/profiles/default"
 
   if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
     echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" > "$env_file"
@@ -182,11 +182,9 @@ setup_workspace() {
 PLATFORM="$PLATFORM"
 CONF
 
-  # Write instance config (WORKSPACE_PATH is per-instance)
-  mkdir -p "$CONFIG_DIR/instances/default"
-  cat > "$CONFIG_DIR/instances/default/config.sh" <<CONF
-WORKSPACE_PATH="$ws_path"
-CONF
+  # Write profile config (workspace is per-profile)
+  mkdir -p "$CONFIG_DIR/profiles/default"
+  jq -n --arg ws "$ws_path" '{"workspace": $ws}' > "$CONFIG_DIR/profiles/default/profile.json"
 
   log_info "Workspace: $ws_path"
 }
@@ -208,9 +206,9 @@ copy_app_files() {
   # Append APP_DIR to config.sh
   echo "APP_DIR=\"$app_dir\"" >> "$CONFIG_DIR/config.sh"
 
-  # Copy whitelist template to default instance
-  cp "$app_dir/config/whitelist.json" "$CONFIG_DIR/instances/default/whitelist.json"
-  log_info "Copied whitelist template to default instance"
+  # Copy whitelist template to default profile
+  cp "$app_dir/config/whitelist.json" "$CONFIG_DIR/profiles/default/whitelist.json"
+  log_info "Copied whitelist template to default profile"
 }
 
 build_images() {
@@ -283,7 +281,7 @@ main() {
 
   echo ""
   log_info "Installation complete!"
-  log_info "Run 'claude-secure --instance default' to start."
+  log_info "Run 'claude-secure --profile default' to start."
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
