@@ -26,7 +26,7 @@
 
 ### v2.0 Headless Agent Mode (In Progress)
 
-- [ ] **Phase 12: Profile System** - Per-service security context with isolated whitelist, secrets, workspace, and repo routing
+- [x] **Phase 12: Profile System** - Per-service security context with isolated whitelist, secrets, workspace, and repo routing (completed 2026-04-11)
 - [ ] **Phase 13: Headless CLI Path** - Non-interactive Claude Code execution with ephemeral container lifecycle
 - [ ] **Phase 14: Webhook Listener** - Systemd service receiving and validating GitHub webhooks
 - [ ] **Phase 15: Event Handlers** - Event-type dispatch with prompt templates and payload sanitization
@@ -138,7 +138,7 @@ Phases execute in numeric order: 12 -> 13 -> 14 -> 15 -> 16 -> 17
 | 9. Multi-Instance Support | v1.0 | 3/3 | Complete | 2026-04-10 |
 | 10. Automate Pre-push Tests | v1.0 | 2/2 | Complete | 2026-04-10 |
 | 11. Milestone Cleanup | v1.0 | 1/1 | Complete | 2026-04-11 |
-| 12. Profile System | v2.0 | 0/2 | Planning complete | - |
+| 12. Profile System | v2.0 | 0/2 | Complete    | 2026-04-11 |
 | 13. Headless CLI Path | v2.0 | 0/? | Not started | - |
 | 14. Webhook Listener | v2.0 | 0/? | Not started | - |
 | 15. Event Handlers | v2.0 | 0/? | Not started | - |
