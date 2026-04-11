@@ -1,64 +1,312 @@
 #!/bin/bash
 set -uo pipefail
 
-# Pre-push hook: run all integration tests before allowing push.
-# Requires Docker containers to be running.
+# Smart pre-push hook: selects relevant test suites based on changed files,
+# manages a dedicated claude-test instance, and provides structured failure output.
+#
+# Implements all 9 locked decisions (D-01 through D-09):
+#   D-01: Smart test selection via test-map.json
+#   D-02: RUN_ALL_TESTS=1 override
+#   D-03: Docs-only skip
+#   D-04: Dedicated claude-test instance
+#   D-05: Teardown on success only
+#   D-06: Local-only (no CI)
+#   D-07: Failure summary table with requirement IDs
+#   D-08: Full down/up between suites
+#   D-09: Test credentials via test.env
+#
 # Skip with: git push --no-verify
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+TEST_MAP="$REPO_ROOT/tests/test-map.json"
 TEST_DIR="$REPO_ROOT/tests"
+TEST_ENV="$REPO_ROOT/tests/test.env"
+RESULTS_FILE=$(mktemp)
+TEST_WHITELIST=$(mktemp)
+cp "$REPO_ROOT/config/whitelist.json" "$TEST_WHITELIST"
+trap 'rm -f "$RESULTS_FILE" "$TEST_WHITELIST"' EXIT
 
-echo "========================================"
-echo "  Pre-push: Running integration tests"
-echo "========================================"
-echo ""
+# --- Dependency checks ---
 
-# Check if Docker is available
+if ! command -v jq &>/dev/null; then
+  echo "FATAL: jq not found. Required for test selection."
+  echo "Push blocked. Use 'git push --no-verify' to skip."
+  exit 1
+fi
+
 if ! command -v docker &>/dev/null; then
   echo "FATAL: docker not found. Cannot run integration tests."
   echo "Push blocked. Use 'git push --no-verify' to skip."
   exit 1
 fi
 
-# Check if containers are running (quick check via compose)
-if ! docker compose ps --status running --format '{{.Service}}' 2>/dev/null | grep -q .; then
-  echo "FATAL: No running containers detected."
-  echo "Start an instance first: claude-secure --instance <name>"
-  echo "Push blocked. Use 'git push --no-verify' to skip."
-  exit 1
-fi
+# ============================================================
+# Section 1: Read refs from stdin (git pre-push protocol)
+# ============================================================
+# Each line: <local_ref> <local_sha> <remote_ref> <remote_sha>
+# Accumulate changed files across all refs being pushed.
 
-# Find and run all test scripts
-TESTS=("$TEST_DIR"/test-phase*.sh)
-if [ ${#TESTS[@]} -eq 0 ]; then
-  echo "WARNING: No test scripts found in $TEST_DIR"
+ZERO="0000000000000000000000000000000000000000"
+CHANGED_FILES=""
+REFS_READ=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  REFS_READ=1
+  if [ "$local_sha" = "$ZERO" ]; then
+    # Deleting remote branch -- nothing to test
+    continue
+  fi
+  if [ "$remote_sha" = "$ZERO" ]; then
+    # New remote branch -- diff against merge-base with main
+    BASE=$(git merge-base HEAD main 2>/dev/null || echo "")
+    if [ -n "$BASE" ]; then
+      FILES=$(git diff --name-only "$BASE" "$local_sha" 2>/dev/null)
+    else
+      # No common ancestor with main -- diff entire branch
+      FILES=$(git diff --name-only --diff-filter=ACMR "$local_sha" 2>/dev/null)
+    fi
+  else
+    FILES=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null)
+  fi
+  CHANGED_FILES="$CHANGED_FILES"$'\n'"$FILES"
+done
+
+# Handle empty stdin (no-op push)
+if [ "$REFS_READ" = "0" ]; then
   exit 0
 fi
 
-FAILED=0
-PASSED=0
+# Deduplicate and remove empty lines
+CHANGED_FILES=$(echo "$CHANGED_FILES" | sort -u | sed '/^$/d')
 
-for test_script in "${TESTS[@]}"; do
-  test_name="$(basename "$test_script" .sh)"
-  echo "--- $test_name ---"
-  if bash "$test_script"; then
-    ((PASSED++))
+if [ -z "$CHANGED_FILES" ]; then
+  echo "No changed files detected. Skipping tests."
+  exit 0
+fi
+
+# ============================================================
+# Section 2: RUN_ALL_TESTS override (D-02)
+# ============================================================
+
+SELECTED_TESTS=()
+
+if [ "${RUN_ALL_TESTS:-0}" = "1" ]; then
+  for t in "$TEST_DIR"/test-phase*.sh; do
+    [ -f "$t" ] && SELECTED_TESTS+=("$(basename "$t")")
+  done
+else
+
+  # ============================================================
+  # Section 3: Smart test selection (D-01, D-03)
+  # ============================================================
+
+  # Check if test-map.json exists; fall back to all tests if not
+  if [ ! -f "$TEST_MAP" ]; then
+    echo "WARNING: test-map.json not found. Running all tests as fallback."
+    for t in "$TEST_DIR"/test-phase*.sh; do
+      [ -f "$t" ] && SELECTED_TESTS+=("$(basename "$t")")
+    done
   else
-    ((FAILED++))
+    # Determine which files are skippable and which need testing
+    SKIP_PATTERNS=$(jq -r '.always_skip[]' "$TEST_MAP")
+    ALL_SKIPPED=true
+    TESTABLE_FILES=""
+
+    while IFS= read -r file; do
+      [ -z "$file" ] && continue
+      SKIPPED=false
+
+      while IFS= read -r pattern; do
+        [ -z "$pattern" ] && continue
+        # Directory prefix match (e.g., ".planning/")
+        if [[ "$pattern" == */ ]] && [[ "$file" == "$pattern"* ]]; then
+          SKIPPED=true
+          break
+        fi
+        # Glob match (e.g., "*.md")
+        if [[ "$pattern" == \** ]]; then
+          # Extract extension from glob pattern like "*.md"
+          ext="${pattern#\*}"
+          if [[ "$file" == *"$ext" ]]; then
+            SKIPPED=true
+            break
+          fi
+        fi
+        # Exact match
+        if [ "$file" = "$pattern" ]; then
+          SKIPPED=true
+          break
+        fi
+      done <<< "$SKIP_PATTERNS"
+
+      if [ "$SKIPPED" = "false" ]; then
+        ALL_SKIPPED=false
+        TESTABLE_FILES="$TESTABLE_FILES"$'\n'"$file"
+      fi
+    done <<< "$CHANGED_FILES"
+
+    # D-03: If all changed files match always_skip, allow push without tests
+    if [ "$ALL_SKIPPED" = "true" ]; then
+      echo "No testable changes detected. Skipping tests."
+      exit 0
+    fi
+
+    # Remove leading empty line
+    TESTABLE_FILES=$(echo "$TESTABLE_FILES" | sed '/^$/d')
+
+    # Match testable files against mappings to select test suites
+    MATCHED_TESTS=""
+    while IFS= read -r file; do
+      [ -z "$file" ] && continue
+      TESTS_FOR_FILE=$(jq -r --arg f "$file" '
+        .mappings[] | select(.paths[] as $p | $f | startswith($p)) | .tests[]
+      ' "$TEST_MAP")
+      MATCHED_TESTS="$MATCHED_TESTS"$'\n'"$TESTS_FOR_FILE"
+    done <<< "$TESTABLE_FILES"
+
+    # Deduplicate
+    MATCHED_TESTS=$(echo "$MATCHED_TESTS" | sort -u | sed '/^$/d')
+
+    if [ -z "$MATCHED_TESTS" ]; then
+      # Files changed but no mapping found -- run all tests as safety fallback
+      echo "WARNING: Changed files have no test mapping. Running all tests as fallback."
+      for t in "$TEST_DIR"/test-phase*.sh; do
+        [ -f "$t" ] && SELECTED_TESTS+=("$(basename "$t")")
+      done
+    else
+      while IFS= read -r test_name; do
+        [ -n "$test_name" ] && SELECTED_TESTS+=("$test_name")
+      done <<< "$MATCHED_TESTS"
+    fi
   fi
+fi
+
+# Nothing selected (shouldn't happen, but guard)
+if [ ${#SELECTED_TESTS[@]} -eq 0 ]; then
+  echo "No test suites selected. Allowing push."
+  exit 0
+fi
+
+# ============================================================
+# Section 4: Test instance setup (D-04, D-09)
+# ============================================================
+
+# COMPOSE_PROJECT_NAME isolates test containers from user instances
+export COMPOSE_PROJECT_NAME="claude-test"
+export COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
+export SECRETS_FILE="$TEST_ENV"
+export WHITELIST_PATH="$TEST_WHITELIST"
+export WORKSPACE_PATH="${TMPDIR:-/tmp}/claude-test-workspace"
+export LOG_DIR="${TMPDIR:-/tmp}/claude-test-logs"
+
+mkdir -p "$WORKSPACE_PATH" "$LOG_DIR"
+
+# ============================================================
+# Section 5: Print header
+# ============================================================
+
+echo ""
+echo "========================================"
+echo "  Pre-push: Running integration tests"
+echo "========================================"
+echo "Instance: claude-test (isolated)"
+echo "Suites:   ${#SELECTED_TESTS[@]} selected"
+echo ""
+
+# ============================================================
+# Section 6: Run test suites with clean state (D-08)
+# ============================================================
+
+SUITE_RESULTS=()
+TOTAL_FAILED=0
+TOTAL_PASSED=0
+FATAL=0
+
+for test_script in "${SELECTED_TESTS[@]}"; do
+  test_name="${test_script%.sh}"
+
+  echo "--- $test_name ---"
+
+  # Clean slate: full teardown including volumes
+  docker compose down --volumes --remove-orphans --timeout 5 2>/dev/null
+
+  # Start fresh containers
+  if ! docker compose up -d --wait --timeout 60 2>/dev/null; then
+    echo "FATAL: containers failed to start for $test_name"
+    SUITE_RESULTS+=("$test_name FAIL")
+    FATAL=1
+    break
+  fi
+
+  # Run the test suite and capture output
+  TEST_OUTPUT=$(bash "$TEST_DIR/$test_script" 2>&1)
+  TEST_EXIT=$?
+
+  # Show output to user (live progress)
+  echo "$TEST_OUTPUT"
+
+  # Extract PASS/FAIL lines and append to results file
+  echo "$TEST_OUTPUT" | grep -E '(PASS|FAIL)$' >> "$RESULTS_FILE"
+
+  # Track per-suite status
+  if [ "$TEST_EXIT" -eq 0 ]; then
+    SUITE_RESULTS+=("$test_name PASS")
+    ((TOTAL_PASSED++))
+  else
+    SUITE_RESULTS+=("$test_name FAIL")
+    ((TOTAL_FAILED++))
+  fi
+
   echo ""
 done
 
-echo "========================================"
-echo "  Results: $PASSED passed, $FAILED failed"
-echo "========================================"
+# ============================================================
+# Section 7: Teardown logic (D-05)
+# ============================================================
 
-if [ "$FAILED" -gt 0 ]; then
-  echo ""
-  echo "Push blocked: $FAILED test suite(s) failed."
-  echo "Fix the failures and try again, or use 'git push --no-verify' to skip."
-  exit 1
+if [ "$TOTAL_FAILED" -eq 0 ] && [ "$FATAL" -eq 0 ]; then
+  # All passed -- clean up
+  docker compose down --volumes --remove-orphans --timeout 5 2>/dev/null
+  echo "========================================"
+  echo "  All tests passed. Containers torn down. Pushing..."
+  echo "========================================"
+  exit 0
 fi
 
-echo "All tests passed. Pushing..."
-exit 0
+# ============================================================
+# Section 8: Summary table on failure (D-07)
+# ============================================================
+
+echo ""
+echo "========================================"
+echo "  Pre-Push Test Results"
+echo "========================================"
+echo ""
+printf "  %-20s %s\n" "Suite" "Status"
+printf "  %-20s %s\n" "-------------------" "------"
+for result in "${SUITE_RESULTS[@]}"; do
+  suite="${result% *}"
+  status="${result##* }"
+  printf "  %-20s %s\n" "$suite" "$status"
+done
+
+# Show failed requirements
+FAILED_LINES=$(grep -E 'FAIL$' "$RESULTS_FILE" 2>/dev/null || true)
+if [ -n "$FAILED_LINES" ]; then
+  echo ""
+  echo "  Failed requirements:"
+  echo "$FAILED_LINES"
+fi
+
+echo ""
+echo "========================================"
+FAIL_COUNT=$((TOTAL_FAILED + FATAL))
+echo "  Push blocked: $FAIL_COUNT suite(s) failed."
+echo "========================================"
+echo ""
+echo "Containers left running for debugging:"
+echo "  docker compose -p claude-test exec claude bash"
+echo ""
+echo "Tear down manually:"
+echo "  docker compose -p claude-test down --volumes"
+exit 1
