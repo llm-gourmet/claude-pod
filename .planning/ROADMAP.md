@@ -43,11 +43,11 @@
   1. User can create a profile directory with its own whitelist.json, .env, and workspace path, and spawn a claude-secure instance that uses that profile's config
   2. User can map a GitHub repository URL to a profile, and the system resolves the correct profile from a repo URL
   3. When a profile is missing or invalid (no whitelist.json, no .env, bad workspace path), execution is blocked with a clear error -- never falls back to a default profile
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 12-01: TBD
-- [ ] 12-02: TBD
+- [ ] 12-01-PLAN.md — Test scaffold + CLI rewrite (profile system core)
+- [ ] 12-02-PLAN.md — Installer update + test-map cleanup
 
 ### Phase 13: Headless CLI Path
 **Goal**: Users can run Claude Code non-interactively through claude-secure with full security isolation and automatic cleanup
@@ -138,7 +138,7 @@ Phases execute in numeric order: 12 -> 13 -> 14 -> 15 -> 16 -> 17
 | 9. Multi-Instance Support | v1.0 | 3/3 | Complete | 2026-04-10 |
 | 10. Automate Pre-push Tests | v1.0 | 2/2 | Complete | 2026-04-10 |
 | 11. Milestone Cleanup | v1.0 | 1/1 | Complete | 2026-04-11 |
-| 12. Profile System | v2.0 | 0/? | Not started | - |
+| 12. Profile System | v2.0 | 0/2 | Planning complete | - |
 | 13. Headless CLI Path | v2.0 | 0/? | Not started | - |
 | 14. Webhook Listener | v2.0 | 0/? | Not started | - |
 | 15. Event Handlers | v2.0 | 0/? | Not started | - |
