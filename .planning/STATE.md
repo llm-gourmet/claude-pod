@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-milestone_name: MVP
-status: milestone_complete
-stopped_at: v1.0 milestone shipped
-last_updated: "2026-04-11T19:30:00.000Z"
+milestone_name: milestone
+status: v1.0 milestone shipped 2026-04-11
+stopped_at: Completed 12-01-PLAN.md
+last_updated: "2026-04-11T21:21:24.066Z"
 last_activity: 2026-04-11
 progress:
-  total_phases: 11
-  completed_phases: 11
-  total_plans: 21
-  completed_plans: 21
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 1
   percent: 100
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** v1.0 shipped — planning next milestone
+**Current focus:** Phase 12 -- profile-system (v2.0)
 
 ## Current Position
 
-Phase: All complete
-Plan: All complete
-Status: v1.0 milestone shipped 2026-04-11
-Last activity: 2026-04-11
+Phase: 12 (profile-system) -- EXECUTING
+Plan: 1 of 2 complete
+Status: Executing Phase 12
+Last activity: 2026-04-11 -- Completed 12-01
 
-Progress: [████████████████████] 2/2 plans (100%)
+Progress: [█████░░░░░] 50% (1/2 plans)
 
 ## Performance Metrics
 
@@ -66,6 +66,7 @@ Progress: [████████████████████] 2/2 pla
 | Phase 08 P01 | 2min | 2 tasks | 1 files |
 | Phase 09 P03 | 2min | 1 tasks | 1 files |
 | Phase 11-milestone-cleanup P01 | 1min | 3 tasks | 3 files |
+| Phase 12 P01 | 5min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -96,6 +97,8 @@ Recent decisions affecting current work:
 - [Phase 09]: DNS validation tested via regex extraction rather than sourcing full CLI
 - [Phase quick-260411-mre]: Replicated pre-push hook test execution pattern directly in run-tests.sh for manual use
 - [Phase 11-milestone-cleanup]: No logic changes to validator -- docstring-only update to /validate endpoint
+- [Phase 12]: Source-only guard pattern (__CLAUDE_SECURE_SOURCE_ONLY) for test sourcing of bin/claude-secure
+- [Phase 12]: Profile validation uses return 1 (not exit 1) so functions are testable when sourced
 
 ### Roadmap Evolution
 
@@ -124,7 +127,7 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-11T17:19:30.054Z
+Last session: 2026-04-11T21:21:24.064Z
 Last activity: 2026-04-11 - Completed quick task 260411-mre: Add run-tests script and document testing in README
-Stopped at: Completed 11-01-PLAN.md
+Stopped at: Completed 12-01-PLAN.md
 Resume file: None
