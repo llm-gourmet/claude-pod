@@ -329,6 +329,43 @@ spawn_cleanup() {
   done
 }
 
+build_output_envelope() {
+  local profile="$1"
+  local event_type="$2"
+  local claude_output="$3"
+  local timestamp
+  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  echo "$claude_output" | jq --arg profile "$profile" \
+    --arg event_type "$event_type" \
+    --arg timestamp "$timestamp" \
+    '{
+      profile: $profile,
+      event_type: $event_type,
+      timestamp: $timestamp,
+      claude: .
+    }'
+}
+
+build_error_envelope() {
+  local profile="$1"
+  local event_type="$2"
+  local error_msg="$3"
+  local timestamp
+  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  jq -n --arg profile "$profile" \
+    --arg event_type "$event_type" \
+    --arg timestamp "$timestamp" \
+    --arg error "$error_msg" \
+    '{
+      profile: $profile,
+      event_type: $event_type,
+      timestamp: $timestamp,
+      error: $error
+    }'
+}
+
 do_spawn() {
   # Per D-04: --profile is required for spawn (enforced above by profile resolution)
   if [ -z "$PROFILE" ]; then
@@ -383,11 +420,69 @@ do_spawn() {
   # Read max_turns from profile.json (per D-08)
   MAX_TURNS=$(jq -r '.max_turns // empty' "$CONFIG_DIR/profiles/$PROFILE/profile.json")
 
-  # TODO: Plan 02 implements execution lifecycle and output capture
-  # TODO: Plan 03 implements prompt template resolution and rendering
+  # Extract event_type from event JSON for envelope
+  local event_type
+  event_type=$(echo "$EVENT_JSON" | jq -r '.event_type // .action // "unknown"')
 
-  echo "ERROR: spawn execution not yet implemented (pending Plans 02/03)" >&2
-  return 1
+  # TODO: Plan 03 adds resolve_template + render_template here
+  # For now, use a simple prompt from event JSON
+  local rendered_prompt
+  rendered_prompt="Process this event: $EVENT_JSON"
+
+  # --dry-run: print resolved prompt and exit (per Claude's Discretion)
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "$rendered_prompt"
+    return 0
+  fi
+
+  # Ensure LOG_DIR is set (normally set by load_profile_config, but defensive)
+  LOG_DIR="${LOG_DIR:-$CONFIG_DIR/logs}"
+
+  # Start ephemeral containers (per D-06)
+  mkdir -p "$LOG_DIR"
+  chmod 777 "$LOG_DIR"
+  docker compose up -d --wait
+
+  # Build claude command flags
+  # NOTE: --bare is intentionally OMITTED. Per RESEARCH.md Open Question 3,
+  # --bare skips hooks/CLAUDE.md/MCP. The PreToolUse security hooks inside the
+  # container are critical for enforcing the security whitelist (CLAUDE.md mandate).
+  # Until empirical testing confirms hooks survive --bare, we do NOT use it.
+  # The small startup time cost is acceptable vs risking security bypass.
+  local claude_args=("$rendered_prompt" "--output-format" "json" "--dangerously-skip-permissions")
+  if [ -n "${MAX_TURNS:-}" ]; then
+    claude_args+=("--max-turns" "$MAX_TURNS")
+  fi
+
+  # Execute headless Claude Code (per D-06, D-09)
+  local claude_stdout claude_stderr_file claude_exit=0
+  claude_stderr_file=$(mktemp)
+  _CLEANUP_FILES+=("$claude_stderr_file")
+
+  claude_stdout=$(docker compose exec -T claude claude -p "${claude_args[@]}" 2>"$claude_stderr_file") || claude_exit=$?
+
+  # Validate Claude output contains expected fields (per HEAD-02: result, cost, duration, session_id)
+  # Note: Exact field names from --output-format json are documented as result, session_id,
+  # cost_usd/cost, duration_ms/duration. Log actual fields for debugging if validation fails.
+  if [ "$claude_exit" -eq 0 ]; then
+    local has_result
+    has_result=$(echo "$claude_stdout" | jq 'has("result")' 2>/dev/null)
+    if [ "$has_result" != "true" ]; then
+      echo "WARNING: Claude output missing expected 'result' field. Actual keys: $(echo "$claude_stdout" | jq -r 'keys | join(", ")' 2>/dev/null)" >&2
+      echo "DEBUG: Raw output fields: $(echo "$claude_stdout" | jq -r 'keys[]' 2>/dev/null | tr '\n' ' ')" >&2
+    fi
+  fi
+
+  # Handle output (per D-11, D-12)
+  if [ "$claude_exit" -ne 0 ]; then
+    local error_msg
+    error_msg=$(cat "$claude_stderr_file")
+    build_error_envelope "$PROFILE" "$event_type" "$error_msg"
+    return "$claude_exit"
+  fi
+
+  # Success: wrap in metadata envelope (per D-11)
+  build_output_envelope "$PROFILE" "$event_type" "$claude_stdout"
 }
 
 # =========================================================================
