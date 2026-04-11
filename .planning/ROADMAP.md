@@ -59,11 +59,12 @@ Plans:
   3. User can set per-profile max-turns budget, and execution stops when the limit is reached
   4. After execution completes (success or failure), all containers, volumes, and networks for that run are automatically torn down
   5. User can define prompt templates with variable substitution (e.g. `{{ISSUE_TITLE}}`) in the profile directory, and the headless spawn fills them from event data
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 13-01: TBD
-- [ ] 13-02: TBD
+- [ ] 13-01-PLAN.md — Test scaffold + spawn arg parsing + ephemeral project naming
+- [ ] 13-02-PLAN.md — Execution lifecycle + output envelope + max-turns
+- [ ] 13-03-PLAN.md — Prompt template resolution and variable substitution
 
 ### Phase 14: Webhook Listener
 **Goal**: A persistent host-side service receives GitHub webhooks, validates their authenticity, and safely handles concurrent events
