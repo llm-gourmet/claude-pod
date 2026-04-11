@@ -366,6 +366,84 @@ build_error_envelope() {
     }'
 }
 
+resolve_template() {
+  local event_type="$1"
+  local explicit_template="${2:-}"
+
+  local profile_dir="$CONFIG_DIR/profiles/$PROFILE"
+  local prompts_dir="$profile_dir/prompts"
+  if [ ! -d "$prompts_dir" ]; then
+    echo "ERROR: No prompts directory at $prompts_dir" >&2
+    echo "Create templates in: $prompts_dir/<event-type>.md" >&2
+    return 1
+  fi
+
+  local path
+  if [ -n "$explicit_template" ]; then
+    path="$prompts_dir/${explicit_template}.md"
+  else
+    path="$prompts_dir/${event_type}.md"
+  fi
+
+  if [ ! -f "$path" ]; then
+    echo "ERROR: Template not found: $path" >&2
+    if [ -n "$explicit_template" ]; then
+      echo "Specified via --prompt-template flag" >&2
+    else
+      echo "Derived from event_type '$event_type'. Use --prompt-template to override." >&2
+    fi
+    return 1
+  fi
+  echo "$path"
+}
+
+render_template() {
+  local template_path="$1"
+  local event_json="$2"
+
+  local rendered
+  rendered=$(cat "$template_path")
+
+  # Extract standard variables from event JSON via jq (per D-17)
+  local repo_name event_type issue_title issue_body commit_sha branch
+  repo_name=$(echo "$event_json" | jq -r '.repository.full_name // empty')
+  event_type=$(echo "$event_json" | jq -r '.event_type // empty')
+  issue_title=$(echo "$event_json" | jq -r '.issue.title // empty')
+  issue_body=$(echo "$event_json" | jq -r '.issue.body // empty')
+  commit_sha=$(echo "$event_json" | jq -r '.after // .head_commit.id // empty')
+  branch=$(echo "$event_json" | jq -r '.ref // empty' | sed 's|refs/heads/||')
+
+  # Substitute variables using sed (per D-15)
+  # Use | delimiter to handle / in values (e.g., repo names like "org/repo")
+  rendered=$(echo "$rendered" | sed "s|{{REPO_NAME}}|${repo_name}|g")
+  rendered=$(echo "$rendered" | sed "s|{{EVENT_TYPE}}|${event_type}|g")
+  rendered=$(echo "$rendered" | sed "s|{{ISSUE_TITLE}}|${issue_title}|g")
+  rendered=$(echo "$rendered" | sed "s|{{COMMIT_SHA}}|${commit_sha}|g")
+  rendered=$(echo "$rendered" | sed "s|{{BRANCH}}|${branch}|g")
+
+  # Handle ISSUE_BODY separately for multiline safety (per Pitfall 1)
+  # Write body to temp file, use awk for multiline substitution
+  if [ -n "$issue_body" ]; then
+    local body_file
+    body_file=$(mktemp)
+    _CLEANUP_FILES+=("$body_file")
+    echo "$issue_body" > "$body_file"
+    # Use awk to replace {{ISSUE_BODY}} with file contents
+    rendered=$(echo "$rendered" | awk -v bodyfile="$body_file" '
+      /\{\{ISSUE_BODY\}\}/ {
+        while ((getline line < bodyfile) > 0) print line
+        close(bodyfile)
+        next
+      }
+      { print }
+    ')
+  else
+    rendered=$(echo "$rendered" | sed "s|{{ISSUE_BODY}}||g")
+  fi
+
+  echo "$rendered"
+}
+
 do_spawn() {
   # Per D-04: --profile is required for spawn (enforced above by profile resolution)
   if [ -z "$PROFILE" ]; then
@@ -424,10 +502,13 @@ do_spawn() {
   local event_type
   event_type=$(echo "$EVENT_JSON" | jq -r '.event_type // .action // "unknown"')
 
-  # TODO: Plan 03 adds resolve_template + render_template here
-  # For now, use a simple prompt from event JSON
+  # Resolve and render prompt template (per D-13 through D-17)
+  local profile_dir="$CONFIG_DIR/profiles/$PROFILE"
+  local template_path
+  template_path=$(resolve_template "$event_type" "$PROMPT_TEMPLATE") || return 1
+
   local rendered_prompt
-  rendered_prompt="Process this event: $EVENT_JSON"
+  rendered_prompt=$(render_template "$template_path" "$EVENT_JSON")
 
   # --dry-run: print resolved prompt and exit (per Claude's Discretion)
   if [ "$DRY_RUN" -eq 1 ]; then
