@@ -181,3 +181,13 @@ Plans:
 - [ ] 09-01-PLAN.md -- Docker Compose and service changes: remove container_name, add LOG_PREFIX/WHITELIST_PATH parameterization
 - [ ] 09-02-PLAN.md -- CLI refactor: --instance flag, migration, list/remove commands, installer update
 - [ ] 09-03-PLAN.md -- Integration tests for all MULTI requirements
+
+### Phase 10: automate pre-push tests
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 9
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 10 to break down)

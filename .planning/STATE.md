@@ -98,6 +98,7 @@ Recent decisions affecting current work:
 
 - Phase 7 added: Env-file strategy and secret loading for claude-secure
 - Phase 8 added: Container tooling — full dev environment for claude-secure
+- Phase 10 added: automate pre-push tests
 
 ### Pending Todos
 
