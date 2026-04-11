@@ -30,10 +30,11 @@ No secret ever leaves the isolated environment uncontrolled — every outbound c
 - Full dev environment in Claude container (git, build-essential, Python, ripgrep, fd-find) — v1.0
 - Multi-instance support: `--instance NAME` flag, auto-creation, DNS-safe validation, list/remove commands, instance-scoped config and logs — v1.0
 - Pre-push hook with smart test selection, dedicated test instance, clean-state guarantees, and failure summary table — v1.0
+- Profile system replacing instances: `--profile NAME` flag, profile.json config, superuser mode, list command, profile-aware installer — v2.0 Phase 12
 
 ### Active
 
-- [ ] Profile system (profiles/service-A/) with own whitelist.json, .env, allowed domains, and workspace directory
+- [ ] Headless CLI path: non-interactive Claude Code via `docker compose exec -T` with `--profile`
 - [ ] Webhook listener as host process (systemd) receiving GitHub webhooks
 - [ ] Event handlers for Issues, Push to Main, CI Failure
 - [ ] Headless spawn: non-interactive Claude Code session per event (dangerously-skip-permissions)
