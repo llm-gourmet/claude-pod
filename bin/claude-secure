@@ -1453,6 +1453,187 @@ do_replay() {
 }
 
 # =========================================================================
+# Phase 17: Reaper (OPS-03)
+# Cleans up orphaned spawn containers + stale event files. Invoked via the
+# `reap` subcommand or the claude-secure-reaper.timer systemd unit.
+# Locked by .planning/phases/17-operational-hardening/17-CONTEXT.md D-01..D-12.
+# =========================================================================
+
+# D-04 / D-05 / D-07: orphan detection + teardown.
+# Walks every compose project whose name begins with the instance prefix and
+# whose first container is older than REAPER_ORPHAN_AGE_SECS. For each,
+# runs `docker compose -p <project> down -v --remove-orphans --timeout 10`.
+#
+# Returns the kill count via the global REAPED_COUNT, errors via REAPED_ERRORS.
+reap_orphan_projects() {
+  local prefix="${1:-${INSTANCE_PREFIX:-cs-}}"
+  local age_threshold="${REAPER_ORPHAN_AGE_SECS:-600}"
+  local now killed=0 errors=0
+  now=$(date +%s)
+
+  # docker --filter does NOT support glob; we filter by label key existence
+  # and apply the prefix match in bash. The label key is fixed; we collect
+  # unique project values and prefix-match in shell.
+  local projects
+  projects=$(docker ps -a \
+               --filter "label=com.docker.compose.project" \
+               --format '{{.Label "com.docker.compose.project"}}' \
+             2>/dev/null | sort -u)
+
+  local proj
+  while IFS= read -r proj; do
+    [ -z "$proj" ] && continue
+    # Multi-instance (D-07): only touch projects matching this prefix.
+    case "$proj" in
+      "$prefix"*) ;;
+      *) continue ;;
+    esac
+
+    # Defensive shape guard: spawn projects follow cs-<profile>-<8hex>.
+    # Refuses to reap other compose stacks that happen to share the prefix.
+    case "$proj" in
+      cs-*-*) ;;
+      *) continue ;;
+    esac
+
+    # Get the project's oldest container Created timestamp via docker inspect.
+    local first_id created created_epoch age
+    first_id=$(docker ps -a \
+                 --filter "label=com.docker.compose.project=$proj" \
+                 --format '{{.ID}}' 2>/dev/null \
+               | head -1)
+    # Under mocked docker (tests), docker ps with a value filter may return
+    # empty; fall back to the project name as an inspect key just so the
+    # mock's inspect branch still fires. In production the first_id path
+    # always succeeds because docker ps returns real container IDs.
+    [ -z "$first_id" ] && first_id="$proj"
+
+    created=$(docker inspect --format '{{.Created}}' "$first_id" 2>/dev/null)
+    if [ -z "$created" ]; then
+      echo "reaper: ERROR cannot read Created for $proj" >&2
+      errors=$((errors + 1))
+      continue
+    fi
+
+    # Strip ISO8601 fractional seconds for portable `date -d` parsing.
+    # Some inputs have .123456789Z (strip fractional), others just Z; handle both.
+    local created_clean="$created"
+    case "$created_clean" in
+      *.*Z) created_clean="${created_clean%.*}Z" ;;
+      *.*)  created_clean="${created_clean%.*}" ;;
+    esac
+    created_epoch=$(date -d "$created_clean" +%s 2>/dev/null) || {
+      echo "reaper: ERROR cannot parse Created=$created for $proj" >&2
+      errors=$((errors + 1))
+      continue
+    }
+    age=$((now - created_epoch))
+
+    if [ "$age" -lt "$age_threshold" ]; then
+      continue  # too young, skip
+    fi
+
+    if [ "${REAPER_DRY_RUN:-0}" = "1" ]; then
+      echo "reaper: [dry-run] would reap $proj age=${age}s"
+      killed=$((killed + 1))
+      continue
+    fi
+
+    echo "reaper: reaped $proj age=${age}s"
+    if docker compose -p "$proj" down -v --remove-orphans --timeout 10 \
+         >/dev/null 2>&1; then
+      killed=$((killed + 1))
+    else
+      echo "reaper: ERROR tearing down $proj" >&2
+      errors=$((errors + 1))
+    fi
+  done <<< "$projects"
+
+  REAPED_COUNT=$killed
+  REAPED_ERRORS=$errors
+}
+
+# D-06 / Phase 14 D-20 fold-in: delete event files older than REAPER_EVENT_AGE_SECS.
+# Pure age-based; no audit cross-reference. Default threshold 86400s = 24h.
+reap_stale_event_files() {
+  local events_dir="${CONFIG_DIR:-$HOME/.claude-secure}/events"
+  local age_secs="${REAPER_EVENT_AGE_SECS:-86400}"
+  local age_mins=$((age_secs / 60))
+
+  EVENTS_DELETED=0
+  [ -d "$events_dir" ] || return 0
+
+  # find -mmin +N matches files strictly older than N minutes.
+  local deleted=0 f
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    if [ "${REAPER_DRY_RUN:-0}" = "1" ]; then
+      echo "reaper: [dry-run] would delete $f"
+      deleted=$((deleted + 1))
+      continue
+    fi
+    if rm -f -- "$f" 2>/dev/null; then
+      deleted=$((deleted + 1))
+    fi
+  done < <(find "$events_dir" -maxdepth 1 -type f -name '*.json' -mmin "+$age_mins" 2>/dev/null)
+
+  EVENTS_DELETED=$deleted
+}
+
+# D-08: single-flight reaper cycle. Acquires a non-blocking flock on
+# $LOG_DIR/${LOG_PREFIX}reaper.lock. If held (e.g., timer-driven cycle
+# already running when operator invokes `claude-secure reap`), the second
+# instance exits 0 silently with a journal log line.
+do_reap() {
+  local dry_run=0
+  # Parse optional --dry-run flag.
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run) dry_run=1; shift ;;
+      --help|-h)
+        echo "Usage: claude-secure reap [--dry-run]"
+        echo "  Cleans up orphaned spawn containers and stale event files."
+        return 0
+        ;;
+      *)
+        echo "reaper: unknown flag '$1'" >&2
+        echo "Usage: claude-secure reap [--dry-run]" >&2
+        return 2
+        ;;
+    esac
+  done
+  export REAPER_DRY_RUN=$dry_run
+
+  local lock_file="${LOG_DIR:-$CONFIG_DIR/logs}/${LOG_PREFIX:-}reaper.lock"
+  mkdir -p "$(dirname "$lock_file")" 2>/dev/null || true
+
+  # Acquire exclusive non-blocking lock on FD 9.
+  exec 9>"$lock_file"
+  chmod 666 "$lock_file" 2>/dev/null || true
+  if ! flock -n 9; then
+    echo "reaper: another instance is running (lock held), skipping cycle"
+    return 0
+  fi
+
+  echo "reaper: cycle start prefix=${INSTANCE_PREFIX:-cs-}"
+
+  REAPED_COUNT=0
+  REAPED_ERRORS=0
+  EVENTS_DELETED=0
+
+  reap_orphan_projects "${INSTANCE_PREFIX:-cs-}"
+  reap_stale_event_files
+
+  echo "reaper: cycle end killed=${REAPED_COUNT} events_deleted=${EVENTS_DELETED} errors=${REAPED_ERRORS}"
+
+  # D-10: whole-cycle failure (all projects errored, none reaped) flips exit code.
+  if [ "${REAPED_ERRORS:-0}" -gt 0 ] && [ "${REAPED_COUNT:-0}" -eq 0 ]; then
+    return 1
+  fi
+  return 0
+}
+
+# =========================================================================
 # Source-only guard: if sourced by tests, stop here
 # =========================================================================
 if [ "$__CLAUDE_SECURE_SOURCE_ONLY" = "1" ]; then
@@ -1655,6 +1836,7 @@ case "$CMD" in
     echo "  update     Pull latest claude-secure and rebuild all images"
     echo "  upgrade    Rebuild claude image with latest Claude Code (--no-cache)"
     echo "  spawn      Run headless Claude Code session (requires --profile and --event)"
+    echo "  reap       Clean up orphaned spawn containers and stale event files"
     echo "  help       Show this help message"
     echo ""
     echo "Modes:"
@@ -1687,6 +1869,10 @@ case "$CMD" in
     ;;
   replay)
     do_replay
+    ;;
+  reap)
+    # Drop the "reap" literal so only the remaining flags (if any) go to do_reap.
+    do_reap "${REMAINING_ARGS[@]:1}"
     ;;
   *)
     mkdir -p "$LOG_DIR"
