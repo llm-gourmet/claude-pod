@@ -91,11 +91,13 @@ Plans:
   2. When a push-to-main event arrives, the listener routes it to the correct profile and spawns a headless session with commit context in the prompt
   3. When a CI failure event (workflow_run completed with failure) arrives, the listener routes it to the correct profile and spawns a headless session with failure context in the prompt
   4. User can replay a stored webhook payload via CLI command for debugging
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 15-01: TBD
-- [ ] 15-02: TBD
+- [ ] 15-01-PLAN.md — Test scaffold: test-phase15.sh, 9 fixtures, test-map.json update
+- [ ] 15-02-PLAN.md — Default templates + listener.py event-type filter and top-level event_type injection
+- [ ] 15-03-PLAN.md — bin/claude-secure extract_payload_field, render_template sed-bug fix, resolve_template fallback, replay subcommand
+- [ ] 15-04-PLAN.md — install.sh copies webhook/templates/ to /opt/claude-secure/webhook/templates/
 
 ### Phase 16: Result Channel
 **Goal**: Every headless execution produces a structured report pushed to a documentation repo and an audit log entry
