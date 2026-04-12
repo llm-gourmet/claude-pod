@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="$HOME/.claude-secure"
 PLATFORM=""
 app_dir=""
+WITH_WEBHOOK=0
 
 # Colors
 RED='\033[0;31m'
@@ -15,6 +16,15 @@ NC='\033[0m'
 log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
+
+parse_args() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --with-webhook) WITH_WEBHOOK=1; shift ;;
+      *) shift ;;
+    esac
+  done
+}
 
 check_dependencies() {
   local missing=()
@@ -263,7 +273,127 @@ install_cli() {
   fi
 }
 
+install_webhook_service() {
+  # Gate: either --with-webhook flag, or interactive confirm. Non-interactive + no flag = skip.
+  if [ "$WITH_WEBHOOK" -ne 1 ]; then
+    if [ -t 0 ]; then
+      read -rp "Install webhook listener as a systemd service? [y/N]: " ans
+      [[ "$ans" =~ ^[Yy]$ ]] || return 0
+    else
+      return 0
+    fi
+  fi
+
+  log_info "Installing webhook listener..."
+
+  # 1. Python 3.11+ check
+  if ! command -v python3 >/dev/null 2>&1; then
+    log_error "python3 is required for the webhook listener. Install with: apt install python3"
+    return 1
+  fi
+  local py_ver
+  py_ver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+  if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)'; then
+    log_error "Python 3.11+ required for the webhook listener (found $py_ver)."
+    return 1
+  fi
+
+  # 2. systemctl check (not an error on WSL2-without-systemd; just skip)
+  if ! command -v systemctl >/dev/null 2>&1; then
+    log_warn "systemctl not found. Cannot install the webhook service on this host."
+    return 0
+  fi
+
+  # 3. WSL2 systemd gate (D-26: warn, do not block)
+  local wsl2_no_systemd=0
+  if grep -qi microsoft /proc/version 2>/dev/null; then
+    if [ ! -f /etc/wsl.conf ] || ! grep -qE '^\s*systemd\s*=\s*true' /etc/wsl.conf; then
+      wsl2_no_systemd=1
+      log_warn "WSL2 detected without systemd enabled in /etc/wsl.conf."
+      log_warn "The webhook listener runs as a systemd service. To enable systemd in WSL2:"
+      echo ""
+      echo "  Add the following to /etc/wsl.conf:"
+      echo ""
+      echo "      [boot]"
+      echo "      systemd=true"
+      echo ""
+      echo "  Then from a Windows PowerShell / CMD prompt run:"
+      echo ""
+      echo "      wsl.exe --shutdown"
+      echo ""
+      echo "  After WSL restarts, re-run the installer or start the service manually:"
+      echo ""
+      echo "      sudo systemctl enable --now claude-secure-webhook"
+      echo ""
+      log_warn "Installer will copy files but skip 'systemctl enable --now'."
+    fi
+  fi
+
+  # 4. Resolve invoking user's home (D-24 + home-directory gotcha)
+  local invoking_user invoking_home
+  invoking_user="${SUDO_USER:-$USER}"
+  invoking_home=$(getent passwd "$invoking_user" | cut -d: -f6 || true)
+  if [ -z "$invoking_home" ]; then
+    log_error "Could not resolve home directory for user '$invoking_user'"
+    return 1
+  fi
+  log_info "Webhook paths will be rooted at: $invoking_home/.claude-secure/"
+
+  # 5. Copy listener.py (always overwrite -- latest code ships)
+  sudo mkdir -p /opt/claude-secure/webhook
+  sudo cp "$app_dir/webhook/listener.py" /opt/claude-secure/webhook/listener.py
+  sudo chmod 755 /opt/claude-secure/webhook/listener.py
+  log_info "Copied listener.py to /opt/claude-secure/webhook/"
+
+  # 6. Copy config template (idempotent -- never overwrite existing config)
+  sudo mkdir -p /etc/claude-secure
+  if [ ! -f /etc/claude-secure/webhook.json ]; then
+    sed \
+      -e "s|__REPLACED_BY_INSTALLER__PROFILES__|${invoking_home}/.claude-secure/profiles|" \
+      -e "s|__REPLACED_BY_INSTALLER__EVENTS__|${invoking_home}/.claude-secure/events|" \
+      -e "s|__REPLACED_BY_INSTALLER__LOGS__|${invoking_home}/.claude-secure/logs|" \
+      "$app_dir/webhook/config.example.json" | sudo tee /etc/claude-secure/webhook.json > /dev/null
+    sudo chmod 644 /etc/claude-secure/webhook.json
+    log_info "Installed default config at /etc/claude-secure/webhook.json"
+  else
+    log_info "Existing /etc/claude-secure/webhook.json preserved (no overwrite)"
+  fi
+
+  # 7. Install systemd unit file
+  sudo cp "$app_dir/webhook/claude-secure-webhook.service" /etc/systemd/system/claude-secure-webhook.service
+  sudo chmod 644 /etc/systemd/system/claude-secure-webhook.service
+  sudo systemctl daemon-reload 2>/dev/null || log_warn "systemctl daemon-reload failed (likely WSL2-no-systemd)"
+  log_info "Installed systemd unit /etc/systemd/system/claude-secure-webhook.service"
+
+  # 8. Enable + start (unless WSL2 gated)
+  if [ "$wsl2_no_systemd" -eq 1 ]; then
+    log_warn "Skipping 'systemctl enable --now' due to WSL2 systemd gate."
+    log_warn "After enabling systemd in WSL2, run: sudo systemctl enable --now claude-secure-webhook"
+  else
+    if sudo systemctl enable --now claude-secure-webhook 2>/dev/null; then
+      sleep 1
+      if sudo systemctl is-active --quiet claude-secure-webhook; then
+        log_info "Webhook listener is active -- tail logs with: journalctl -u claude-secure-webhook -f"
+      else
+        log_error "Webhook listener failed to start. Check: journalctl -u claude-secure-webhook"
+        return 1
+      fi
+    else
+      log_warn "Could not enable claude-secure-webhook (systemctl enable failed)."
+      log_warn "Manually enable later with: sudo systemctl enable --now claude-secure-webhook"
+    fi
+  fi
+
+  log_info "Webhook listener installation complete."
+  log_info "NOTE: Each profile that should receive webhooks needs a 'webhook_secret' field"
+  log_info "      added to its profile.json. Example:"
+  log_info "        jq '.webhook_secret = \"<your-github-webhook-secret>\"' \\"
+  log_info "          ~/.claude-secure/profiles/<name>/profile.json > /tmp/p.json \\"
+  log_info "          && mv /tmp/p.json ~/.claude-secure/profiles/<name>/profile.json"
+}
+
 main() {
+  parse_args "$@"
   echo "=== claude-secure installer ==="
   echo ""
 
@@ -278,6 +408,7 @@ main() {
   install_cli
 
   install_git_hooks
+  install_webhook_service
 
   echo ""
   log_info "Installation complete!"
