@@ -621,18 +621,91 @@ test_compose_has_mem_limit() {
 # =========================================================================
 
 test_installer_step_5d_present() {
-  echo "NOT IMPLEMENTED: flipped green by 17-04 (install.sh step 5d copies reaper unit + timer)"
-  return 1
+  local installer="$PROJECT_DIR/install.sh"
+  if [ ! -f "$installer" ]; then
+    echo "install.sh missing"
+    return 1
+  fi
+  # Step 5d must cp BOTH the reaper .service and .timer into /etc/systemd/system/
+  # and chmod them 644. We assert the literal destination paths and a # 5d. header.
+  if ! grep -q '^  # 5d\. ' "$installer"; then
+    echo "missing step 5d comment header"
+    return 1
+  fi
+  if ! grep -q '/etc/systemd/system/claude-secure-reaper\.service' "$installer"; then
+    echo "missing /etc/systemd/system/claude-secure-reaper.service path"
+    return 1
+  fi
+  if ! grep -q '/etc/systemd/system/claude-secure-reaper\.timer' "$installer"; then
+    echo "missing /etc/systemd/system/claude-secure-reaper.timer path"
+    return 1
+  fi
+  # Both unit files must be chmodded 644
+  local chmod_count
+  chmod_count=$(grep -c 'sudo chmod 644 /etc/systemd/system/claude-secure-reaper' "$installer")
+  if [ "$chmod_count" -lt 2 ]; then
+    echo "expected 2 chmod 644 lines for reaper unit+timer, got $chmod_count"
+    return 1
+  fi
+  # Both unit files must be cp'd from $app_dir/webhook/
+  local cp_count
+  cp_count=$(grep -c 'sudo cp .*claude-secure-reaper' "$installer")
+  if [ "$cp_count" -lt 2 ]; then
+    echo "expected 2 cp lines for reaper unit+timer, got $cp_count"
+    return 1
+  fi
+  return 0
 }
 
 test_installer_enables_timer() {
-  echo "NOT IMPLEMENTED: flipped green by 17-04 (install.sh enables claude-secure-reaper.timer)"
-  return 1
+  local installer="$PROJECT_DIR/install.sh"
+  if [ ! -f "$installer" ]; then
+    echo "install.sh missing"
+    return 1
+  fi
+  # Must enable the timer via systemctl, subject to the WSL2 gate.
+  # Expect at least two references to 'enable --now claude-secure-reaper.timer':
+  # 1. The real enable call
+  # 2. The WSL2 manual-instructions fallback log_warn
+  local enable_count
+  enable_count=$(grep -c 'enable --now claude-secure-reaper\.timer' "$installer")
+  if [ "$enable_count" -lt 2 ]; then
+    echo "expected >=2 'enable --now claude-secure-reaper.timer', got $enable_count"
+    return 1
+  fi
+  # WSL2 gate reuse: wsl2_no_systemd must be referenced near the new enable
+  # block (guards against someone adding an unconditional enable).
+  if ! awk '/^install_webhook_service\(\)/,/^\}/' "$installer" \
+       | grep -q 'wsl2_no_systemd'; then
+    echo "wsl2_no_systemd gate missing inside install_webhook_service"
+    return 1
+  fi
+  # is-active check on the timer after enable
+  if ! grep -q 'systemctl is-active --quiet claude-secure-reaper\.timer' "$installer"; then
+    echo "missing is-active check for claude-secure-reaper.timer"
+    return 1
+  fi
+  return 0
 }
 
 test_installer_post_install_hint() {
-  echo "NOT IMPLEMENTED: flipped green by 17-04 (install.sh prints journalctl -u claude-secure-reaper -f hint)"
-  return 1
+  local installer="$PROJECT_DIR/install.sh"
+  if [ ! -f "$installer" ]; then
+    echo "install.sh missing"
+    return 1
+  fi
+  # D-18: installer prints the exact `journalctl -u claude-secure-reaper -f`
+  # hint so operators know how to tail reaper activity.
+  if ! grep -q 'journalctl -u claude-secure-reaper -f' "$installer"; then
+    echo "missing 'journalctl -u claude-secure-reaper -f' post-install hint"
+    return 1
+  fi
+  # Cadence hint: '5 minutes' must appear in the hint for operator context.
+  if ! grep -q 'runs every 5 minutes' "$installer"; then
+    echo "missing 'runs every 5 minutes' cadence hint"
+    return 1
+  fi
+  return 0
 }
 
 # =========================================================================
