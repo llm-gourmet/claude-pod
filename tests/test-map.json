@@ -242,5 +242,47 @@
       "test_audit_manual_synthetic_id",
       "test_audit_webhook_id_null_when_absent"
     ]
+  },
+  "OPS-03": {
+    "phase": 17,
+    "test_file": "tests/test-phase17.sh",
+    "e2e_test_file": "tests/test-phase17-e2e.sh",
+    "tests": [
+      "test_reap_subcommand_exists",
+      "test_reaper_unit_files_exist",
+      "test_reaper_unit_files_lint",
+      "test_reaper_service_directives",
+      "test_reaper_timer_directives",
+      "test_reaper_install_sections",
+      "test_reap_age_threshold_select",
+      "test_reap_age_threshold_skip",
+      "test_reap_compose_down_invocation",
+      "test_reap_never_touches_images",
+      "test_reap_instance_prefix_scoping",
+      "test_reap_per_project_failure_continues",
+      "test_reap_whole_cycle_failure_exits_nonzero",
+      "test_reap_dry_run",
+      "test_reap_stale_event_files_deleted",
+      "test_reap_fresh_event_files_preserved",
+      "test_reap_event_age_secs_override",
+      "test_reap_flock_single_flight",
+      "test_reap_no_jsonl_output",
+      "test_reap_log_format",
+      "test_reap_grep_guard",
+      "test_d11_directives_present",
+      "test_d11_forbidden_directives_absent",
+      "test_d11_comment_block_present",
+      "test_compose_has_mem_limit",
+      "test_installer_step_5d_present",
+      "test_installer_enables_timer",
+      "test_installer_post_install_hint"
+    ],
+    "e2e_scenarios": [
+      "scenario_hmac_rejection",
+      "scenario_concurrent_execution",
+      "scenario_orphan_cleanup",
+      "scenario_resource_limits",
+      "test_e2e_budget_under_90s"
+    ]
   }
 }

@@ -1,0 +1,13 @@
+# /etc/systemd/system/claude-secure-reaper.service
+# Installed by install.sh --with-webhook (copies this file verbatim).
+# Source of truth: webhook/claude-secure-reaper.service in the claude-secure repo.
+#
+# WAVE 0 PLACEHOLDER -- populated in 17-02 (Reaper Core).
+# Locked by .planning/phases/17-operational-hardening/17-CONTEXT.md D-01..D-12.
+#
+# DO NOT add NoNewPrivileges, ProtectSystem, PrivateTmp, CapabilityBoundingSet,
+# ProtectHome, or PrivateDevices: each one breaks docker compose subprocess
+# (empirically confirmed in Phase 14, re-confirmed in Phase 17 E2E gate D-12).
+
+[Unit]
+Description=claude-secure reaper (PLACEHOLDER -- populated by 17-02)
