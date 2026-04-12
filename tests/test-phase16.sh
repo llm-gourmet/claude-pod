@@ -266,8 +266,59 @@ test_pat_not_leaked_on_failure() {
 }
 
 test_report_template_fallback() {
-  echo "NOT IMPLEMENTED: flipped green by 16-02 (resolve_report_template fallback chain D-08)"
-  return 1
+  # Exercise the D-08 fallback chain for resolve_report_template:
+  #   (a) profile override present  → profile path wins
+  #   (b) no profile, env var set   → $WEBHOOK_REPORT_TEMPLATES_DIR wins
+  #   (c) no profile, no env, dev   → $APP_DIR/webhook/report-templates wins
+  #   (d) nothing resolves          → return 1
+  local fake_home="$TEST_TMPDIR/rtf-home"
+  local fake_config="$fake_home/.claude-secure"
+  mkdir -p "$fake_config/profiles/test-profile/report-templates"
+
+  # Source bin/claude-secure in source-only mode so we can call its functions.
+  # Use a subshell so we don't pollute the test harness environment.
+  (
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export CONFIG_DIR="$fake_config"
+    export PROFILE="test-profile"
+    export APP_DIR="$PROJECT_DIR"
+    # shellcheck disable=SC1090
+    source "$PROJECT_DIR/bin/claude-secure"
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+
+    # (a) profile override
+    echo "profile override" > "$fake_config/profiles/test-profile/report-templates/issues-opened.md"
+    local result
+    result=$(resolve_report_template issues-opened) || { echo "(a) resolver returned nonzero"; exit 1; }
+    [ "$result" = "$fake_config/profiles/test-profile/report-templates/issues-opened.md" ] \
+      || { echo "(a) profile override path mismatch: $result"; exit 1; }
+
+    # (b) env var override (no profile override for this event type)
+    rm "$fake_config/profiles/test-profile/report-templates/issues-opened.md"
+    local env_dir="$TEST_TMPDIR/rtf-env-templates"
+    mkdir -p "$env_dir"
+    echo "env override" > "$env_dir/push.md"
+    result=$(WEBHOOK_REPORT_TEMPLATES_DIR="$env_dir" resolve_report_template push) \
+      || { echo "(b) resolver returned nonzero"; exit 1; }
+    [ "$result" = "$env_dir/push.md" ] \
+      || { echo "(b) env override path mismatch: $result"; exit 1; }
+
+    # (c) dev checkout fallback (uses $APP_DIR/webhook/report-templates from the checkout)
+    unset WEBHOOK_REPORT_TEMPLATES_DIR
+    if [ -f "$PROJECT_DIR/webhook/report-templates/push.md" ]; then
+      result=$(resolve_report_template push) || { echo "(c) resolver returned nonzero"; exit 1; }
+      [ "$result" = "$PROJECT_DIR/webhook/report-templates/push.md" ] \
+        || { echo "(c) dev fallback path mismatch: $result"; exit 1; }
+    fi
+
+    # (d) unresolvable event type — must return 1
+    if resolve_report_template does-not-exist-event 2>/dev/null; then
+      echo "(d) should have returned 1 for nonexistent template"
+      exit 1
+    fi
+
+    exit 0
+  )
 }
 
 test_no_report_repo_skips_push() {
