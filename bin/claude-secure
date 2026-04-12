@@ -713,6 +713,232 @@ render_template() {
   echo "$rendered"
 }
 
+# =========================================================================
+# Phase 16 helpers (D-04..D-18): result text extraction, report rendering,
+# secret redaction, audit log writer, publish + push retry.
+# =========================================================================
+
+# Phase 16 D-16 / Pitfall 4: extract .claude.result from the envelope and
+# emit the UTF-8-safe, control-char-stripped, 16KB-truncated bytes to a
+# fresh tempfile. Dedicated variant (vs extract_payload_field) so the
+# Phase 15 8KB payload limit stays unchanged for prompt rendering.
+_extract_result_text_to_tempfile() {
+  local envelope_source="$1"
+  local out_file
+  out_file=$(mktemp)
+  _CLEANUP_FILES+=("$out_file")
+
+  local raw
+  if [ -f "$envelope_source" ]; then
+    raw=$(jq -r '.claude.result // empty' "$envelope_source" 2>/dev/null)
+  else
+    raw=$(printf '%s' "$envelope_source" | jq -r '.claude.result // empty' 2>/dev/null)
+  fi
+
+  RAW_PAYLOAD="$raw" python3 -c '
+import os, sys
+data = os.environb.get(b"RAW_PAYLOAD", b"")
+keep = {0x09, 0x0A, 0x0D}
+cleaned = bytes(b for b in data if b >= 0x20 or b in keep)
+LIMIT = 16384
+if len(cleaned) > LIMIT:
+    truncated = cleaned[:LIMIT].decode("utf-8", errors="ignore").encode("utf-8")
+    dropped = len(cleaned) - len(truncated)
+    suffix = f"... [truncated {dropped} more bytes]".encode("utf-8")
+    cleaned = truncated + suffix
+sys.stdout.buffer.write(cleaned)
+' > "$out_file"
+
+  echo "$out_file"
+}
+
+# Phase 16 D-10 / D-11 / Pattern G / Pitfall 2: render a report template.
+# Chains on top of Phase 15's render_template (which substitutes all D-16
+# variables using the awk-from-file pattern) then substitutes the six
+# D-10 extension variables. RESULT_TEXT and ERROR_MESSAGE are deliberately
+# LAST so embedded {{ISSUE_TITLE}} style tokens inside Claude's output
+# are not re-interpreted as template variables (Pitfall 2).
+render_report_template() {
+  local template_path="$1"
+  local event_json="$2"
+  local envelope_json="$3"
+  local status="$4"
+
+  # Step 1: run Phase 15 render_template to substitute all D-16 variables.
+  local rendered
+  rendered=$(render_template "$template_path" "$event_json")
+  local v_file
+
+  # Step 2: substitute D-10 metadata variables (short single-line) FIRST,
+  # so that if RESULT_TEXT contains e.g. {{COST_USD}}, the inner token
+  # survives the RESULT_TEXT substitution (which runs last).
+  #
+  # Pitfall 5: cost_usd // cost and duration_ms // duration fallback
+  # because Claude Code has shipped both field names historically.
+  v_file=$(_extract_to_tempfile "$envelope_json" '.claude.cost_usd // .claude.cost // 0 | tostring' "0")
+  rendered=$(_substitute_token_from_file "$rendered" "COST_USD" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$envelope_json" '.claude.duration_ms // .claude.duration // 0 | tostring' "0")
+  rendered=$(_substitute_token_from_file "$rendered" "DURATION_MS" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$envelope_json" '.claude.session_id // ""' "")
+  rendered=$(_substitute_token_from_file "$rendered" "SESSION_ID" "$v_file")
+
+  # Wrapper-generated: TIMESTAMP and STATUS come from the caller, not the envelope.
+  v_file=$(mktemp); _CLEANUP_FILES+=("$v_file")
+  date -u +"%Y-%m-%dT%H:%M:%SZ" > "$v_file"
+  rendered=$(_substitute_token_from_file "$rendered" "TIMESTAMP" "$v_file")
+
+  v_file=$(mktemp); _CLEANUP_FILES+=("$v_file")
+  printf '%s' "$status" > "$v_file"
+  rendered=$(_substitute_token_from_file "$rendered" "STATUS" "$v_file")
+
+  # Step 3: LAST — RESULT_TEXT and ERROR_MESSAGE.
+  # These carry arbitrary Claude output that may contain literal {{TOKEN}}
+  # strings. Substituting them AFTER all other passes guarantees those
+  # literal tokens are preserved (Pitfall 2).
+  v_file=$(_extract_result_text_to_tempfile "$envelope_json")
+  rendered=$(_substitute_multiline_token_from_file "$rendered" "RESULT_TEXT" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$envelope_json" '.error // ""' "")
+  rendered=$(_substitute_multiline_token_from_file "$rendered" "ERROR_MESSAGE" "$v_file")
+
+  printf '%s' "$rendered"
+}
+
+# Phase 16 D-15 / Pattern B / Pitfall 1: redact every non-empty profile
+# .env value from a rendered report file in place. Uses awk-from-file
+# LITERAL substring replace (index + substr) so any value metacharacter
+# (| / \ & $ [ ] ^ * .) is safe. NEVER uses sed with interpolation.
+redact_report_file() {
+  local report_file="$1"
+  local env_file="$2"
+  local tmp_out tmp_val
+  tmp_out=$(mktemp)
+  tmp_val=$(mktemp)
+  _CLEANUP_FILES+=("$tmp_out" "$tmp_val")
+
+  while IFS='=' read -r raw_key raw_val || [ -n "$raw_key" ]; do
+    [[ -z "$raw_key" || "$raw_key" =~ ^[[:space:]]*# ]] && continue
+    raw_key="${raw_key#export }"
+    raw_key="${raw_key//[[:space:]]/}"
+    [ -z "$raw_key" ] && continue
+    raw_val="${raw_val%$'\r'}"
+    raw_val="${raw_val#\"}"; raw_val="${raw_val%\"}"
+    raw_val="${raw_val#\'}"; raw_val="${raw_val%\'}"
+    # D-15: skip empty values
+    [ -z "$raw_val" ] && continue
+
+    printf '%s' "$raw_val" > "$tmp_val"
+
+    awk -v repl="<REDACTED:${raw_key}>" -v vfile="$tmp_val" '
+      BEGIN {
+        value = ""
+        first = 1
+        while ((getline line < vfile) > 0) {
+          if (first) { value = line; first = 0 }
+          else       { value = value "\n" line }
+        }
+        close(vfile)
+        if (value == "") exit 0
+      }
+      {
+        line = $0
+        out = ""
+        while ((i = index(line, value)) > 0) {
+          out = out substr(line, 1, i-1) repl
+          line = substr(line, i + length(value))
+        }
+        print out line
+      }
+    ' "$report_file" > "$tmp_out"
+    mv "$tmp_out" "$report_file"
+    : > "$tmp_val"
+  done < "$env_file"
+
+  rm -f "$tmp_val" 2>/dev/null || true
+}
+
+# Phase 16 D-04 / D-06 / D-07 / Pattern C / Pitfall 8 / Pitfall 14:
+# Append a single audit line to $LOG_DIR/${LOG_PREFIX}executions.jsonl.
+# Uses jq -cn for safe JSON construction. Enforces a 4095-byte guard so
+# POSIX O_APPEND atomicity (< PIPE_BUF = 4096 on Linux) is preserved under
+# concurrent same-profile spawns (Phase 14 semaphore up to 3).
+write_audit_entry() {
+  local ts="$1" delivery_id="$2" webhook_id="$3" event_type="$4"
+  local profile="$5" repo="$6" commit_sha="$7" branch="$8"
+  local cost_usd="$9" duration_ms="${10}" session_id="${11}"
+  local status="${12}" report_url="${13}" error_short="${14:-}"
+
+  mkdir -p "$LOG_DIR"
+  local audit_file="$LOG_DIR/${LOG_PREFIX:-}executions.jsonl"
+
+  # jq_cost / jq_duration normalize: "" -> null, numeric -> number.
+  local jq_cost="null" jq_duration="null"
+  [ -n "$cost_usd" ] && jq_cost="$cost_usd"
+  [ -n "$duration_ms" ] && jq_duration="$duration_ms"
+
+  local line
+  line=$(jq -cn \
+    --arg ts "$ts" \
+    --arg delivery_id "$delivery_id" \
+    --arg webhook_id "$webhook_id" \
+    --arg event_type "$event_type" \
+    --arg profile "$profile" \
+    --arg repo "$repo" \
+    --arg commit_sha "$commit_sha" \
+    --arg branch "$branch" \
+    --arg session_id "$session_id" \
+    --arg status "$status" \
+    --arg report_url "$report_url" \
+    --arg error_short "$error_short" \
+    --argjson cost_usd "$jq_cost" \
+    --argjson duration_ms "$jq_duration" \
+    '{
+      ts: $ts,
+      delivery_id: $delivery_id,
+      webhook_id: (if $webhook_id == "" then null else $webhook_id end),
+      event_type: $event_type,
+      profile: $profile,
+      repo: (if $repo == "" then null else $repo end),
+      commit_sha: (if $commit_sha == "" then null else $commit_sha end),
+      branch: (if $branch == "" then null else $branch end),
+      cost_usd: $cost_usd,
+      duration_ms: $duration_ms,
+      session_id: (if $session_id == "" then null else $session_id end),
+      status: $status,
+      report_url: (if $report_url == "" then null else $report_url end),
+      error_short: (if $error_short == "" then null else $error_short end)
+    }')
+
+  # Pattern C / Pitfall 14: refuse to emit over-budget lines; drop error_short
+  # and retry once with a sentinel value.
+  if [ "${#line}" -gt 4095 ]; then
+    echo "WARNING: audit line exceeds PIPE_BUF, dropping error_short" >&2
+    line=$(jq -cn \
+      --arg ts "$ts" --arg delivery_id "$delivery_id" --arg webhook_id "$webhook_id" \
+      --arg event_type "$event_type" --arg profile "$profile" --arg repo "$repo" \
+      --arg commit_sha "$commit_sha" --arg branch "$branch" \
+      --arg session_id "$session_id" --arg status "$status" --arg report_url "$report_url" \
+      --argjson cost_usd "$jq_cost" --argjson duration_ms "$jq_duration" \
+      '{
+        ts: $ts, delivery_id: $delivery_id,
+        webhook_id: (if $webhook_id == "" then null else $webhook_id end),
+        event_type: $event_type, profile: $profile,
+        repo: (if $repo == "" then null else $repo end),
+        commit_sha: (if $commit_sha == "" then null else $commit_sha end),
+        branch: (if $branch == "" then null else $branch end),
+        cost_usd: $cost_usd, duration_ms: $duration_ms,
+        session_id: (if $session_id == "" then null else $session_id end),
+        status: $status,
+        report_url: (if $report_url == "" then null else $report_url end),
+        error_short: "<dropped: over-budget>"
+      }')
+  fi
+
+  printf '%s\n' "$line" >> "$audit_file"
+}
+
 do_spawn() {
   # Per D-04: --profile is required for spawn (enforced above by profile resolution)
   if [ -z "$PROFILE" ]; then
