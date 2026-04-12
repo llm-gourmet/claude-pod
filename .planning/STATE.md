@@ -130,8 +130,19 @@ Recent decisions affecting current work:
 - [Research]: `--allowedTools` prefix match syntax needs empirical verification (affects Phase 13)
 - [Research]: Docker Compose `deploy.resources.limits` vs `mem_limit` -- verify with `docker inspect` (affects Phase 13)
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260409-2jp | Write a README.md for the claude-secure project | 2026-04-08 | 8fc85b6 | [260409-2jp-write-a-readme-md-for-the-claude-secure-](./quick/260409-2jp-write-a-readme-md-for-the-claude-secure-/) |
+| 260409-fof | Add Claude Code version update mechanism | 2026-04-09 | e780bf4 | [260409-fof-add-claude-code-version-update-mechanism](./quick/260409-fof-add-claude-code-version-update-mechanism/) |
+| 260410-fjy | Update README with logging features and verify update instructions | 2026-04-10 | c332c78 | [260410-fjy-update-readme-with-logging-features-and-](./quick/260410-fjy-update-readme-with-logging-features-and-/) |
+| 260410-ic4 | Log redacted secret mappings in anthropic proxy | 2026-04-10 | b77f0cc | [260410-ic4-log-redacted-secret-mappings-in-anthropi](./quick/260410-ic4-log-redacted-secret-mappings-in-anthropi/) |
+| 260411-mre | Add run-tests.sh script and document testing | 2026-04-11 | dbb11c5 | [260411-mre-add-run-tests-script-and-document-testin](./quick/260411-mre-add-run-tests-script-and-document-testin/) |
+| 260412-q2o | Fix install.sh CONFIG_DIR resolves to /root under sudo | 2026-04-12 | 2e1820a | [260412-q2o-fix-install-sh-config-dir-resolves-to-ro](./quick/260412-q2o-fix-install-sh-config-dir-resolves-to-ro/) |
+
 ## Session Continuity
 
-Last session: 2026-04-12T14:42:13.524Z
-Stopped at: Completed 17-03-PLAN.md
+Last activity: 2026-04-12 - Completed quick task 260412-q2o: Fix install.sh CONFIG_DIR resolves to /root under sudo
+Stopped at: Completed quick-260412-q2o
 Resume file: None
