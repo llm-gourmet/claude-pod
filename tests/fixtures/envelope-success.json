@@ -1,0 +1,12 @@
+{
+  "profile": "test-profile",
+  "event_type": "issues-opened",
+  "timestamp": "2026-04-12T12:00:00Z",
+  "claude": {
+    "result": "Issue triage complete. No action required.",
+    "cost_usd": 0.0123,
+    "duration_ms": 4567,
+    "session_id": "sess-01H9ABC1234XYZ",
+    "num_turns": 2
+  }
+}

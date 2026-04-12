@@ -1,0 +1,4 @@
+This directory is a placeholder. The test harness creates a real bare
+repo at $TEST_TMPDIR/report-repo-bare.git via `git init --bare
+--initial-branch=main` in setup_bare_repo(). The checked-in directory
+exists only so git tracks the placeholder path.

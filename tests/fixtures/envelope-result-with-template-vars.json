@@ -1,0 +1,11 @@
+{
+  "profile": "test-profile",
+  "event_type": "issues-opened",
+  "timestamp": "2026-04-12T12:00:00Z",
+  "claude": {
+    "result": "Use {{ISSUE_TITLE}} as the anchor and {{REPO_NAME}} for context.",
+    "cost_usd": 0.002,
+    "duration_ms": 500,
+    "session_id": "sess-TEMPLATEVAR"
+  }
+}

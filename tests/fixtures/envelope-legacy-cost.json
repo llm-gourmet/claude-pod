@@ -1,0 +1,11 @@
+{
+  "profile": "test-profile",
+  "event_type": "issues-opened",
+  "timestamp": "2026-04-12T12:00:00Z",
+  "claude": {
+    "result": "Legacy schema fixture.",
+    "cost": 0.0099,
+    "duration": 3210,
+    "session_id": "sess-LEGACYXYZ"
+  }
+}

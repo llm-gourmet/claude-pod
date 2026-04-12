@@ -1,0 +1,6 @@
+{
+  "profile": "test-profile",
+  "event_type": "workflow_run-completed",
+  "timestamp": "2026-04-12T12:00:00Z",
+  "error": "Claude stderr: max_turns reached after 20 iterations"
+}

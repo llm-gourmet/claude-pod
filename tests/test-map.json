@@ -1,25 +1,246 @@
 {
   "mappings": [
-    { "paths": ["claude/"], "tests": ["test-phase1.sh", "test-phase2.sh"] },
-    { "paths": ["proxy/"], "tests": ["test-phase1.sh", "test-phase3.sh"] },
-    { "paths": ["validator/"], "tests": ["test-phase1.sh", "test-phase2.sh"] },
-    { "paths": ["docker-compose.yml"], "tests": ["test-phase1.sh", "test-phase6.sh", "test-phase7.sh", "test-phase12.sh"] },
-    { "paths": ["config/whitelist.json"], "tests": ["test-phase1.sh", "test-phase3.sh", "test-phase7.sh"] },
-    { "paths": ["install.sh"], "tests": ["test-phase4.sh", "test-phase12.sh", "test-phase14.sh", "test-phase15.sh"] },
-    { "paths": ["bin/claude-secure"], "tests": ["test-phase6.sh", "test-phase12.sh", "test-phase13.sh", "test-phase14.sh", "test-phase15.sh"] },
-    { "paths": ["webhook/"], "tests": ["test-phase14.sh", "test-phase15.sh"] },
-    { "paths": ["webhook/templates/"], "tests": ["test-phase15.sh"] },
-    { "paths": ["git-hooks/"], "tests": ["test-phase2.sh"] },
-    { "paths": ["tests/test-phase1.sh"], "tests": ["test-phase1.sh"] },
-    { "paths": ["tests/test-phase2.sh"], "tests": ["test-phase2.sh"] },
-    { "paths": ["tests/test-phase3.sh"], "tests": ["test-phase3.sh"] },
-    { "paths": ["tests/test-phase4.sh"], "tests": ["test-phase4.sh"] },
-    { "paths": ["tests/test-phase6.sh"], "tests": ["test-phase6.sh"] },
-    { "paths": ["tests/test-phase7.sh"], "tests": ["test-phase7.sh"] },
-    { "paths": ["tests/test-phase12.sh"], "tests": ["test-phase12.sh"] },
-    { "paths": ["tests/test-phase13.sh"], "tests": ["test-phase13.sh"] },
-    { "paths": ["tests/test-phase14.sh"], "tests": ["test-phase14.sh"] },
-    { "paths": ["tests/test-phase15.sh"], "tests": ["test-phase15.sh"] }
+    {
+      "paths": [
+        "claude/"
+      ],
+      "tests": [
+        "test-phase1.sh",
+        "test-phase2.sh"
+      ]
+    },
+    {
+      "paths": [
+        "proxy/"
+      ],
+      "tests": [
+        "test-phase1.sh",
+        "test-phase3.sh"
+      ]
+    },
+    {
+      "paths": [
+        "validator/"
+      ],
+      "tests": [
+        "test-phase1.sh",
+        "test-phase2.sh"
+      ]
+    },
+    {
+      "paths": [
+        "docker-compose.yml"
+      ],
+      "tests": [
+        "test-phase1.sh",
+        "test-phase6.sh",
+        "test-phase7.sh",
+        "test-phase12.sh"
+      ]
+    },
+    {
+      "paths": [
+        "config/whitelist.json"
+      ],
+      "tests": [
+        "test-phase1.sh",
+        "test-phase3.sh",
+        "test-phase7.sh"
+      ]
+    },
+    {
+      "paths": [
+        "install.sh"
+      ],
+      "tests": [
+        "test-phase4.sh",
+        "test-phase12.sh",
+        "test-phase14.sh",
+        "test-phase15.sh",
+        "test-phase16.sh"
+      ]
+    },
+    {
+      "paths": [
+        "bin/claude-secure"
+      ],
+      "tests": [
+        "test-phase6.sh",
+        "test-phase12.sh",
+        "test-phase13.sh",
+        "test-phase14.sh",
+        "test-phase15.sh",
+        "test-phase16.sh"
+      ]
+    },
+    {
+      "paths": [
+        "webhook/"
+      ],
+      "tests": [
+        "test-phase14.sh",
+        "test-phase15.sh",
+        "test-phase16.sh"
+      ]
+    },
+    {
+      "paths": [
+        "webhook/templates/"
+      ],
+      "tests": [
+        "test-phase15.sh"
+      ]
+    },
+    {
+      "paths": [
+        "git-hooks/"
+      ],
+      "tests": [
+        "test-phase2.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/test-phase1.sh"
+      ],
+      "tests": [
+        "test-phase1.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/test-phase2.sh"
+      ],
+      "tests": [
+        "test-phase2.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/test-phase3.sh"
+      ],
+      "tests": [
+        "test-phase3.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/test-phase4.sh"
+      ],
+      "tests": [
+        "test-phase4.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/test-phase6.sh"
+      ],
+      "tests": [
+        "test-phase6.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/test-phase7.sh"
+      ],
+      "tests": [
+        "test-phase7.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/test-phase12.sh"
+      ],
+      "tests": [
+        "test-phase12.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/test-phase13.sh"
+      ],
+      "tests": [
+        "test-phase13.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/test-phase14.sh"
+      ],
+      "tests": [
+        "test-phase14.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/test-phase15.sh"
+      ],
+      "tests": [
+        "test-phase15.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/test-phase16.sh"
+      ],
+      "tests": [
+        "test-phase16.sh"
+      ]
+    },
+    {
+      "paths": [
+        "webhook/report-templates/"
+      ],
+      "tests": [
+        "test-phase16.sh"
+      ]
+    }
   ],
-  "always_skip": [".planning/", ".claude/", ".git/", "*.md"]
+  "always_skip": [
+    ".planning/",
+    ".claude/",
+    ".git/",
+    "*.md"
+  ],
+  "OPS-01": {
+    "phase": 16,
+    "test_file": "tests/test-phase16.sh",
+    "tests": [
+      "test_report_push_success",
+      "test_report_filename_format",
+      "test_commit_message_format",
+      "test_no_force_push_grep",
+      "test_rebase_retry",
+      "test_push_failure_audit_and_exit",
+      "test_secret_redaction_committed",
+      "test_redaction_empty_value_noop",
+      "test_redaction_metacharacters",
+      "test_pat_not_leaked_on_failure",
+      "test_report_template_fallback",
+      "test_no_report_repo_skips_push",
+      "test_result_text_truncation",
+      "test_result_text_no_recursive_substitution",
+      "test_crlf_and_null_stripped",
+      "test_clone_timeout_bounded"
+    ]
+  },
+  "OPS-02": {
+    "phase": 16,
+    "test_file": "tests/test-phase16.sh",
+    "tests": [
+      "test_audit_file_path",
+      "test_audit_creates_log_dir",
+      "test_audit_jsonl_parseable",
+      "test_audit_has_mandatory_keys",
+      "test_audit_status_enum",
+      "test_audit_spawn_error",
+      "test_audit_claude_error",
+      "test_audit_cost_fallback",
+      "test_audit_line_under_pipe_buf",
+      "test_audit_concurrent_safe",
+      "test_audit_replay_identical",
+      "test_audit_manual_synthetic_id",
+      "test_audit_webhook_id_null_when_absent"
+    ]
+  }
 }
