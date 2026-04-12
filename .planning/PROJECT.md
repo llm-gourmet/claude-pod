@@ -31,15 +31,15 @@ No secret ever leaves the isolated environment uncontrolled — every outbound c
 - Multi-instance support: `--instance NAME` flag, auto-creation, DNS-safe validation, list/remove commands, instance-scoped config and logs — v1.0
 - Pre-push hook with smart test selection, dedicated test instance, clean-state guarantees, and failure summary table — v1.0
 - Profile system replacing instances: `--profile NAME` flag, profile.json config, superuser mode, list command, profile-aware installer — v2.0 Phase 12
+- Headless CLI path: `claude-secure spawn` non-interactive Claude Code via `docker compose exec -T` with profile template rendering — v2.0 Phase 13
+- Webhook listener as host systemd process with HMAC-SHA256 verification and ThreadingHTTPServer dispatch — v2.0 Phase 14
+- Event handlers for Issues, Push, CI Failure with profile-scoped filtering and template rendering — v2.0 Phase 15
+- Result channel: report written to separate documentation repo with audit log — v2.0 Phase 16
+- Operational hardening: container reaper systemd timer, D-11 listener hardening, E2E integration tests — v2.0 Phase 17
 
 ### Active
 
-- [ ] Headless CLI path: non-interactive Claude Code via `docker compose exec -T` with `--profile`
-- [ ] Webhook listener as host process (systemd) receiving GitHub webhooks
-- [ ] Event handlers for Issues, Push to Main, CI Failure
-- [ ] Headless spawn: non-interactive Claude Code session per event (dangerously-skip-permissions)
-- [ ] Result channel: report written to separate documentation repo
-- [ ] Ephemeral instances: container teardown after task completion
+- [ ] (none — v2.0 Headless Agent Mode milestone complete)
 
 ## Current Milestone: v2.0 Headless Agent Mode
 
