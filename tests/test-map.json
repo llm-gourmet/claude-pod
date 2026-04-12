@@ -5,9 +5,10 @@
     { "paths": ["validator/"], "tests": ["test-phase1.sh", "test-phase2.sh"] },
     { "paths": ["docker-compose.yml"], "tests": ["test-phase1.sh", "test-phase6.sh", "test-phase7.sh", "test-phase12.sh"] },
     { "paths": ["config/whitelist.json"], "tests": ["test-phase1.sh", "test-phase3.sh", "test-phase7.sh"] },
-    { "paths": ["install.sh"], "tests": ["test-phase4.sh", "test-phase12.sh", "test-phase14.sh"] },
-    { "paths": ["bin/claude-secure"], "tests": ["test-phase6.sh", "test-phase12.sh", "test-phase13.sh", "test-phase14.sh"] },
-    { "paths": ["webhook/"], "tests": ["test-phase14.sh"] },
+    { "paths": ["install.sh"], "tests": ["test-phase4.sh", "test-phase12.sh", "test-phase14.sh", "test-phase15.sh"] },
+    { "paths": ["bin/claude-secure"], "tests": ["test-phase6.sh", "test-phase12.sh", "test-phase13.sh", "test-phase14.sh", "test-phase15.sh"] },
+    { "paths": ["webhook/"], "tests": ["test-phase14.sh", "test-phase15.sh"] },
+    { "paths": ["webhook/templates/"], "tests": ["test-phase15.sh"] },
     { "paths": ["git-hooks/"], "tests": ["test-phase2.sh"] },
     { "paths": ["tests/test-phase1.sh"], "tests": ["test-phase1.sh"] },
     { "paths": ["tests/test-phase2.sh"], "tests": ["test-phase2.sh"] },
@@ -17,7 +18,8 @@
     { "paths": ["tests/test-phase7.sh"], "tests": ["test-phase7.sh"] },
     { "paths": ["tests/test-phase12.sh"], "tests": ["test-phase12.sh"] },
     { "paths": ["tests/test-phase13.sh"], "tests": ["test-phase13.sh"] },
-    { "paths": ["tests/test-phase14.sh"], "tests": ["test-phase14.sh"] }
+    { "paths": ["tests/test-phase14.sh"], "tests": ["test-phase14.sh"] },
+    { "paths": ["tests/test-phase15.sh"], "tests": ["test-phase15.sh"] }
   ],
   "always_skip": [".planning/", ".claude/", ".git/", "*.md"]
 }
