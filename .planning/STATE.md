@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Headless Agent Mode
-status: executing
-stopped_at: Completed 15-03-PLAN.md
-last_updated: "2026-04-12T10:53:59.873Z"
+status: verifying
+stopped_at: Completed 15-04-PLAN.md
+last_updated: "2026-04-12T10:57:21.524Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 6
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 13
-  completed_plans: 12
+  completed_plans: 13
   percent: 17
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 
 Phase: 15 (event-handlers) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-12
 
 Progress: [██░░░░░░░░] 2/2 plans (17%)
@@ -63,6 +63,7 @@ Progress: [██░░░░░░░░] 2/2 plans (17%)
 | Phase 15-event-handlers P01 | 8min | 3 tasks | 11 files |
 | Phase 15-event-handlers P02 | 7min | 2 tasks | 6 files |
 | Phase 15 P03 | 35min | 3 tasks | 5 files |
+| Phase 15 P04 | 3min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -93,6 +94,7 @@ Recent decisions affecting current work:
 - [Phase 15]: BRANCH/COMMIT_SHA use gated [ -s ] fallback pattern (not post-hoc grep)
 - [Phase 15]: replay subcommand uses exec recursion with CLAUDE_SECURE_EXEC escape hatch for test harness
 - [Phase 15]: Dev-checkout fallback: APP_DIR derived from script location when config.sh absent
+- [Phase 15]: [Phase 15-04]: install.sh install_webhook_service now copies webhook/templates/*.md to /opt/claude-secure/webhook/templates/ with D-12 always-refresh (cp overwrite, never rm -rf)
 
 ### Pending Todos
 
@@ -106,6 +108,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-12T10:53:59.870Z
-Stopped at: Completed 15-03-PLAN.md
+Last session: 2026-04-12T10:57:21.522Z
+Stopped at: Completed 15-04-PLAN.md
 Resume file: None

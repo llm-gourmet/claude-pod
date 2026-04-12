@@ -29,7 +29,7 @@
 - [x] **Phase 12: Profile System** - Per-service security context with isolated whitelist, secrets, workspace, and repo routing (completed 2026-04-11)
 - [x] **Phase 13: Headless CLI Path** - Non-interactive Claude Code execution with ephemeral container lifecycle (completed 2026-04-11)
 - [x] **Phase 14: Webhook Listener** - Systemd service receiving and validating GitHub webhooks (completed 2026-04-12)
-- [ ] **Phase 15: Event Handlers** - Event-type dispatch with prompt templates and payload sanitization
+- [x] **Phase 15: Event Handlers** - Event-type dispatch with prompt templates and payload sanitization (completed 2026-04-12)
 - [ ] **Phase 16: Result Channel** - Structured reporting and execution audit logging
 - [ ] **Phase 17: Operational Hardening** - Container reaper and end-to-end integration verification
 
@@ -97,7 +97,7 @@ Plans:
 - [x] 15-01-PLAN.md — Test scaffold: test-phase15.sh, 9 fixtures, test-map.json update
 - [x] 15-02-PLAN.md — Default templates + listener.py event-type filter and top-level event_type injection
 - [x] 15-03-PLAN.md — bin/claude-secure extract_payload_field, render_template sed-bug fix, resolve_template fallback, replay subcommand
-- [ ] 15-04-PLAN.md — install.sh copies webhook/templates/ to /opt/claude-secure/webhook/templates/
+- [x] 15-04-PLAN.md — install.sh copies webhook/templates/ to /opt/claude-secure/webhook/templates/
 
 ### Phase 16: Result Channel
 **Goal**: Every headless execution produces a structured report pushed to a documentation repo and an audit log entry
@@ -146,6 +146,6 @@ Phases execute in numeric order: 12 -> 13 -> 14 -> 15 -> 16 -> 17
 | 12. Profile System | v2.0 | 0/2 | Complete    | 2026-04-11 |
 | 13. Headless CLI Path | v2.0 | 3/3 | Complete    | 2026-04-11 |
 | 14. Webhook Listener | v2.0 | 4/4 | Complete   | 2026-04-12 |
-| 15. Event Handlers | v2.0 | 3/4 | In Progress|  |
+| 15. Event Handlers | v2.0 | 4/4 | Complete   | 2026-04-12 |
 | 16. Result Channel | v2.0 | 0/? | Not started | - |
 | 17. Operational Hardening | v2.0 | 0/? | Not started | - |
