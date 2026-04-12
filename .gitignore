@@ -4,3 +4,5 @@
 .mcp.json
 *.swp
 *.swo
+__pycache__/
+*.pyc

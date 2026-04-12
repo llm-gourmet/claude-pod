@@ -30,6 +30,111 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 # ---------------------------------------------------------------------------
+# Event filter (Phase 15: D-05..D-10)
+# ---------------------------------------------------------------------------
+# D-06: Sane defaults when profile.webhook_event_filter is omitted.
+# Empty arrays for labels/workflows mean "match anything in that category".
+DEFAULT_FILTER = {
+    "issues": {"actions": ["opened", "labeled"], "labels": []},
+    "push": {"branches": ["main", "master"]},
+    "workflow_run": {"conclusions": ["failure"], "workflows": []},
+}
+
+
+def compute_event_type(headers, payload: dict) -> str:
+    """Collapse (X-GitHub-Event, payload.action) into composite type string.
+
+    D-01: Examples:
+        ('issues', 'opened')          -> 'issues-opened'
+        ('issues', 'labeled')         -> 'issues-labeled'
+        ('push', None)                -> 'push'
+        ('workflow_run', 'completed') -> 'workflow_run-completed'
+        ('ping', None)                -> 'ping'
+
+    `headers` may be a dict or BaseHTTPRequestHandler.headers (HTTPMessage);
+    both support .get().
+    """
+    base = (headers.get("X-GitHub-Event") or "").strip()
+    if not base:
+        return "unknown"
+    action = payload.get("action") if isinstance(payload, dict) else None
+    if isinstance(action, str) and action:
+        return f"{base}-{action}"
+    return base
+
+
+def apply_event_filter(profile: dict, event_type: str, payload: dict):
+    """Return (allowed: bool, reason: str). `reason` is empty when allowed.
+
+    D-05..D-10. Zero I/O: takes the already-loaded profile dict, does dict
+    lookups only. Sub-millisecond per call (Pitfall 3).
+    """
+    base = event_type.split("-", 1)[0]
+    fcfg = (profile.get("webhook_event_filter") or {}).get(base)
+    if fcfg is None:
+        fcfg = DEFAULT_FILTER.get(base)
+    if fcfg is None:
+        # Unknown base event type -- not an error, just filter out (D-04).
+        # This catches `ping` and any other event GitHub may add.
+        return (False, f"unsupported_event:{base}")
+
+    if base == "issues":
+        action = payload.get("action", "") if isinstance(payload, dict) else ""
+        if fcfg.get("actions") and action not in fcfg["actions"]:
+            return (False, f"issue_action_not_matched:{action}")
+        required_labels = fcfg.get("labels") or []
+        if required_labels:
+            issue = payload.get("issue") or {}
+            labels = {
+                lbl.get("name", "")
+                for lbl in issue.get("labels", [])
+                if isinstance(lbl, dict)
+            }
+            if not labels.intersection(required_labels):
+                return (False, "issue_labels_not_matched")
+        return (True, "")
+
+    if base == "push":
+        # D-09: Loop prevention FIRST (before branch matching), so a bot
+        # push to main is still filtered.
+        bot_users = profile.get("webhook_bot_users") or []
+        pusher = ((payload.get("pusher") or {}).get("name") or "")
+        if pusher and pusher in bot_users:
+            return (False, "loop_prevention")
+        ref = payload.get("ref", "") or ""
+        if ref.startswith("refs/heads/"):
+            branch = ref[len("refs/heads/"):]
+        else:
+            branch = ref
+        allowed_branches = fcfg.get("branches") or []
+        if allowed_branches and branch not in allowed_branches:
+            return (False, f"branch_not_matched:{branch}")
+        return (True, "")
+
+    if base == "workflow_run":
+        action = payload.get("action") if isinstance(payload, dict) else None
+        if action != "completed":
+            return (False, f"workflow_action_not_completed:{action}")
+        wr = payload.get("workflow_run") or {}
+        conclusion = wr.get("conclusion") or ""
+        allowed_conclusions = fcfg.get("conclusions") or []
+        if allowed_conclusions and conclusion not in allowed_conclusions:
+            return (False, f"workflow_conclusion_not_matched:{conclusion}")
+        allowed_workflows = fcfg.get("workflows") or []
+        if allowed_workflows:
+            wf_name = (
+                (payload.get("workflow") or {}).get("name")
+                or wr.get("name")
+                or ""
+            )
+            if wf_name not in allowed_workflows:
+                return (False, f"workflow_name_not_matched:{wf_name}")
+        return (True, "")
+
+    return (False, f"unsupported_event:{base}")
+
+
+# ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 class Config:
@@ -107,7 +212,11 @@ def log_event(**kwargs):
 def resolve_profile_by_repo(profiles_dir: pathlib.Path, repo_full_name: str):
     """Scan profiles_dir for a profile whose `repo` matches repo_full_name.
 
-    Returns dict {name, repo, webhook_secret} or None.
+    Returns dict {name, repo, webhook_secret, webhook_event_filter,
+    webhook_bot_users} or None. The filter + bot_users fields are loaded
+    here (single disk read) so that Phase 15's apply_event_filter can work
+    against an in-memory dict with zero I/O (Pitfall 3).
+
     Gotcha 8: profile.json may be mid-write during scan; skip on parse error.
     """
     if not repo_full_name:
@@ -129,6 +238,8 @@ def resolve_profile_by_repo(profiles_dir: pathlib.Path, repo_full_name: str):
                 "name": profile_json.parent.name,
                 "repo": repo_full_name,
                 "webhook_secret": secret,
+                "webhook_event_filter": data.get("webhook_event_filter") or {},
+                "webhook_bot_users": data.get("webhook_bot_users") or [],
             }
     return None
 
@@ -155,10 +266,11 @@ def persist_event(
     suffix = uuid.uuid4().hex[:8]
     path = events_dir / f"{ts}-{suffix}.json"
     payload = json.loads(raw_body)
+    payload["event_type"] = event_type           # D-02: canonical top-level field
     payload["_meta"] = {
         "received_at": now.isoformat().replace("+00:00", "Z"),
         "profile": profile_name,
-        "event_type": event_type,
+        "event_type": event_type,                # kept for backward compat (D-02)
         "delivery_id": delivery_id,
     }
     path.write_text(json.dumps(payload, indent=2))
@@ -356,7 +468,27 @@ class WebhookHandler(BaseHTTPRequestHandler):
         delivery_id = self.headers.get(
             "X-GitHub-Delivery", f"nodelivery-{uuid.uuid4().hex[:8]}"
         )
-        event_type = self.headers.get("X-GitHub-Event", "unknown")
+
+        # D-01: composite event type from header + payload.action
+        event_type = compute_event_type(self.headers, payload)
+
+        # D-05..D-10: per-profile filter between HMAC and persist.
+        # D-07: filtered events log + return 202 WITHOUT persisting or spawning.
+        allowed, reason = apply_event_filter(profile, event_type, payload)
+        if not allowed:
+            log_event(
+                event="filtered",
+                profile=profile["name"],
+                repo=repo,
+                delivery_id=delivery_id,
+                event_type=event_type,
+                reason=reason,
+                status_code=202,
+            )
+            return self._send_json(
+                202, {"status": "filtered", "reason": reason}
+            )
+
         try:
             event_path = persist_event(
                 _config.events_dir,
@@ -377,6 +509,17 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 500, {"error": "persist_failed", "detail": str(exc)}
             )
 
+        # D-23: new 'routed' log event — accepted into the spawn pipeline
+        log_event(
+            event="routed",
+            profile=profile["name"],
+            repo=repo,
+            delivery_id=delivery_id,
+            event_type=event_type,
+            status_code=202,
+        )
+
+        # Retain Phase 14 'received' log line for backward compatibility.
         log_event(
             event="received",
             profile=profile["name"],
