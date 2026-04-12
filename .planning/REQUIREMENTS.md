@@ -93,8 +93,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HOOK-05 | Phase 15 | Complete |
 | HOOK-06 | Phase 14 | Complete |
 | HOOK-07 | Phase 15 | Complete |
-| OPS-01 | Phase 16 | Pending |
-| OPS-02 | Phase 16 | Pending |
+| OPS-01 | Phase 16 | In Progress |
+| OPS-02 | Phase 16 | In Progress |
 | OPS-03 | Phase 17 | Pending |
 
 **Coverage:**
