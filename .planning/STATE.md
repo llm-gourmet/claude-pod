@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Headless Agent Mode
-status: phase_complete
-stopped_at: "Phase 16 complete — all 4 plans, 33/33 tests green, OPS-01/OPS-02 satisfied"
-last_updated: "2026-04-12T12:50:36.159Z"
+status: executing
+stopped_at: "Completed 17-operational-hardening/17-01-PLAN.md (Phase 17 Wave 0 scaffold: 31 unit tests + 5 E2E scenarios, 26 NOT IMPLEMENTED sentinels)"
+last_updated: "2026-04-12T13:57:30.252Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 6
   completed_phases: 5
-  total_plans: 17
-  completed_plans: 17
+  total_plans: 21
+  completed_plans: 18
   percent: 88
 ---
 
@@ -21,12 +21,12 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** Phase 15 — event-handlers
+**Current focus:** Phase 17 — operational-hardening
 
 ## Current Position
 
-Phase: 16 (result-channel) — IN PROGRESS
-Plan: 4 of 4 complete (16-03 next)
+Phase: 17 (operational-hardening) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
 Last activity: 2026-04-12
 
@@ -67,6 +67,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 16-result-channel P02 | 12min | 2 tasks | 3 files |
 | Phase 16-result-channel P03 | 180 | 3 tasks | 2 files |
 | Phase 16-result-channel P04 | 12m | 2 tasks | 3 files |
+| Phase 17 P01 | 9min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -105,6 +106,8 @@ Recent decisions affecting current work:
 - [Phase 16-result-channel]: [Phase 16-03]: CLAUDE_SECURE_FAKE_CLAUDE_STDOUT test escape hatch added (Rule 3 deviation) — production docker compose path unchanged
 - [Phase 16-result-channel]: Plan 16-04: install.sh step 5c clones step 5b structurally with templates→report-templates substitution and explicit chmod 755 on the directory; D-12 always-refresh preserves operator-added custom templates
 - [Phase 16-result-channel]: Plan 16-04: README Phase 16 section placed between Logging and Testing as the operator observability anchor; uses natural prose with no leaked decision IDs and copy-pasteable jq/profile.json examples
+- [Phase 17]: [Phase 17-01]: Wave 0 failing-test scaffold with mock docker (Pattern B) + mock flock PATH shims; 31 unit tests (26 fail as NOT IMPLEMENTED sentinels, 5 scaffold passes); E2E harness with check_budget gate between scenarios + REAPER_ORPHAN_AGE_SECS=0 cleanup trap
+- [Phase 17]: [Phase 17-01]: profile-e2e .env force-added (gitignored by default) -- test-only placeholder, no real secret. Fixture rewrites loader-facing .env path that Phase 15/16 contracts require verbatim
 
 ### Pending Todos
 
@@ -118,6 +121,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-12T12:50:36.156Z
-Stopped at: Completed 16-result-channel/16-04-PLAN.md (Phase 16 complete: all 4 plans, all 33 tests green)
+Last session: 2026-04-12T13:57:30.249Z
+Stopped at: Completed 17-operational-hardening/17-01-PLAN.md (Phase 17 Wave 0 scaffold: 31 unit tests + 5 E2E scenarios, 26 NOT IMPLEMENTED sentinels)
 Resume file: None

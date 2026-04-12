@@ -35,7 +35,7 @@ Requirements for headless agent mode. Each maps to roadmap phases.
 
 - [x] **OPS-01**: After execution, a structured markdown report is written and pushed to a separate documentation repo
 - [x] **OPS-02**: Each headless execution is logged to structured JSONL with event metadata (webhook ID, event type, commit SHA, cost)
-- [ ] **OPS-03**: A container reaper cleans up orphaned containers from failed or timed-out executions
+- [x] **OPS-03**: A container reaper cleans up orphaned containers from failed or timed-out executions
 
 ## Future Requirements
 
@@ -95,7 +95,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HOOK-07 | Phase 15 | Complete |
 | OPS-01 | Phase 16 | In Progress |
 | OPS-02 | Phase 16 | In Progress |
-| OPS-03 | Phase 17 | Pending |
+| OPS-03 | Phase 17 | Complete |
 
 **Coverage:**
 - v2.0 requirements: 18 total

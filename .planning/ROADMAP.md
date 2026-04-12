@@ -124,7 +124,7 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 17-01: TBD
+- [x] 17-01: TBD
 - [ ] 17-02: TBD
 
 ## Progress
@@ -151,4 +151,4 @@ Phases execute in numeric order: 12 -> 13 -> 14 -> 15 -> 16 -> 17
 | 14. Webhook Listener | v2.0 | 4/4 | Complete   | 2026-04-12 |
 | 15. Event Handlers | v2.0 | 4/4 | Complete   | 2026-04-12 |
 | 16. Result Channel | v2.0 | 4/4 | Complete   | 2026-04-12 |
-| 17. Operational Hardening | v2.0 | 0/? | Not started | - |
+| 17. Operational Hardening | v2.0 | 1/4 | In Progress|  |
