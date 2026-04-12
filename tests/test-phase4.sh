@@ -114,8 +114,8 @@ report "PLAT-03" "Platform detection includes iptables version check" $?
   ANTHROPIC_API_KEY="test-key-12345"
   setup_auth > /dev/null 2>&1
 
-  # setup_auth writes to $CONFIG_DIR/instances/default/.env
-  ENV_FILE="$TMPDIR_AUTH/instances/default/.env"
+  # setup_auth writes to $CONFIG_DIR/profiles/default/.env (Phase 12 migration)
+  ENV_FILE="$TMPDIR_AUTH/profiles/default/.env"
 
   # Verify .env was created with correct content
   RESULT=0
