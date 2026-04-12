@@ -951,6 +951,7 @@ push_with_retry() {
 
   local err_log="$clone_dir/push.err"
 
+  # Initial push attempt.
   if LC_ALL=C GIT_ASKPASS="$clone_dir/.askpass.sh" \
      GIT_ASKPASS_PAT="$REPORT_REPO_TOKEN" \
      GIT_TERMINAL_PROMPT=0 \
@@ -959,8 +960,26 @@ push_with_retry() {
     return 0
   fi
 
-  if grep -q -e 'non-fast-forward' -e 'Updates were rejected' "$err_log"; then
-    echo "INFO: report push rejected (non-fast-forward). Rebasing and retrying once." >&2
+  # Phase 17 Rule 1 fix: rebase+retry loop up to 3 attempts. The original
+  # single-retry path loses a 3-way concurrent race (Phase 17 17-03 D-14.2
+  # test). File-protocol bare repos report non-ff rejection as:
+  #   "remote rejected", "failed to update ref", or "cannot lock ref"
+  # none of which match the https "non-fast-forward" string. Expanded grep
+  # keeps the https path working while covering file://.
+  local attempt=0 max_attempts=3
+  while [ "$attempt" -lt "$max_attempts" ]; do
+    if ! grep -q -e 'non-fast-forward' \
+                 -e 'Updates were rejected' \
+                 -e 'failed to update ref' \
+                 -e 'cannot lock ref' \
+                 -e 'remote rejected' \
+                 "$err_log"; then
+      # Not a non-ff race -- hard fail (e.g. auth, network, perms).
+      break
+    fi
+    attempt=$((attempt + 1))
+    echo "INFO: report push rejected (non-fast-forward, attempt $attempt/$max_attempts). Rebasing and retrying." >&2
+    : > "$err_log"  # reset so the next grep only sees the next attempt's output
     if ! LC_ALL=C GIT_ASKPASS="$clone_dir/.askpass.sh" \
          GIT_ASKPASS_PAT="$REPORT_REPO_TOKEN" \
          GIT_TERMINAL_PROMPT=0 \
@@ -976,7 +995,7 @@ push_with_retry() {
            push origin "$branch" 2>>"$err_log"; then
       return 0
     fi
-  fi
+  done
 
   sed "s|${REPORT_REPO_TOKEN}|<REDACTED:REPORT_REPO_TOKEN>|g" "$err_log" >&2
   return 1
@@ -1721,8 +1740,13 @@ else
   #   - list/help/-h/--help: no config needed.
   #   - replay: resolves its own profile from the event file before exec-ing
   #     spawn, so skipping superuser load here avoids the interactive prompt.
+  #   - reap: Phase 17 background/timer-driven, must never prompt. Uses
+  #     LOG_DIR/CONFIG_DIR defaults and walks docker ps directly; no profile
+  #     config or whitelist merge is required. load_superuser_config would
+  #     `read -rp` for DEFAULT_WORKSPACE when config.sh is absent and block
+  #     forever in a non-interactive service context.
   case "$FIRST_ARG" in
-    list|help|--help|-h|replay)
+    list|help|--help|-h|replay|reap)
       : # skip superuser load
       ;;
     *)
