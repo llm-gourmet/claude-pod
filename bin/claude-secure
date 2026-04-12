@@ -1091,11 +1091,25 @@ ASKPASS
   return 0
 }
 
+# Phase 16: best-effort audit writer for early-return spawn_error paths.
+# Called from do_spawn precondition checks before delivery_id/event_type
+# are known. Uses synthetic manual-<uuid> and "unknown" event_type.
+_spawn_error_audit() {
+  local err_msg="$1"
+  local _ts _did
+  _ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  _did="manual-$(uuidgen 2>/dev/null | tr -d - | head -c 32 || echo unknown)"
+  LOG_DIR="${LOG_DIR:-$CONFIG_DIR/logs}" \
+    write_audit_entry "$_ts" "$_did" "" "unknown" "${PROFILE:-unknown}" \
+      "" "" "" "" "" "" "spawn_error" "" "${err_msg:0:200}" 2>/dev/null || true
+}
+
 do_spawn() {
   # Per D-04: --profile is required for spawn (enforced above by profile resolution)
   if [ -z "$PROFILE" ]; then
     echo "ERROR: --profile is required for spawn" >&2
     echo "Usage: claude-secure spawn --profile <name> --event '<json>'" >&2
+    _spawn_error_audit "spawn: --profile is required"
     return 1
   fi
 
@@ -1104,6 +1118,10 @@ do_spawn() {
   EVENT_FILE=""
   PROMPT_TEMPLATE=""
   DRY_RUN=0
+  # Phase 16: --skip-report flag (mirrors --dry-run). Also accepts
+  # CLAUDE_SECURE_SKIP_REPORT=1 env var for test harness convenience.
+  SKIP_REPORT=0
+  [ "${CLAUDE_SECURE_SKIP_REPORT:-0}" = "1" ] && SKIP_REPORT=1
   local i=1
   while [ $i -lt ${#REMAINING_ARGS[@]} ]; do
     case "${REMAINING_ARGS[$i]:-}" in
@@ -1111,6 +1129,7 @@ do_spawn() {
       --event-file)     EVENT_FILE="${REMAINING_ARGS[$((i+1))]:-}"; i=$((i+2)) ;;
       --prompt-template) PROMPT_TEMPLATE="${REMAINING_ARGS[$((i+1))]:-}"; i=$((i+2)) ;;
       --dry-run)        DRY_RUN=1; i=$((i+1)) ;;
+      --skip-report)    SKIP_REPORT=1; i=$((i+1)) ;;
       *)                i=$((i+1)) ;;
     esac
   done
@@ -1119,6 +1138,7 @@ do_spawn() {
   if [ -n "$EVENT_FILE" ] && [ -z "$EVENT_JSON" ]; then
     if [ ! -f "$EVENT_FILE" ]; then
       echo "ERROR: Event file not found: $EVENT_FILE" >&2
+      _spawn_error_audit "spawn: event file not found: $EVENT_FILE"
       return 1
     fi
     EVENT_JSON=$(cat "$EVENT_FILE")
@@ -1128,10 +1148,12 @@ do_spawn() {
   if [ -z "$EVENT_JSON" ]; then
     echo "ERROR: --event or --event-file is required for spawn" >&2
     echo "Usage: claude-secure spawn --profile <name> --event '<json>'" >&2
+    _spawn_error_audit "spawn: --event or --event-file is required"
     return 1
   fi
   if ! echo "$EVENT_JSON" | jq empty 2>/dev/null; then
     echo "ERROR: Invalid JSON in --event" >&2
+    _spawn_error_audit "spawn: invalid JSON in --event"
     return 1
   fi
 
@@ -1149,6 +1171,42 @@ do_spawn() {
   local event_type
   # D-03: Priority: top-level .event_type (Phase 15) > ._meta.event_type (Phase 14) > .action (older)
   event_type=$(echo "$EVENT_JSON" | jq -r '.event_type // ._meta.event_type // .action // "unknown"')
+
+  # Phase 16 / D-12: derive delivery_id.
+  # Priority: ._meta.delivery_id (webhook path) > replay-<uuid> (CLAUDE_SECURE_EXEC set) > manual-<uuid>.
+  local delivery_id webhook_id delivery_id_short _did_stripped
+  delivery_id=$(echo "$EVENT_JSON" | jq -r '._meta.delivery_id // empty')
+  if [ -z "$delivery_id" ]; then
+    if [ -n "${CLAUDE_SECURE_EXEC:-}" ]; then
+      delivery_id="replay-$(uuidgen 2>/dev/null | tr -d - | head -c 32 || echo unknown)"
+    else
+      delivery_id="manual-$(uuidgen 2>/dev/null | tr -d - | head -c 32 || echo unknown)"
+    fi
+    webhook_id=""
+  else
+    webhook_id="$delivery_id"
+  fi
+  # D-12: delivery_id_short = last 8 chars of the *stripped* id (no replay-/manual- prefix).
+  _did_stripped="${delivery_id##*-}"
+  delivery_id_short="${_did_stripped: -8}"
+
+  # Phase 16 / D-06: audit metadata extracted from event JSON.
+  local audit_repo audit_commit audit_branch
+  audit_repo=$(echo "$EVENT_JSON" | jq -r '.repository.full_name // empty')
+  audit_commit=$(echo "$EVENT_JSON" | jq -r '.pull_request.head.sha // .after // .head_commit.id // empty')
+  audit_branch=$(echo "$EVENT_JSON" | jq -r '.pull_request.head.ref // (.ref // empty | sub("^refs/heads/"; ""))')
+  [ "$audit_branch" = "null" ] && audit_branch=""
+
+  # Phase 16 / D-12: read report_repo fields from profile.json and export as env vars
+  # so publish_report can consume them via REPORT_REPO / REPORT_BRANCH / REPORT_PATH_PREFIX.
+  # REPORT_REPO_TOKEN comes from profile.env (loaded earlier via load_profile_config).
+  local _profile_json="$CONFIG_DIR/profiles/$PROFILE/profile.json"
+  if [ -f "$_profile_json" ]; then
+    REPORT_REPO=$(jq -r '.report_repo // empty' "$_profile_json")
+    REPORT_BRANCH=$(jq -r '.report_branch // "main"' "$_profile_json")
+    REPORT_PATH_PREFIX=$(jq -r '.report_path_prefix // "reports"' "$_profile_json")
+    export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX
+  fi
 
   # Resolve and render prompt template (per D-13 through D-17)
   local profile_dir="$CONFIG_DIR/profiles/$PROFILE"
@@ -1170,7 +1228,6 @@ do_spawn() {
   # Start ephemeral containers (per D-06)
   mkdir -p "$LOG_DIR"
   chmod 777 "$LOG_DIR"
-  docker compose up -d --wait
 
   # Build claude command flags
   # NOTE: --bare is intentionally OMITTED. Per RESEARCH.md Open Question 3,
@@ -1188,7 +1245,16 @@ do_spawn() {
   claude_stderr_file=$(mktemp)
   _CLEANUP_FILES+=("$claude_stderr_file")
 
-  claude_stdout=$(docker compose exec -T claude claude -p "${claude_args[@]}" 2>"$claude_stderr_file") || claude_exit=$?
+  # Phase 16 test escape hatch: if CLAUDE_SECURE_FAKE_CLAUDE_STDOUT points at a
+  # file, skip docker and use its contents as the envelope stdout. Mirrors the
+  # Phase 15 CLAUDE_SECURE_EXEC pattern. Production path unchanged.
+  if [ -n "${CLAUDE_SECURE_FAKE_CLAUDE_STDOUT:-}" ] && [ -f "${CLAUDE_SECURE_FAKE_CLAUDE_STDOUT}" ]; then
+    claude_stdout=$(cat "${CLAUDE_SECURE_FAKE_CLAUDE_STDOUT}")
+    claude_exit="${CLAUDE_SECURE_FAKE_CLAUDE_EXIT:-0}"
+  else
+    docker compose up -d --wait
+    claude_stdout=$(docker compose exec -T claude claude -p "${claude_args[@]}" 2>"$claude_stderr_file") || claude_exit=$?
+  fi
 
   # Validate Claude output contains expected fields (per HEAD-02: result, cost, duration, session_id)
   # Note: Exact field names from --output-format json are documented as result, session_id,
@@ -1202,16 +1268,91 @@ do_spawn() {
     fi
   fi
 
-  # Handle output (per D-11, D-12)
-  if [ "$claude_exit" -ne 0 ]; then
+  # =======================================================================
+  # Phase 16 / Pattern E: publish + audit wrapper.
+  #
+  # Flow:
+  #   1. Build envelope (success or error) into $envelope_json.
+  #   2. Render report template if one exists for event_type.
+  #   3. Redact env secrets from rendered report.
+  #   4. publish_report() -> report_url (or empty on skip/failure).
+  #   5. write_audit_entry() with final report_url (D-17: audit-always).
+  #   6. Emit envelope to stdout.
+  # D-18: exit nonzero ONLY when Claude itself failed. Publish failures
+  # are logged in audit.status but do NOT flip the spawn exit code.
+  # =======================================================================
+  local envelope_json report_url="" audit_status report_body_file=""
+  local _audit_ts _audit_duration_total _audit_cost _audit_session _audit_err_short=""
+  _audit_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  if [ "$claude_exit" -eq 0 ]; then
+    envelope_json=$(build_output_envelope "$PROFILE" "$event_type" "$claude_stdout")
+    audit_status="success"
+  else
     local error_msg
-    error_msg=$(cat "$claude_stderr_file")
-    build_error_envelope "$PROFILE" "$event_type" "$error_msg"
-    return "$claude_exit"
+    error_msg=$(cat "$claude_stderr_file" 2>/dev/null || echo "")
+    envelope_json=$(build_error_envelope "$PROFILE" "$event_type" "$error_msg")
+    audit_status="claude_error"
+    _audit_err_short="${error_msg:0:200}"
   fi
 
-  # Success: wrap in metadata envelope (per D-11)
-  build_output_envelope "$PROFILE" "$event_type" "$claude_stdout"
+  # Extract audit fields from envelope (Pitfall 5: legacy cost/duration fallback).
+  _audit_cost=$(echo "$envelope_json" | jq -r '.claude.cost_usd // .claude.cost // 0' 2>/dev/null || echo 0)
+  _audit_duration_total=$(echo "$envelope_json" | jq -r '.claude.duration_ms // .claude.duration // 0' 2>/dev/null || echo 0)
+  _audit_session=$(echo "$envelope_json" | jq -r '.claude.session_id // ""' 2>/dev/null || echo "")
+
+  # Render + redact + publish report when not skipped.
+  if [ "$SKIP_REPORT" -ne 1 ]; then
+    local _report_template
+    _report_template=$(resolve_report_template "$event_type" 2>/dev/null || echo "")
+    if [ -n "$_report_template" ] && [ -f "$_report_template" ]; then
+      report_body_file=$(mktemp)
+      _CLEANUP_FILES+=("$report_body_file")
+      if render_report_template "$_report_template" "$EVENT_JSON" "$envelope_json" "$audit_status" \
+           > "$report_body_file" 2>/dev/null; then
+        # Redact env secrets (D-15) from rendered report before publishing.
+        local _env_file="$CONFIG_DIR/profiles/$PROFILE/.env"
+        if [ -f "$_env_file" ]; then
+          redact_report_file "$report_body_file" "$_env_file" 2>/dev/null || true
+        fi
+        # D-17: publish is best-effort. Failures are logged in audit.status
+        # but do NOT flip spawn exit code (only claude failures do — D-18).
+        local _publish_rc=0
+        report_url=$(publish_report "$report_body_file" "$event_type" \
+                       "$delivery_id" "$delivery_id_short" "$audit_repo") || _publish_rc=$?
+        if [ "$_publish_rc" -ne 0 ] && [ "$_publish_rc" -ne 2 ]; then
+          # 2 = skipped (no REPORT_REPO/TOKEN); anything else = real failure.
+          if [ "$audit_status" = "success" ]; then
+            audit_status="push_error"
+          fi
+          report_url=""
+        fi
+      fi
+    fi
+  fi
+
+  # D-17: audit-always, with final report_url populated (Pattern E).
+  write_audit_entry \
+    "$_audit_ts" \
+    "$delivery_id" \
+    "$webhook_id" \
+    "$event_type" \
+    "$PROFILE" \
+    "$audit_repo" \
+    "$audit_commit" \
+    "$audit_branch" \
+    "$_audit_cost" \
+    "$_audit_duration_total" \
+    "$_audit_session" \
+    "$audit_status" \
+    "$report_url" \
+    "$_audit_err_short" 2>/dev/null || true
+
+  # Emit envelope to stdout.
+  echo "$envelope_json"
+
+  # D-18: only flip exit on claude failure. Publish failures audit-logged only.
+  return "$claude_exit"
 }
 
 # =========================================================================
