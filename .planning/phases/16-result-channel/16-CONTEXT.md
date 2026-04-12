@@ -71,7 +71,7 @@ The phase wires this into the existing `do_spawn` lifecycle in `bin/claude-secur
 
 ### File Placement & Commit
 
-- **D-12:** Report filename inside the doc repo: **`<report_path_prefix>/<YYYY>/<MM>/<event_type>-<delivery_id_short>.md`**, where `delivery_id_short` is the first 8 chars of the delivery id (matches Phase 14 event file pattern). Example: `reports/2026/04/issues-opened-9c1a7e44.md`.
+- **D-12:** Report filename inside the doc repo: **`<report_path_prefix>/<YYYY>/<MM>/<event_type>-<delivery_id_short>.md`**, where `delivery_id_short` is the **last 8 hex chars** of the delivery id after stripping any `replay-` or `manual-` prefix (per RESEARCH.md Open Question 2). For webhook spawns this yields `9c1a7e44`; for `replay-<uuid32>` and `manual-<uuid32>` it yields the last 8 chars of the internal uuid. Example: `reports/2026/04/issues-opened-9c1a7e44.md`.
 - **D-13:** Commit message: `"report(<event_type>): <repo> <delivery_id_short>"` — single-line, conventional, no body. Authored with `GIT_AUTHOR_NAME="claude-secure"` and `GIT_AUTHOR_EMAIL="claude-secure@localhost"` via env vars to avoid touching host git config.
 - **D-14:** Push strategy: **`git push origin <report_branch>`** (non-forced) from the shallow clone. On rejection (remote drifted), retry exactly once with `git pull --rebase && git push`. Second failure → audit with `status: "report_push_failed"` and surface warning to stderr. Never force-push.
 
