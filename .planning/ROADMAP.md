@@ -110,7 +110,7 @@ Plans:
 
 Plans:
 - [x] 16-01-PLAN.md — Wave 0 test scaffold: harness, fixtures, default report templates (Nyquist self-healing)
-- [ ] 16-02-PLAN.md — Wave 1a: resolve_report_template + config schema documentation
+- [x] 16-02-PLAN.md — Wave 1a: resolve_report_template + config schema documentation
 - [ ] 16-03-PLAN.md — Wave 1b: render + redact + publish + audit wired into do_spawn (OPS-01 + OPS-02 core)
 - [ ] 16-04-PLAN.md — Wave 2: installer ships report templates + README operator docs
 
@@ -150,5 +150,5 @@ Phases execute in numeric order: 12 -> 13 -> 14 -> 15 -> 16 -> 17
 | 13. Headless CLI Path | v2.0 | 3/3 | Complete    | 2026-04-11 |
 | 14. Webhook Listener | v2.0 | 4/4 | Complete   | 2026-04-12 |
 | 15. Event Handlers | v2.0 | 4/4 | Complete   | 2026-04-12 |
-| 16. Result Channel | v2.0 | 1/4 | In Progress|  |
+| 16. Result Channel | v2.0 | 2/4 | In Progress|  |
 | 17. Operational Hardening | v2.0 | 0/? | Not started | - |

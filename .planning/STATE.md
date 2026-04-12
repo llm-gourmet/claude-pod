@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Headless Agent Mode
-status: verifying
-stopped_at: Completed 16-01-PLAN.md (Wave 0 test scaffold)
-last_updated: "2026-04-12T12:08:56.160Z"
+status: in_progress
+stopped_at: Completed 16-02-PLAN.md (Wave 1a — report template resolver)
+last_updated: "2026-04-12T12:16:43.715Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 6
   completed_phases: 4
   total_plans: 17
-  completed_plans: 14
-  percent: 83
+  completed_plans: 15
+  percent: 88
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 
 ## Current Position
 
-Phase: 15 (event-handlers) — VERIFIED
-Plan: 4 of 4
-Status: Phase complete — ready for verification
+Phase: 16 (result-channel) — IN PROGRESS
+Plan: 2 of 4 complete (16-03 next)
+Status: Wave 1a complete — resolver + schema doc landed
 Last activity: 2026-04-12
 
-Progress: [████████░░] 5/6 phases (83%)
+Progress: [█████████░] 88% (15/17 plans)
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [████████░░] 5/6 phases (83%)
 | Phase 15-event-handlers P02 | 7min | 2 tasks | 6 files |
 | Phase 15 P03 | 35min | 3 tasks | 5 files |
 | Phase 15 P04 | 3min | 1 tasks | 1 files |
+| Phase 16-result-channel P02 | 12min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -95,6 +96,7 @@ Recent decisions affecting current work:
 - [Phase 15]: replay subcommand uses exec recursion with CLAUDE_SECURE_EXEC escape hatch for test harness
 - [Phase 15]: Dev-checkout fallback: APP_DIR derived from script location when config.sh absent
 - [Phase 15]: [Phase 15-04]: install.sh install_webhook_service now copies webhook/templates/*.md to /opt/claude-secure/webhook/templates/ with D-12 always-refresh (cp overwrite, never rm -rf)
+- [Phase 16-result-channel]: Parameterized _resolve_default_templates_dir(subdir) instead of duplicating — single resolver serves both prompt and report templates, preserving Phase 15 backward compat
 
 ### Pending Todos
 
@@ -108,6 +110,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-12T12:08:56.157Z
-Stopped at: Completed 16-01-PLAN.md (Wave 0 test scaffold)
+Last session: 2026-04-12T12:16:21.605Z
+Stopped at: Completed 16-02-PLAN.md (Wave 1a — report template resolver)
 Resume file: None
