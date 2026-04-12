@@ -74,7 +74,10 @@ The proxy container bridges both networks. The validator shares the claude conta
 ```bash
 git clone <repo-url>
 cd claude-secure
-./install.sh
+sudo ./install.sh
+
+# Optional: also install webhook listener (systemd service) and reaper timer
+sudo ./install.sh --with-webhook
 ```
 
 The installer:
@@ -87,6 +90,8 @@ The installer:
 6. Copies the default `whitelist.json` to `~/.claude-secure/whitelist.json` and symlinks it back so config edits persist across updates
 7. Builds Docker images
 8. Installs the `claude-secure` CLI to `/usr/local/bin` (or `~/.local/bin` as fallback)
+9. Requires `sudo` to install the CLI to `/usr/local/bin/` and write hook configs to `/etc/claude-secure/` (root-owned, immutable to the Claude process). If `sudo` is unavailable, the CLI falls back to `~/.local/bin` but security hooks will not be root-owned.
+10. When `--with-webhook` is passed: installs `webhook/listener.py` to `/opt/claude-secure/webhook/`, writes a default config to `/etc/claude-secure/webhook.json` (never overwrites an existing file), and installs `claude-secure-listener.service` plus `claude-secure-reaper.timer` systemd units.
 
 ## Usage
 
@@ -108,6 +113,27 @@ claude-secure upgrade
 
 # Show all available commands
 claude-secure help
+```
+
+```bash
+# Scope any command to a specific profile
+claude-secure --profile <name>
+
+# Without --profile: superuser mode (merged access to all profiles)
+claude-secure
+
+# Run headless Claude Code session triggered by a GitHub event
+claude-secure --profile <name> spawn --event '<json>'
+claude-secure --profile <name> spawn --event-file <path/to/event.json>
+
+# Replay a previous webhook delivery by delivery-ID substring
+claude-secure --profile <name> replay <delivery-id>
+
+# Clean up orphaned spawn containers and stale event files
+claude-secure reap
+
+# List all profiles and their running status
+claude-secure list
 ```
 
 ## Configuration
@@ -153,6 +179,56 @@ The whitelist is re-read on every request -- no container restart is needed afte
 **`readonly_domains`** -- Domains allowed for read-only (GET) requests without call-ID registration. These are typically documentation and reference sites.
 
 To add a new secret, add an entry to the `secrets` array with a unique placeholder, the environment variable name, and the domains that need it. Set the environment variable in `~/.claude-secure/.env`.
+
+## Profiles
+
+Profiles isolate each project's workspace, secrets, and whitelist into a named
+directory under `~/.claude-secure/profiles/<name>/`.
+
+### Profile directory layout
+
+```
+~/.claude-secure/profiles/<name>/
+  profile.json      # Profile configuration
+  .env              # Auth credentials + project secrets (chmod 600)
+  whitelist.json    # Per-profile domain whitelist
+  prompts/          # Optional: custom prompt templates
+  report-templates/ # Optional: custom report templates
+```
+
+### Creating a profile
+
+Pass `--profile <name>` to any `claude-secure` command. If the profile does not
+exist, the CLI prompts interactively for workspace path and auth credentials:
+
+```bash
+claude-secure --profile myproject
+```
+
+Profile names must be DNS-safe: lowercase alphanumeric and hyphens, starting with
+a letter or digit, max 63 characters.
+
+### profile.json fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `workspace` | Yes | Absolute path to the project workspace directory |
+| `repo` | No | Full repo name (`owner/repo`) -- used by webhook listener for profile routing |
+| `webhook_secret` | No | HMAC-SHA256 secret for GitHub webhook verification |
+| `report_repo` | No | Full HTTPS URL of the docs repo for report push (e.g. `https://github.com/you/docs.git`) |
+| `report_branch` | No | Target branch for report push (default: `main`) |
+| `report_path_prefix` | No | Directory inside report repo where reports land (default: `reports`) |
+| `max_turns` | No | Maximum Claude turns per headless spawn (default: unlimited) |
+| `webhook_event_filter` | No | Per-event-type filter config (see Webhook Listener section) |
+| `webhook_bot_users` | No | GitHub usernames ignored for loop prevention on push events |
+
+The `REPORT_REPO_TOKEN` PAT for report push belongs in the profile `.env`, not
+the global `.env`:
+
+```bash
+# ~/.claude-secure/profiles/<name>/.env
+REPORT_REPO_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+```
 
 ## Logging
 
@@ -271,22 +347,22 @@ The audit log is always written. The report push is best-effort -- push failures
 
 ### Audit log
 
-Every spawn appends one JSONL line to `$LOG_DIR/<LOG_PREFIX>executions.jsonl`. For the default instance the path is `~/.claude-secure/logs/executions.jsonl`; multi-instance deployments (e.g. the test instance) get their own prefixed file.
+Every spawn appends one JSONL line to `$LOG_DIR/<LOG_PREFIX>executions.jsonl`. For the default profile the path is `~/.claude-secure/logs/default-executions.jsonl`; multi-instance deployments (e.g. the test instance) get their own prefixed file.
 
 Each line is a single JSON object with mandatory keys: `ts`, `delivery_id`, `webhook_id`, `event_type`, `profile`, `repo`, `commit_sha`, `branch`, `cost_usd`, `duration_ms`, `session_id`, `status`, `report_url`.
 
 ```bash
 # tail successful spawns
-tail -f ~/.claude-secure/logs/executions.jsonl | jq 'select(.status == "success")'
+tail -f ~/.claude-secure/logs/default-executions.jsonl | jq 'select(.status == "success")'
 
 # find push failures
-jq 'select(.status == "report_push_failed")' ~/.claude-secure/logs/executions.jsonl
+jq 'select(.status == "report_push_failed")' ~/.claude-secure/logs/default-executions.jsonl
 
 # total cost per profile
 jq -s 'group_by(.profile)
        | map({profile: .[0].profile,
               total_cost: (map(.cost_usd // 0) | add)})' \
-  ~/.claude-secure/logs/executions.jsonl
+  ~/.claude-secure/logs/default-executions.jsonl
 ```
 
 The `status` field takes one of four values:
@@ -332,6 +408,73 @@ CLAUDE_SECURE_SKIP_REPORT=1 claude-secure spawn --profile <name> --event ...
 - **No force-push, ever.** Force-push is never used by the report publisher. If a concurrent writer pushes to the same branch first, the spawn rebases with `git pull --rebase` and retries exactly once. A second failure is recorded in the audit log with `status=report_push_failed`; the doc repo history is never rewritten.
 - **Result text is bounded at 16KB.** Larger Claude outputs are truncated UTF-8-safely with a `... [truncated N more bytes]` suffix so that long sessions cannot produce multi-megabyte commits.
 - **Audit lines are append-only.** Per-instance JSONL files respect the `LOG_PREFIX` multi-instance convention, so two instances on the same host write to distinct files and cannot race each other. Within one instance, POSIX `O_APPEND` guarantees atomic writes because each line stays under 4KB (`PIPE_BUF`).
+
+## Webhook Listener
+
+The webhook listener is an optional component that receives GitHub webhook POSTs,
+verifies HMAC-SHA256 signatures, and dispatches `claude-secure spawn` for matching
+events. Install it with `--with-webhook` (see Installation).
+
+### Installing
+
+```bash
+sudo ./install.sh --with-webhook
+```
+
+This installs `claude-secure-listener.service` (the webhook HTTP server) and
+`claude-secure-reaper.timer` (the orphan cleanup timer). After installation:
+
+```bash
+sudo systemctl enable --now claude-secure-listener.service
+```
+
+### webhook.json configuration
+
+The listener reads `/etc/claude-secure/webhook.json` on startup. The installer
+writes a default from `webhook/config.example.json` if the file does not exist (never
+overwrites):
+
+```json
+{
+  "bind": "127.0.0.1",
+  "port": 9000,
+  "max_concurrent_spawns": 3,
+  "profiles_dir": "/home/<user>/.claude-secure/profiles",
+  "events_dir": "/home/<user>/.claude-secure/events",
+  "logs_dir": "/home/<user>/.claude-secure/logs",
+  "claude_secure_bin": "/usr/local/bin/claude-secure"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `bind` | Address to listen on. Use `127.0.0.1` (local only) behind a reverse proxy, or `0.0.0.0` to expose directly. |
+| `port` | HTTP port for incoming webhooks. |
+| `max_concurrent_spawns` | Maximum simultaneous headless Claude sessions (default 3). |
+| `profiles_dir` | Path to `~/.claude-secure/profiles/`. |
+| `events_dir` | Directory where raw event JSON files are persisted for replay. |
+| `logs_dir` | Directory for `webhook.jsonl` and per-profile audit logs. |
+| `claude_secure_bin` | Path to the `claude-secure` CLI (must be the system-installed copy). |
+
+### Profile fields required for webhook routing
+
+For the listener to route an incoming event to a profile, the profile's
+`profile.json` must include:
+
+- `repo` -- matches the `repository.full_name` in the GitHub payload (e.g. `"owner/repo"`)
+- `webhook_secret` -- HMAC-SHA256 secret matching the GitHub webhook configuration
+
+### Starting manually (for testing)
+
+```bash
+python3 webhook/listener.py --config /etc/claude-secure/webhook.json
+```
+
+### Tailing webhook logs
+
+```bash
+tail -f ~/.claude-secure/logs/webhook.jsonl | jq .
+```
 
 ## Phase 17 -- Operational Hardening (Container Reaper)
 
@@ -413,9 +556,13 @@ Requires Docker running. All tests use an isolated `claude-test` Docker Compose 
 | test-phase2.sh | Call validation, hook enforcement, iptables rules |
 | test-phase3.sh | Secret redaction in proxy |
 | test-phase4.sh | Installer script |
-| test-phase6.sh | Phase 6 features |
-| test-phase7.sh | Environment file and secret loading |
-| test-phase9.sh | CLI wrapper (bin/claude-secure) |
+| test-phase12.sh | Profile system (create, validate, list, superuser mode) |
+| test-phase13.sh | Headless spawn (output envelope, max-turns, ephemeral lifecycle) |
+| test-phase14.sh | Webhook listener (HMAC verification, dispatch, concurrency) |
+| test-phase15.sh | Event handlers (issue/push/workflow_run filter, replay) |
+| test-phase16.sh | Result channel (report push, JSONL audit log) |
+| test-phase17.sh | Container reaper unit tests (orphan detection, event cleanup) |
+| test-phase17-e2e.sh | End-to-end reaper scenarios (live Docker containers) |
 
 ### Smart Pre-Push Hook
 

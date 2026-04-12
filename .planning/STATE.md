@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Headless Agent Mode
 status: verifying
-stopped_at: Completed 17-03-PLAN.md
-last_updated: "2026-04-12T14:48:52.628Z"
+stopped_at: "Completed quick-260412-w1y: Update README.md to document v2.0 features"
+last_updated: "2026-04-12T21:12:33.466Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 6
   completed_phases: 6
   total_plans: 21
   completed_plans: 21
-  percent: 88
+  percent: 100
 ---
 
 # Project State
@@ -140,9 +140,10 @@ Recent decisions affecting current work:
 | 260410-ic4 | Log redacted secret mappings in anthropic proxy | 2026-04-10 | b77f0cc | [260410-ic4-log-redacted-secret-mappings-in-anthropi](./quick/260410-ic4-log-redacted-secret-mappings-in-anthropi/) |
 | 260411-mre | Add run-tests.sh script and document testing | 2026-04-11 | dbb11c5 | [260411-mre-add-run-tests-script-and-document-testin](./quick/260411-mre-add-run-tests-script-and-document-testin/) |
 | 260412-q2o | Fix install.sh CONFIG_DIR resolves to /root under sudo | 2026-04-12 | 2e1820a | [260412-q2o-fix-install-sh-config-dir-resolves-to-ro](./quick/260412-q2o-fix-install-sh-config-dir-resolves-to-ro/) |
+| 260412-w1y | Update README.md to document v2.0 features | 2026-04-12 | 5a8a9a5 | [260412-w1y-update-readme-md-to-document-v2-0-featur](./quick/260412-w1y-update-readme-md-to-document-v2-0-featur/) |
 
 ## Session Continuity
 
-Last activity: 2026-04-12 - Completed quick task 260412-q2o: Fix install.sh CONFIG_DIR resolves to /root under sudo
-Stopped at: Completed quick-260412-q2o
+Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
+Stopped at: Completed quick-260412-w1y
 Resume file: None
