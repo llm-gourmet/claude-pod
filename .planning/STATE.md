@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Headless Agent Mode
 status: executing
-stopped_at: Completed 15-02-PLAN.md
-last_updated: "2026-04-12T10:35:07.728Z"
+stopped_at: Completed 15-03-PLAN.md
+last_updated: "2026-04-12T10:53:59.873Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 13
-  completed_plans: 11
+  completed_plans: 12
   percent: 17
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 ## Current Position
 
 Phase: 15 (event-handlers) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-04-12
 
@@ -62,6 +62,7 @@ Progress: [██░░░░░░░░] 2/2 plans (17%)
 | Phase 14 P04 | 8min | 1 tasks | 1 files |
 | Phase 15-event-handlers P01 | 8min | 3 tasks | 11 files |
 | Phase 15-event-handlers P02 | 7min | 2 tasks | 6 files |
+| Phase 15 P03 | 35min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -87,6 +88,11 @@ Recent decisions affecting current work:
 - [Phase 15-event-handlers]: [Phase 15-01]: Wave 0 test scaffold — 28 named test functions + 9 fixtures encoding Pitfalls 1/4/7, LISTENER_PORT=19015, inline harness helpers
 - [Phase 15-event-handlers]: [Phase 15-02]: Expanded resolve_profile_by_repo to return webhook_event_filter + webhook_bot_users so apply_event_filter runs with zero I/O (Pitfall 3)
 - [Phase 15-event-handlers]: [Phase 15-02]: Listener emits BOTH event=routed (D-23) and event=received (Phase 14 compat) for accepted events
+- [Phase 15]: render_template rewritten with 18 D-16 variables using awk file-based substitution (Pitfall 1 fix)
+- [Phase 15]: UTF-8 safe truncation via python3 env-var transport (Pitfall 4 fix)
+- [Phase 15]: BRANCH/COMMIT_SHA use gated [ -s ] fallback pattern (not post-hoc grep)
+- [Phase 15]: replay subcommand uses exec recursion with CLAUDE_SECURE_EXEC escape hatch for test harness
+- [Phase 15]: Dev-checkout fallback: APP_DIR derived from script location when config.sh absent
 
 ### Pending Todos
 
@@ -100,6 +106,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-12T10:35:07.726Z
-Stopped at: Completed 15-02-PLAN.md
+Last session: 2026-04-12T10:53:59.870Z
+Stopped at: Completed 15-03-PLAN.md
 Resume file: None

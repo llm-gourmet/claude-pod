@@ -29,7 +29,7 @@ Requirements for headless agent mode. Each maps to roadmap phases.
 - [x] **HOOK-04**: Listener handles Push-to-Main events and dispatches to correct profile
 - [x] **HOOK-05**: Listener handles CI Failure events (workflow_run completed with failure) and dispatches to correct profile
 - [x] **HOOK-06**: Multiple simultaneous webhooks execute safely with unique compose project names and isolated workspaces
-- [ ] **HOOK-07**: User can replay a stored webhook payload for debugging via CLI command
+- [x] **HOOK-07**: User can replay a stored webhook payload for debugging via CLI command
 
 ### Operations
 
@@ -92,7 +92,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HOOK-04 | Phase 15 | Complete |
 | HOOK-05 | Phase 15 | Complete |
 | HOOK-06 | Phase 14 | Complete |
-| HOOK-07 | Phase 15 | Pending |
+| HOOK-07 | Phase 15 | Complete |
 | OPS-01 | Phase 16 | Pending |
 | OPS-02 | Phase 16 | Pending |
 | OPS-03 | Phase 17 | Pending |
