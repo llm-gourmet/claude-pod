@@ -77,7 +77,7 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 14-01-PLAN.md — Test harness, fixtures, and test-map update (Wave 0)
+- [x] 14-01-PLAN.md — Test harness, fixtures, and test-map update (Wave 0)
 - [ ] 14-02-PLAN.md — webhook/listener.py + config.example.json (Wave 1, HOOK-02/HOOK-06)
 - [ ] 14-03-PLAN.md — systemd unit file claude-secure-webhook.service (Wave 1, HOOK-01)
 - [ ] 14-04-PLAN.md — install.sh --with-webhook extension (Wave 2, HOOK-01)
@@ -143,7 +143,7 @@ Phases execute in numeric order: 12 -> 13 -> 14 -> 15 -> 16 -> 17
 | 11. Milestone Cleanup | v1.0 | 1/1 | Complete | 2026-04-11 |
 | 12. Profile System | v2.0 | 0/2 | Complete    | 2026-04-11 |
 | 13. Headless CLI Path | v2.0 | 3/3 | Complete    | 2026-04-11 |
-| 14. Webhook Listener | v2.0 | 0/? | Not started | - |
+| 14. Webhook Listener | v2.0 | 1/4 | In Progress|  |
 | 15. Event Handlers | v2.0 | 0/? | Not started | - |
 | 16. Result Channel | v2.0 | 0/? | Not started | - |
 | 17. Operational Hardening | v2.0 | 0/? | Not started | - |
