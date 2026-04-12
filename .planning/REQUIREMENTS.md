@@ -23,7 +23,7 @@ Requirements for headless agent mode. Each maps to roadmap phases.
 
 ### Webhooks
 
-- [ ] **HOOK-01**: Webhook listener runs as a host-side systemd service receiving GitHub webhooks
+- [x] **HOOK-01**: Webhook listener runs as a host-side systemd service receiving GitHub webhooks
 - [ ] **HOOK-02**: Every incoming webhook is verified via HMAC-SHA256 signature against raw payload body
 - [ ] **HOOK-03**: Listener handles Issue events (opened, labeled) and dispatches to correct profile
 - [ ] **HOOK-04**: Listener handles Push-to-Main events and dispatches to correct profile
@@ -86,7 +86,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HEAD-03 | Phase 13 | Complete |
 | HEAD-04 | Phase 13 | Complete |
 | HEAD-05 | Phase 13 | Complete |
-| HOOK-01 | Phase 14 | Pending |
+| HOOK-01 | Phase 14 | Complete |
 | HOOK-02 | Phase 14 | Pending |
 | HOOK-03 | Phase 15 | Pending |
 | HOOK-04 | Phase 15 | Pending |

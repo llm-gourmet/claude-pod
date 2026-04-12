@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Headless Agent Mode
 status: executing
-stopped_at: Completed 14-01-PLAN.md
-last_updated: "2026-04-12T09:10:29.219Z"
+stopped_at: Completed 14-03-PLAN.md
+last_updated: "2026-04-12T09:14:27.884Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 9
-  completed_plans: 6
+  completed_plans: 7
   percent: 17
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 ## Current Position
 
 Phase: 14 (webhook-listener) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-04-12
 
@@ -57,6 +57,7 @@ Progress: [██░░░░░░░░] 2/2 plans (17%)
 | Phase 13 P02 | 4min | 1 tasks | 1 files |
 | Phase 13 P03 | 1min | 1 tasks | 1 files |
 | Phase 14 P01 | 6min | 3 tasks | 4 files |
+| Phase 14 P03 | 3min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -76,6 +77,7 @@ Recent decisions affecting current work:
 - [Phase 13]: bare flag omitted from spawn to preserve PreToolUse security hooks
 - [Phase 13]: resolve_template uses PROFILE+CONFIG_DIR globals matching test contract
 - [Phase 14]: Wave 0 test scaffold created: 16 named test functions, stub claude-secure binary on PATH, gen_sig uses printf '%s' to avoid trailing-newline HMAC mismatch
+- [Phase 14]: Hardening directives (NoNewPrivileges, ProtectSystem, PrivateTmp, CapabilityBoundingSet) deliberately omitted from webhook unit file — each breaks docker compose subprocess; Phase 17 may revisit
 
 ### Pending Todos
 
@@ -89,6 +91,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-12T09:10:29.216Z
-Stopped at: Completed 14-01-PLAN.md
+Last session: 2026-04-12T09:14:27.882Z
+Stopped at: Completed 14-03-PLAN.md
 Resume file: None
