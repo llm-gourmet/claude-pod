@@ -38,13 +38,30 @@ SyslogIdentifier=claude-secure-webhook
 User=root
 Group=root
 
-# Hardening directives deliberately NOT added (each would break docker compose):
+# === D-11 (Phase 17): Safe-subset systemd hardening ===
+# Each directive below was verified compatible with the listener's docker compose
+# subprocess in the Phase 17 E2E test gate (D-12). See
+# .planning/phases/17-operational-hardening/17-CONTEXT.md D-11 for the locked list.
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+# === Hardening directives deliberately NOT added (each breaks docker compose) ===
+# Phase 17 D-11/D-12 empirically re-verified this exclusion list:
 #   NoNewPrivileges=true     -- blocks subprocess privilege transitions inside claude-secure
 #   ProtectSystem=strict     -- Docker volume-mount machinery writes outside the allowed set
-#   ReadOnlyPaths=...        -- same reason
 #   PrivateTmp=true          -- proxy/validator containers may touch /tmp during bootstrap
-#   CapabilityBoundingSet=...-- docker daemon communication needs broader caps than we can predict
-# Phase 17 hardening can re-evaluate each with an empirical test matrix.
+#   CapabilityBoundingSet=...-- docker daemon communication needs broader caps than predictable
+#   ProtectHome=true         -- profile state lives under $HOME/.claude-secure
+#   PrivateDevices=true      -- iptables validator needs /dev access on shared netns
+# Re-enabling any of these without a new E2E pass will break the listener.
 
 [Install]
 WantedBy=multi-user.target

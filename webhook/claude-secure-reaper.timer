@@ -1,13 +1,32 @@
 # /etc/systemd/system/claude-secure-reaper.timer
-# Installed by install.sh --with-webhook (copies this file verbatim).
+# Installed by install.sh --with-webhook (Phase 17 step 5d).
 # Source of truth: webhook/claude-secure-reaper.timer in the claude-secure repo.
 #
-# WAVE 0 PLACEHOLDER -- populated in 17-02 (Reaper Core).
+# Triggers claude-secure-reaper.service every 5 minutes after a 2-minute boot warmup.
 # Locked by .planning/phases/17-operational-hardening/17-CONTEXT.md D-01..D-02.
-#
-# DO NOT add NoNewPrivileges, ProtectSystem, PrivateTmp, CapabilityBoundingSet,
-# ProtectHome, or PrivateDevices: each one breaks docker compose subprocess
-# (empirically confirmed in Phase 14, re-confirmed in Phase 17 E2E gate D-12).
 
 [Unit]
-Description=claude-secure reaper periodic timer (PLACEHOLDER -- populated by 17-02)
+Description=claude-secure reaper periodic timer
+Documentation=https://github.com/igorthetigor/claude-secure
+
+[Timer]
+# Fire 2 minutes after boot, then every 5 minutes from previous activation.
+# OnBootSec gives the system time to settle before the first reap cycle.
+# OnUnitActiveSec drives steady-state cycle interval (D-02).
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+# AccuracySec controls how much wall-clock skew systemd permits when grouping
+# timer firings to save power. 30s is a sensible default -- way under our
+# 5-min cycle, so cycle drift is negligible.
+AccuracySec=30s
+
+# Persistent=true: if the host was off when a firing was due, run immediately
+# at next boot to catch up. Modern systemd (>=232) persists state for
+# monotonic timers too.
+Persistent=true
+
+Unit=claude-secure-reaper.service
+
+[Install]
+WantedBy=timers.target

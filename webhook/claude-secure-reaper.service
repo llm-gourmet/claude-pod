@@ -1,13 +1,58 @@
 # /etc/systemd/system/claude-secure-reaper.service
-# Installed by install.sh --with-webhook (copies this file verbatim).
+# Installed by install.sh --with-webhook (Phase 17 step 5d).
 # Source of truth: webhook/claude-secure-reaper.service in the claude-secure repo.
 #
-# WAVE 0 PLACEHOLDER -- populated in 17-02 (Reaper Core).
 # Locked by .planning/phases/17-operational-hardening/17-CONTEXT.md D-01..D-12.
-#
 # DO NOT add NoNewPrivileges, ProtectSystem, PrivateTmp, CapabilityBoundingSet,
 # ProtectHome, or PrivateDevices: each one breaks docker compose subprocess
 # (empirically confirmed in Phase 14, re-confirmed in Phase 17 E2E gate D-12).
 
 [Unit]
-Description=claude-secure reaper (PLACEHOLDER -- populated by 17-02)
+Description=claude-secure orphaned container reaper
+Documentation=https://github.com/igorthetigor/claude-secure
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/claude-secure reap
+
+# Logging (D-09): journal-only, no separate JSONL.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=claude-secure-reaper
+
+# User (D-24 carry-forward): root for docker socket access. Same justification
+# as the listener -- delegates real work to docker compose, which itself
+# invokes the hardened container stack.
+User=root
+Group=root
+
+# === D-11: Safe-subset systemd hardening ===
+# These 10 directives do NOT touch /var/run/docker.sock, /tmp (compose state),
+# filesystem writes for compose, or capability-bound docker subprocess calls.
+# Each was verified by Phase 14 to be docker-compose-compatible OR was added
+# in Phase 17 E2E test gate D-12 and verified to keep the reaper functional.
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+# === Hardening directives deliberately NOT added (each breaks docker compose) ===
+# Phase 14 + Phase 17 D-11/D-12 empirically lock this exclusion list:
+#   NoNewPrivileges=true     -- blocks subprocess privilege transitions
+#   ProtectSystem=strict     -- Docker volume-mount machinery writes outside the allowed set
+#   PrivateTmp=true          -- compose may touch /tmp during bootstrap
+#   CapabilityBoundingSet=...-- docker daemon comms need broader caps
+#   ProtectHome=true         -- profile state lives under $HOME/.claude-secure
+#   PrivateDevices=true      -- iptables validator needs /dev access on shared netns
+# Re-enabling any of these without a new E2E pass will break the reaper.
+
+[Install]
+WantedBy=multi-user.target
