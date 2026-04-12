@@ -3,8 +3,10 @@ set -euo pipefail
 
 # Source-only mode: load function definitions without executing main logic.
 # Used by tests: __CLAUDE_SECURE_SOURCE_ONLY=1 source bin/claude-secure
+# (also accepts CLAUDE_SECURE_SOURCE_ONLY without leading underscores for the
+# Phase 15 test harness)
 if [ -z "${__CLAUDE_SECURE_SOURCE_ONLY:-}" ]; then
-  __CLAUDE_SECURE_SOURCE_ONLY=0
+  __CLAUDE_SECURE_SOURCE_ONLY="${CLAUDE_SECURE_SOURCE_ONLY:-0}"
 fi
 
 CONFIG_DIR="${CONFIG_DIR:-$HOME/.claude-secure}"
@@ -318,7 +320,11 @@ parse_log_flags() {
 spawn_project_name() {
   local profile="$1"
   local uuid8
-  uuid8=$(uuidgen | tr -d '-' | head -c 8 | tr '[:upper:]' '[:lower:]')
+  # Pure-ASCII uuid hex, so bash parameter expansion is UTF-8 safe here.
+  # (Phase 15 bans byte-based bash truncation project-wide.)
+  local raw
+  raw=$(uuidgen | tr -d '-' | tr '[:upper:]' '[:lower:]')
+  uuid8="${raw:0:8}"
   echo "cs-${profile}-${uuid8}"
 }
 
@@ -366,35 +372,192 @@ build_error_envelope() {
     }'
 }
 
+# =========================================================================
+# Phase 15 helpers (D-13, D-15, D-17, D-18): template resolution fallback,
+# UTF-8-safe payload extraction, and awk-based token substitution.
+# =========================================================================
+
+# D-15: Resolve the default templates directory. Priority chain:
+#   1. $WEBHOOK_TEMPLATES_DIR env var (operator override).
+#   2. Dev checkout: $APP_DIR/webhook/templates when $APP_DIR/.git exists.
+#   3. Production fallback: /opt/claude-secure/webhook/templates.
+_resolve_default_templates_dir() {
+  if [ -n "${WEBHOOK_TEMPLATES_DIR:-}" ]; then
+    echo "$WEBHOOK_TEMPLATES_DIR"
+    return
+  fi
+  if [ -n "${APP_DIR:-}" ] && [ -d "$APP_DIR/.git" ] && [ -d "$APP_DIR/webhook/templates" ]; then
+    echo "$APP_DIR/webhook/templates"
+    return
+  fi
+  echo "/opt/claude-secure/webhook/templates"
+}
+
+# D-17 / D-18 / Pitfall 4: extract a jq path from an event payload and emit
+# the hygienized + truncated value bytes to stdout. Hygiene strips NUL and
+# ASCII control chars except \n \r \t; truncation is UTF-8-safe at 8192
+# bytes with a "... [truncated N more bytes]" suffix. Uses python3 via stdin
+# to avoid argv-size limits, IFS issues, and byte-unsafe bash truncation.
+#
+# Args:  $1 = event source (JSON string OR a path to a JSON file),
+#        $2 = jq filter,
+#        $3 = default when jq result is empty.
+# Out:   writes the cleaned value to stdout (no temp file path indirection).
+#        Callers that need a file (e.g. render_template) create their own
+#        temp file via mktemp + redirection and register with _CLEANUP_FILES.
+#
+# Hard constraints:
+#   - MUST NOT use byte-based bash truncation (unsafe for multi-byte UTF-8).
+#   - MUST pass raw payload via stdin, not argv.
+extract_payload_field() {
+  local event_source="$1"
+  local jq_path="$2"
+  local default_value="${3:-}"
+
+  # Auto-detect file vs inline JSON: a regular file on disk is read via
+  # `jq -r ... <file>`, otherwise pipe the string in via a here-string.
+  local raw
+  if [ -f "$event_source" ]; then
+    raw=$(jq -r "$jq_path // empty" "$event_source" 2>/dev/null)
+  else
+    raw=$(printf '%s' "$event_source" | jq -r "$jq_path // empty" 2>/dev/null)
+  fi
+  if [ -z "$raw" ]; then
+    raw="$default_value"
+  fi
+
+  # Hygiene + truncation via python3. Payload goes through an env var (not
+  # argv or stdin) to avoid heredoc/pipe collisions and argv-size limits.
+  # The script itself is passed via `python3 -c` so stdin is free for the
+  # caller if needed and bytes pass losslessly.
+  RAW_PAYLOAD="$raw" python3 -c '
+import os, sys
+data = os.environb.get(b"RAW_PAYLOAD", b"")
+keep = {0x09, 0x0A, 0x0D}
+cleaned = bytes(b for b in data if b >= 0x20 or b in keep)
+LIMIT = 8192
+if len(cleaned) > LIMIT:
+    truncated = cleaned[:LIMIT].decode("utf-8", errors="ignore").encode("utf-8")
+    dropped = len(cleaned) - len(truncated)
+    suffix = f"... [truncated {dropped} more bytes]".encode("utf-8")
+    cleaned = truncated + suffix
+sys.stdout.buffer.write(cleaned)
+'
+}
+
+# Helper: extract a field (via extract_payload_field) into a new temp file,
+# register with _CLEANUP_FILES, and echo the temp file path. Used by
+# render_template to feed _substitute_token_from_file.
+_extract_to_tempfile() {
+  local event_source="$1"
+  local jq_path="$2"
+  local default_value="${3:-}"
+  local out_file
+  out_file=$(mktemp)
+  _CLEANUP_FILES+=("$out_file")
+  extract_payload_field "$event_source" "$jq_path" "$default_value" > "$out_file"
+  echo "$out_file"
+}
+
+# Pitfall 1 fix: substitute `{{TOKEN}}` in a template with the contents of
+# a value file, using awk to avoid any sed escape-character bugs. The value
+# can contain any of: | \ & / newlines — none need escaping because awk reads
+# the substitution from a file, not a command-line arg.
+#
+# This variant inlines the value at the token position (short single/few-line
+# values like titles, authors, URLs). For long multiline bodies/messages, use
+# _substitute_multiline_token_from_file which emits each line on its own row.
+_substitute_token_from_file() {
+  local rendered="$1"
+  local token="$2"
+  local value_file="$3"
+  echo "$rendered" | awk -v token="{{${token}}}" -v vfile="$value_file" '
+    BEGIN {
+      value = ""
+      first = 1
+      while ((getline line < vfile) > 0) {
+        if (first) { value = line; first = 0 }
+        else       { value = value "\n" line }
+      }
+      close(vfile)
+    }
+    {
+      if (index($0, token) > 0) {
+        n = split($0, parts, token)
+        out = parts[1]
+        for (i = 2; i <= n; i++) out = out value parts[i]
+        print out
+      } else {
+        print
+      }
+    }
+  '
+}
+
+# Multiline variant: when a line contains only `{{TOKEN}}` (with optional
+# surrounding whitespace handling), emit the value file line-by-line in place.
+# Matches the pre-Phase-15 ISSUE_BODY pattern so templates that reserve a
+# blank line for the body render correctly.
+_substitute_multiline_token_from_file() {
+  local rendered="$1"
+  local token="$2"
+  local value_file="$3"
+  echo "$rendered" | awk -v pat="{{${token}}}" -v vfile="$value_file" '
+    index($0, pat) > 0 {
+      while ((getline line < vfile) > 0) print line
+      close(vfile)
+      next
+    }
+    { print }
+  '
+}
+
 resolve_template() {
   local event_type="$1"
   local explicit_template="${2:-}"
 
   local profile_dir="$CONFIG_DIR/profiles/$PROFILE"
   local prompts_dir="$profile_dir/prompts"
-  if [ ! -d "$prompts_dir" ]; then
-    echo "ERROR: No prompts directory at $prompts_dir" >&2
-    echo "Create templates in: $prompts_dir/<event-type>.md" >&2
-    return 1
-  fi
 
-  local path
+  # D-13 step 1: explicit --prompt-template stays in the profile dir ONLY.
+  # No default-dir fallback when the user named a template explicitly — a
+  # silent fallback would hide typos.
   if [ -n "$explicit_template" ]; then
-    path="$prompts_dir/${explicit_template}.md"
-  else
-    path="$prompts_dir/${event_type}.md"
-  fi
-
-  if [ ! -f "$path" ]; then
-    echo "ERROR: Template not found: $path" >&2
-    if [ -n "$explicit_template" ]; then
-      echo "Specified via --prompt-template flag" >&2
-    else
-      echo "Derived from event_type '$event_type'. Use --prompt-template to override." >&2
+    local path="$prompts_dir/${explicit_template}.md"
+    if [ -f "$path" ]; then
+      echo "$path"
+      return 0
     fi
+    echo "ERROR: Template not found: $path (from --prompt-template)" >&2
     return 1
   fi
-  echo "$path"
+
+  # D-13 step 2: profile override by event_type.
+  if [ -d "$prompts_dir" ]; then
+    local path="$prompts_dir/${event_type}.md"
+    if [ -f "$path" ]; then
+      echo "$path"
+      return 0
+    fi
+  fi
+
+  # D-13 step 3: default template fallback.
+  local default_dir
+  default_dir=$(_resolve_default_templates_dir)
+  if [ -d "$default_dir" ]; then
+    local path="$default_dir/${event_type}.md"
+    if [ -f "$path" ]; then
+      echo "$path"
+      return 0
+    fi
+  fi
+
+  # D-13 step 4: hard fail, listing every path checked.
+  echo "ERROR: No template found for event_type '$event_type'" >&2
+  echo "  Checked: $prompts_dir/${event_type}.md" >&2
+  echo "  Checked: $default_dir/${event_type}.md" >&2
+  echo "  Use --prompt-template to override, or create one of the above." >&2
+  return 1
 }
 
 render_template() {
