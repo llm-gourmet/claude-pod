@@ -225,28 +225,67 @@ test_reap_grep_guard() {
 # =========================================================================
 
 test_reap_subcommand_exists() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (reap) dispatch + do_reap"
-  return 1
+  local bin="$PROJECT_DIR/bin/claude-secure"
+  grep -q '^do_reap()' "$bin" || { echo "missing do_reap() in $bin" >&2; return 1; }
+  grep -q '^reap_orphan_projects()' "$bin" || { echo "missing reap_orphan_projects()" >&2; return 1; }
+  grep -q '^reap_stale_event_files()' "$bin" || { echo "missing reap_stale_event_files()" >&2; return 1; }
+  # Dispatch case: `  reap)` followed later by `do_reap` in the case arm
+  grep -qE '^[[:space:]]+reap\)[[:space:]]*$' "$bin" || { echo "missing reap) dispatch case" >&2; return 1; }
+  return 0
 }
 
 test_reaper_unit_files_lint() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (systemd-analyze verify)"
-  return 1
+  if ! command -v systemd-analyze >/dev/null 2>&1; then
+    # No systemd on this host; fall back to structural grep
+    grep -q '^\[Unit\]' "$PROJECT_DIR/webhook/claude-secure-reaper.service" || return 1
+    grep -q '^\[Service\]' "$PROJECT_DIR/webhook/claude-secure-reaper.service" || return 1
+    grep -q '^\[Install\]' "$PROJECT_DIR/webhook/claude-secure-reaper.service" || return 1
+    grep -q '^\[Unit\]' "$PROJECT_DIR/webhook/claude-secure-reaper.timer" || return 1
+    grep -q '^\[Timer\]' "$PROJECT_DIR/webhook/claude-secure-reaper.timer" || return 1
+    grep -q '^\[Install\]' "$PROJECT_DIR/webhook/claude-secure-reaper.timer" || return 1
+    return 0
+  fi
+  # systemd-analyze verify emits warnings for env-specific issues (ExecStart path
+  # not present in test environment); we only fail on parse errors. The exit
+  # code is what matters to us -- if it's 0 or the only issues are "file not
+  # found" warnings (resolved at install time), we pass. Since the ExecStart
+  # binary /usr/local/bin/claude-secure won't exist on this dev host, we run
+  # verify and tolerate its exit status, only requiring the files parse structurally.
+  systemd-analyze verify \
+    "$PROJECT_DIR/webhook/claude-secure-reaper.service" \
+    "$PROJECT_DIR/webhook/claude-secure-reaper.timer" 2>&1 | \
+    grep -viE 'does not exist|command .* is not executable|No such file or directory|is not installed' | \
+    grep -iE '(error|invalid|bad)' && return 1
+  return 0
 }
 
 test_reaper_service_directives() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (Type=oneshot + ExecStart=/usr/local/bin/claude-secure reap)"
-  return 1
+  local f="$PROJECT_DIR/webhook/claude-secure-reaper.service"
+  grep -q '^Type=oneshot$' "$f" || { echo "missing Type=oneshot" >&2; return 1; }
+  grep -q '^ExecStart=/usr/local/bin/claude-secure reap$' "$f" || { echo "missing ExecStart" >&2; return 1; }
+  grep -q '^User=root$' "$f" || { echo "missing User=root" >&2; return 1; }
+  grep -q '^Group=root$' "$f" || { echo "missing Group=root" >&2; return 1; }
+  grep -q '^StandardOutput=journal$' "$f" || { echo "missing StandardOutput=journal" >&2; return 1; }
+  grep -q '^StandardError=journal$' "$f" || { echo "missing StandardError=journal" >&2; return 1; }
+  return 0
 }
 
 test_reaper_timer_directives() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (OnBootSec=2min + OnUnitActiveSec=5min + Persistent=true)"
-  return 1
+  local f="$PROJECT_DIR/webhook/claude-secure-reaper.timer"
+  grep -q '^OnBootSec=2min$' "$f" || { echo "missing OnBootSec=2min" >&2; return 1; }
+  grep -q '^OnUnitActiveSec=5min$' "$f" || { echo "missing OnUnitActiveSec=5min" >&2; return 1; }
+  grep -q '^AccuracySec=30s$' "$f" || { echo "missing AccuracySec=30s" >&2; return 1; }
+  grep -q '^Persistent=true$' "$f" || { echo "missing Persistent=true" >&2; return 1; }
+  grep -q '^Unit=claude-secure-reaper.service$' "$f" || { echo "missing Unit= binding" >&2; return 1; }
+  return 0
 }
 
 test_reaper_install_sections() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (service WantedBy=multi-user.target, timer WantedBy=timers.target)"
-  return 1
+  local svc="$PROJECT_DIR/webhook/claude-secure-reaper.service"
+  local timer="$PROJECT_DIR/webhook/claude-secure-reaper.timer"
+  grep -q '^WantedBy=multi-user.target$' "$svc" || { echo "service missing WantedBy=multi-user.target" >&2; return 1; }
+  grep -q '^WantedBy=timers.target$' "$timer" || { echo "timer missing WantedBy=timers.target" >&2; return 1; }
+  return 0
 }
 
 # =========================================================================
@@ -254,43 +293,138 @@ test_reaper_install_sections() {
 # =========================================================================
 
 test_reap_age_threshold_select() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (REAPER_ORPHAN_AGE_SECS=0 selects mock project)"
-  return 1
+  source_claude_secure_for_unit_test
+  : > "$MOCK_DOCKER_LOG"
+  export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
+  export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
+  export REAPER_ORPHAN_AGE_SECS=0
+  export REAPED_COUNT=0 REAPED_ERRORS=0
+  reap_orphan_projects "cs-" >/dev/null 2>&1
+  local rc=$REAPED_COUNT
+  unset MOCK_DOCKER_PS_OUTPUT MOCK_DOCKER_INSPECT_CREATED REAPER_ORPHAN_AGE_SECS
+  [ "$rc" -ge 1 ] || { echo "expected >=1 reap, got $rc" >&2; return 1; }
+  return 0
 }
 
 test_reap_age_threshold_skip() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (REAPER_ORPHAN_AGE_SECS=999999 skips all)"
-  return 1
+  source_claude_secure_for_unit_test
+  : > "$MOCK_DOCKER_LOG"
+  export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
+  # Created just now -> age 0, threshold huge -> skip
+  export MOCK_DOCKER_INSPECT_CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  export REAPER_ORPHAN_AGE_SECS=99999999
+  export REAPED_COUNT=0 REAPED_ERRORS=0
+  reap_orphan_projects "cs-" >/dev/null 2>&1
+  local rc=$REAPED_COUNT
+  unset MOCK_DOCKER_PS_OUTPUT MOCK_DOCKER_INSPECT_CREATED REAPER_ORPHAN_AGE_SECS
+  [ "$rc" = 0 ] || { echo "expected 0 reaps, got $rc" >&2; return 1; }
+  return 0
 }
 
 test_reap_compose_down_invocation() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (docker mock records compose -p <proj> down -v --remove-orphans --timeout 10)"
-  return 1
+  source_claude_secure_for_unit_test
+  : > "$MOCK_DOCKER_LOG"
+  export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
+  export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
+  export REAPER_ORPHAN_AGE_SECS=0
+  export REAPED_COUNT=0 REAPED_ERRORS=0
+  reap_orphan_projects "cs-" >/dev/null 2>&1
+  unset MOCK_DOCKER_PS_OUTPUT MOCK_DOCKER_INSPECT_CREATED REAPER_ORPHAN_AGE_SECS
+  grep -q 'compose -p cs-test-11111111 down -v --remove-orphans --timeout 10' "$MOCK_DOCKER_LOG" \
+    || { echo "no compose down invocation recorded in $MOCK_DOCKER_LOG" >&2; cat "$MOCK_DOCKER_LOG" >&2; return 1; }
+  return 0
 }
 
 test_reap_never_touches_images() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (do_reap body contains no docker rmi | image prune | --rmi)"
-  return 1
+  local bin="$PROJECT_DIR/bin/claude-secure"
+  local body
+  body=$(awk '/^do_reap\(\)/,/^}$/' "$bin")
+  if echo "$body" | grep -qE 'docker[[:space:]]+rmi|image[[:space:]]+prune|--rmi'; then
+    echo "do_reap body contains forbidden image commands" >&2
+    return 1
+  fi
+  body=$(awk '/^reap_orphan_projects\(\)/,/^}$/' "$bin")
+  if echo "$body" | grep -qE 'docker[[:space:]]+rmi|image[[:space:]]+prune|--rmi'; then
+    echo "reap_orphan_projects body contains forbidden image commands" >&2
+    return 1
+  fi
+  return 0
 }
 
 test_reap_instance_prefix_scoping() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (INSTANCE_PREFIX-scoped matching)"
-  return 1
+  source_claude_secure_for_unit_test
+  : > "$MOCK_DOCKER_LOG"
+  export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111\nns-other-44444444'
+  export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
+  export REAPER_ORPHAN_AGE_SECS=0
+  export REAPED_COUNT=0 REAPED_ERRORS=0
+  reap_orphan_projects "cs-" >/dev/null 2>&1
+  local rc=$REAPED_COUNT
+  unset MOCK_DOCKER_PS_OUTPUT MOCK_DOCKER_INSPECT_CREATED REAPER_ORPHAN_AGE_SECS
+  # Must have reaped cs-test but not ns-other
+  grep -q 'compose -p cs-test-11111111 down' "$MOCK_DOCKER_LOG" \
+    || { echo "did not reap cs-test-11111111" >&2; return 1; }
+  if grep -q 'compose -p ns-other-44444444 down' "$MOCK_DOCKER_LOG"; then
+    echo "incorrectly reaped ns-other-44444444 under prefix cs-" >&2
+    return 1
+  fi
+  return 0
 }
 
 test_reap_per_project_failure_continues() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (injected failing mock project, next project still reaped)"
-  return 1
+  source_claude_secure_for_unit_test
+  : > "$MOCK_DOCKER_LOG"
+  export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111\ncs-test-22222222'
+  export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
+  export REAPER_ORPHAN_AGE_SECS=0
+  export MOCK_DOCKER_COMPOSE_FAIL=1
+  export REAPED_COUNT=0 REAPED_ERRORS=0
+  reap_orphan_projects "cs-" >/dev/null 2>&1
+  local errs=$REAPED_ERRORS
+  unset MOCK_DOCKER_PS_OUTPUT MOCK_DOCKER_INSPECT_CREATED REAPER_ORPHAN_AGE_SECS MOCK_DOCKER_COMPOSE_FAIL
+  # Both projects were attempted (errors=2), cycle continued
+  [ "$errs" -ge 2 ] || { echo "expected errors>=2, got $errs" >&2; return 1; }
+  grep -q 'compose -p cs-test-11111111 down' "$MOCK_DOCKER_LOG" || return 1
+  grep -q 'compose -p cs-test-22222222 down' "$MOCK_DOCKER_LOG" || return 1
+  return 0
 }
 
 test_reap_whole_cycle_failure_exits_nonzero() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (docker ps exit 1 -> do_reap returns nonzero)"
-  return 1
+  source_claude_secure_for_unit_test
+  : > "$MOCK_DOCKER_LOG"
+  export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
+  export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
+  export REAPER_ORPHAN_AGE_SECS=0
+  export MOCK_DOCKER_COMPOSE_FAIL=1
+  export INSTANCE_PREFIX="cs-"
+  export LOG_DIR="$TEST_TMPDIR/logs" LOG_PREFIX=""
+  mkdir -p "$LOG_DIR"
+  local rc=0
+  do_reap >/dev/null 2>&1 || rc=$?
+  unset MOCK_DOCKER_PS_OUTPUT MOCK_DOCKER_INSPECT_CREATED REAPER_ORPHAN_AGE_SECS MOCK_DOCKER_COMPOSE_FAIL INSTANCE_PREFIX
+  [ "$rc" -ne 0 ] || { echo "expected nonzero exit from whole-cycle failure, got $rc" >&2; return 1; }
+  return 0
 }
 
 test_reap_dry_run() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (claude-secure reap --dry-run)"
-  return 1
+  source_claude_secure_for_unit_test
+  : > "$MOCK_DOCKER_LOG"
+  export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
+  export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
+  export REAPER_ORPHAN_AGE_SECS=0
+  export INSTANCE_PREFIX="cs-"
+  export LOG_DIR="$TEST_TMPDIR/logs" LOG_PREFIX=""
+  mkdir -p "$LOG_DIR"
+  local out
+  out=$(do_reap --dry-run 2>&1)
+  unset MOCK_DOCKER_PS_OUTPUT MOCK_DOCKER_INSPECT_CREATED REAPER_ORPHAN_AGE_SECS INSTANCE_PREFIX
+  # Dry-run: must NOT have invoked compose down
+  if grep -q 'compose -p .* down' "$MOCK_DOCKER_LOG"; then
+    echo "dry-run invoked compose down (forbidden)" >&2
+    return 1
+  fi
+  echo "$out" | grep -q '\[dry-run\]' || { echo "dry-run marker missing from output" >&2; return 1; }
+  return 0
 }
 
 # =========================================================================
@@ -298,18 +432,55 @@ test_reap_dry_run() {
 # =========================================================================
 
 test_reap_stale_event_files_deleted() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (find -mmin +N on CONFIG_DIR/events)"
-  return 1
+  source_claude_secure_for_unit_test
+  local events="$CONFIG_DIR/events"
+  mkdir -p "$events"
+  local stale="$events/stale-aaaaaaaa.json"
+  echo '{}' > "$stale"
+  # Backdate the mtime to 2 days ago (2880 minutes).
+  touch -d '2 days ago' "$stale"
+  export REAPER_EVENT_AGE_SECS=86400
+  export EVENTS_DELETED=0
+  reap_stale_event_files >/dev/null 2>&1
+  local delcount=$EVENTS_DELETED
+  unset REAPER_EVENT_AGE_SECS
+  [ "$delcount" -ge 1 ] || { echo "stale file not deleted, count=$delcount" >&2; return 1; }
+  [ ! -e "$stale" ] || { echo "stale file still exists" >&2; return 1; }
+  return 0
 }
 
 test_reap_fresh_event_files_preserved() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (fresh events survive reap)"
-  return 1
+  source_claude_secure_for_unit_test
+  local events="$CONFIG_DIR/events"
+  mkdir -p "$events"
+  local fresh="$events/fresh-bbbbbbbb.json"
+  echo '{}' > "$fresh"
+  export REAPER_EVENT_AGE_SECS=86400
+  export EVENTS_DELETED=0
+  reap_stale_event_files >/dev/null 2>&1
+  unset REAPER_EVENT_AGE_SECS
+  [ -e "$fresh" ] || { echo "fresh file was deleted (should be preserved)" >&2; return 1; }
+  rm -f "$fresh"
+  return 0
 }
 
 test_reap_event_age_secs_override() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (REAPER_EVENT_AGE_SECS=0 -> even fresh deleted)"
-  return 1
+  source_claude_secure_for_unit_test
+  local events="$CONFIG_DIR/events"
+  mkdir -p "$events"
+  local fresh="$events/override-cccccccc.json"
+  echo '{}' > "$fresh"
+  # REAPER_EVENT_AGE_SECS=0 means "anything older than 0 minutes". With
+  # find -mmin +0, a just-created file is NOT matched (strict inequality).
+  # Backdate 2 minutes to guarantee match regardless of find semantics.
+  touch -d '2 minutes ago' "$fresh"
+  export REAPER_EVENT_AGE_SECS=0
+  export EVENTS_DELETED=0
+  reap_stale_event_files >/dev/null 2>&1
+  local delcount=$EVENTS_DELETED
+  unset REAPER_EVENT_AGE_SECS
+  [ "$delcount" -ge 1 ] || { echo "override failed, count=$delcount" >&2; return 1; }
+  return 0
 }
 
 # =========================================================================
@@ -317,18 +488,53 @@ test_reap_event_age_secs_override() {
 # =========================================================================
 
 test_reap_flock_single_flight() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (flock -n exits 0 silently with 'lock held' line)"
-  return 1
+  source_claude_secure_for_unit_test
+  : > "$MOCK_DOCKER_LOG"
+  export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
+  export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
+  export REAPER_ORPHAN_AGE_SECS=0
+  export INSTANCE_PREFIX="cs-"
+  export LOG_DIR="$TEST_TMPDIR/logs" LOG_PREFIX=""
+  mkdir -p "$LOG_DIR"
+  export MOCK_FLOCK_HELD=1
+  local out rc=0
+  out=$(do_reap 2>&1) || rc=$?
+  unset MOCK_FLOCK_HELD MOCK_DOCKER_PS_OUTPUT MOCK_DOCKER_INSPECT_CREATED REAPER_ORPHAN_AGE_SECS INSTANCE_PREFIX
+  [ "$rc" = 0 ] || { echo "flock-contended do_reap should exit 0, got $rc" >&2; return 1; }
+  echo "$out" | grep -qi 'lock held\|another instance' || { echo "missing lock-held log line" >&2; echo "$out" >&2; return 1; }
+  # Lock held -> no compose down invocations
+  if grep -q 'compose -p .* down' "$MOCK_DOCKER_LOG"; then
+    echo "lock-held reaper still invoked compose down" >&2
+    return 1
+  fi
+  return 0
 }
 
 test_reap_no_jsonl_output() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (do_reap body contains no >> JSONL redirect)"
-  return 1
+  local bin="$PROJECT_DIR/bin/claude-secure"
+  local body
+  body=$(awk '/^do_reap\(\)/,/^}$/' "$bin")
+  if echo "$body" | grep -q '>>'; then
+    echo "do_reap body contains >> redirect (JSONL write forbidden)" >&2
+    return 1
+  fi
+  return 0
 }
 
 test_reap_log_format() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (reaper: cycle start prefix=... + cycle end killed=...)"
-  return 1
+  source_claude_secure_for_unit_test
+  : > "$MOCK_DOCKER_LOG"
+  export MOCK_DOCKER_PS_OUTPUT=""
+  export REAPER_ORPHAN_AGE_SECS=0
+  export INSTANCE_PREFIX="cs-"
+  export LOG_DIR="$TEST_TMPDIR/logs" LOG_PREFIX=""
+  mkdir -p "$LOG_DIR"
+  local out
+  out=$(do_reap 2>&1)
+  unset MOCK_DOCKER_PS_OUTPUT REAPER_ORPHAN_AGE_SECS INSTANCE_PREFIX
+  echo "$out" | grep -q '^reaper: cycle start prefix=' || { echo "missing cycle start line" >&2; echo "$out" >&2; return 1; }
+  echo "$out" | grep -q '^reaper: cycle end killed=' || { echo "missing cycle end line" >&2; echo "$out" >&2; return 1; }
+  return 0
 }
 
 # =========================================================================
@@ -336,18 +542,63 @@ test_reap_log_format() {
 # =========================================================================
 
 test_d11_directives_present() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (all 10 D-11 directives in BOTH webhook + reaper unit files)"
-  return 1
+  local files=(
+    "$PROJECT_DIR/webhook/claude-secure-reaper.service"
+    "$PROJECT_DIR/webhook/claude-secure-webhook.service"
+  )
+  local directives=(
+    ProtectKernelTunables
+    ProtectKernelModules
+    ProtectKernelLogs
+    ProtectControlGroups
+    RestrictNamespaces
+    LockPersonality
+    RestrictRealtime
+    RestrictSUIDSGID
+    MemoryDenyWriteExecute
+  )
+  local f d
+  for f in "${files[@]}"; do
+    for d in "${directives[@]}"; do
+      grep -q "^${d}=true$" "$f" || { echo "MISSING $d=true in $f" >&2; return 1; }
+    done
+    grep -q '^SystemCallArchitectures=native$' "$f" || { echo "MISSING SystemCallArchitectures=native in $f" >&2; return 1; }
+  done
+  return 0
 }
 
 test_d11_forbidden_directives_absent() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (0 forbidden D-11 directives: NoNewPrivileges, ProtectSystem, PrivateTmp, CapabilityBoundingSet, ProtectHome, PrivateDevices)"
-  return 1
+  local files=(
+    "$PROJECT_DIR/webhook/claude-secure-reaper.service"
+    "$PROJECT_DIR/webhook/claude-secure-webhook.service"
+  )
+  local forbidden='^(NoNewPrivileges|ProtectSystem|PrivateTmp|CapabilityBoundingSet|ProtectHome|PrivateDevices)='
+  local f
+  for f in "${files[@]}"; do
+    if grep -qE "$forbidden" "$f"; then
+      echo "FORBIDDEN directive in $f" >&2
+      grep -nE "$forbidden" "$f" >&2
+      return 1
+    fi
+  done
+  return 0
 }
 
 test_d11_comment_block_present() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (DO NOT add comment block listing 6 forbidden directives in both unit files)"
-  return 1
+  local files=(
+    "$PROJECT_DIR/webhook/claude-secure-reaper.service"
+    "$PROJECT_DIR/webhook/claude-secure-webhook.service"
+  )
+  local f
+  for f in "${files[@]}"; do
+    # Comment block must reference each forbidden directive name so operators
+    # understand why they are excluded.
+    local d
+    for d in NoNewPrivileges ProtectSystem PrivateTmp CapabilityBoundingSet ProtectHome PrivateDevices; do
+      grep -q "^#.*${d}" "$f" || { echo "comment block in $f missing mention of $d" >&2; return 1; }
+    done
+  done
+  return 0
 }
 
 # =========================================================================
@@ -355,8 +606,14 @@ test_d11_comment_block_present() {
 # =========================================================================
 
 test_compose_has_mem_limit() {
-  echo "NOT IMPLEMENTED: flipped green by 17-02 (docker-compose.yml mem_limit: 1g under claude service)"
-  return 1
+  local f="$PROJECT_DIR/docker-compose.yml"
+  grep -q '^    mem_limit: 1g$' "$f" || { echo "missing mem_limit: 1g under claude service" >&2; return 1; }
+  # Defensive: ensure we didn't use deploy.resources (Swarm-only, silently ignored)
+  if grep -q '^[[:space:]]*deploy:' "$f"; then
+    echo "docker-compose.yml uses deploy: stanza (Pitfall 5: Swarm-only)" >&2
+    return 1
+  fi
+  return 0
 }
 
 # =========================================================================
