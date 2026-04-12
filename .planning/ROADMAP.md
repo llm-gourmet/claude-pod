@@ -30,7 +30,7 @@
 - [x] **Phase 13: Headless CLI Path** - Non-interactive Claude Code execution with ephemeral container lifecycle (completed 2026-04-11)
 - [x] **Phase 14: Webhook Listener** - Systemd service receiving and validating GitHub webhooks (completed 2026-04-12)
 - [x] **Phase 15: Event Handlers** - Event-type dispatch with prompt templates and payload sanitization (completed 2026-04-12)
-- [ ] **Phase 16: Result Channel** - Structured reporting and execution audit logging
+- [x] **Phase 16: Result Channel** - Structured reporting and execution audit logging (completed 2026-04-12)
 - [ ] **Phase 17: Operational Hardening** - Container reaper and end-to-end integration verification
 
 ## Phase Details
@@ -112,7 +112,7 @@ Plans:
 - [x] 16-01-PLAN.md — Wave 0 test scaffold: harness, fixtures, default report templates (Nyquist self-healing)
 - [x] 16-02-PLAN.md — Wave 1a: resolve_report_template + config schema documentation
 - [x] 16-03-PLAN.md — Wave 1b: render + redact + publish + audit wired into do_spawn (OPS-01 + OPS-02 core)
-- [ ] 16-04-PLAN.md — Wave 2: installer ships report templates + README operator docs
+- [x] 16-04-PLAN.md — Wave 2: installer ships report templates + README operator docs
 
 ### Phase 17: Operational Hardening
 **Goal**: Orphaned containers from failed runs are automatically cleaned up and the full system is verified end-to-end
@@ -150,5 +150,5 @@ Phases execute in numeric order: 12 -> 13 -> 14 -> 15 -> 16 -> 17
 | 13. Headless CLI Path | v2.0 | 3/3 | Complete    | 2026-04-11 |
 | 14. Webhook Listener | v2.0 | 4/4 | Complete   | 2026-04-12 |
 | 15. Event Handlers | v2.0 | 4/4 | Complete   | 2026-04-12 |
-| 16. Result Channel | v2.0 | 2/4 | In Progress|  |
+| 16. Result Channel | v2.0 | 4/4 | Complete   | 2026-04-12 |
 | 17. Operational Hardening | v2.0 | 0/? | Not started | - |

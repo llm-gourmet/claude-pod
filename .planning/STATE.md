@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Headless Agent Mode
 status: executing
-stopped_at: Completed 16-03-PLAN.md (Wave 1b — publish + audit wired into do_spawn)
-last_updated: "2026-04-12T12:41:54.129Z"
+stopped_at: "Completed 16-result-channel/16-04-PLAN.md (Phase 16 complete: all 4 plans, all 33 tests green)"
+last_updated: "2026-04-12T12:50:36.159Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 6
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 17
-  completed_plans: 16
+  completed_plans: 17
   percent: 88
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 ## Current Position
 
 Phase: 16 (result-channel) — IN PROGRESS
-Plan: 3 of 4 complete (16-03 next)
+Plan: 4 of 4 complete (16-03 next)
 Status: Ready to execute
 Last activity: 2026-04-12
 
@@ -66,6 +66,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 15 P04 | 3min | 1 tasks | 1 files |
 | Phase 16-result-channel P02 | 12min | 2 tasks | 3 files |
 | Phase 16-result-channel P03 | 180 | 3 tasks | 2 files |
+| Phase 16-result-channel P04 | 12m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -102,6 +103,8 @@ Recent decisions affecting current work:
 - [Phase 16-result-channel]: [Phase 16-03]: D-18 exit semantics — publish failures audit-log only; only claude_exit \!= 0 flips spawn exit
 - [Phase 16-result-channel]: [Phase 16-03]: delivery_id_short = last 8 chars of STRIPPED id (after replay-/manual- prefix removal) so all three id types produce the same slug format
 - [Phase 16-result-channel]: [Phase 16-03]: CLAUDE_SECURE_FAKE_CLAUDE_STDOUT test escape hatch added (Rule 3 deviation) — production docker compose path unchanged
+- [Phase 16-result-channel]: Plan 16-04: install.sh step 5c clones step 5b structurally with templates→report-templates substitution and explicit chmod 755 on the directory; D-12 always-refresh preserves operator-added custom templates
+- [Phase 16-result-channel]: Plan 16-04: README Phase 16 section placed between Logging and Testing as the operator observability anchor; uses natural prose with no leaked decision IDs and copy-pasteable jq/profile.json examples
 
 ### Pending Todos
 
@@ -115,6 +118,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-12T12:41:54.126Z
-Stopped at: Completed 16-03-PLAN.md (Wave 1b — publish + audit wired into do_spawn)
+Last session: 2026-04-12T12:50:36.156Z
+Stopped at: Completed 16-result-channel/16-04-PLAN.md (Phase 16 complete: all 4 plans, all 33 tests green)
 Resume file: None
