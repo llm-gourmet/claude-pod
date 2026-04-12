@@ -333,6 +333,64 @@ CLAUDE_SECURE_SKIP_REPORT=1 claude-secure spawn --profile <name> --event ...
 - **Result text is bounded at 16KB.** Larger Claude outputs are truncated UTF-8-safely with a `... [truncated N more bytes]` suffix so that long sessions cannot produce multi-megabyte commits.
 - **Audit lines are append-only.** Per-instance JSONL files respect the `LOG_PREFIX` multi-instance convention, so two instances on the same host write to distinct files and cannot race each other. Within one instance, POSIX `O_APPEND` guarantees atomic writes because each line stays under 4KB (`PIPE_BUF`).
 
+## Phase 17 -- Operational Hardening (Container Reaper)
+
+A systemd timer periodically cleans up orphaned spawn containers (from crashed or timed-out executions) and stale event files. The reaper is installed automatically by `install.sh --with-webhook`; no configuration is required for default behavior.
+
+### How it runs
+
+- **Timer:** `claude-secure-reaper.timer` fires 2 minutes after boot, then every 5 minutes thereafter.
+- **Service:** Each firing invokes `claude-secure reap` as a one-shot systemd service. No long-running daemon.
+- **Locking:** A `flock` guard prevents concurrent cycles. If a manual invocation and a timer firing collide, the second one exits silently.
+- **Logging:** All reaper activity goes to the systemd journal only -- no separate log file.
+
+### Tailing activity
+
+```bash
+# Live tail of the reaper journal (what the timer is doing right now)
+journalctl -u claude-secure-reaper -f
+
+# Timer status and next scheduled firing
+systemctl list-timers claude-secure-reaper.timer
+
+# One-shot view of recent cycles
+journalctl -u claude-secure-reaper --since '1 hour ago'
+```
+
+### Manual invocation
+
+```bash
+# Preview what would be reaped without touching anything
+claude-secure reap --dry-run
+
+# Run a normal reap cycle (same as the timer does)
+claude-secure reap
+
+# Aggressive cleanup: reap every matching container regardless of age
+REAPER_ORPHAN_AGE_SECS=0 claude-secure reap
+```
+
+### Tuning via environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `REAPER_ORPHAN_AGE_SECS` | `600` (10 min) | Minimum container age before the reaper will tear it down. The default is twice the timer interval, so a healthy spawn always exits well before the reaper would consider it. |
+| `REAPER_EVENT_AGE_SECS` | `86400` (24 h) | Minimum age before event files under `~/.claude-secure/events/` are deleted. The 24-hour default is well above any normal spawn lifetime. |
+
+The reaper never touches images, named volumes, bind-mounted workspaces, or containers outside your configured instance prefix. Multi-instance deployments (e.g. a `test` instance alongside `default`) are isolated by label -- each instance's timer only reaps its own orphans.
+
+### Listener hardening
+
+The webhook listener unit file and the reaper service both ship with a conservative set of systemd hardening directives (read-only kernel tunables, no namespace creation, no write-execute memory, native syscall ABI only). These are docker-compose-compatible. Six additional directives (`NoNewPrivileges`, `ProtectSystem`, `PrivateTmp`, `CapabilityBoundingSet`, `ProtectHome`, `PrivateDevices`) are deliberately excluded because each one breaks docker compose subprocess access to the docker socket or `/tmp`. The exclusion list is documented inline in each unit file; re-enabling any of those directives without re-running the end-to-end tests will break the listener.
+
+### Upgrading from Phase 16
+
+If you installed a prior version with `install.sh --with-webhook`, re-run the installer to pick up both the reaper timer and the updated listener hardening. Your existing webhook secrets, profiles, and report repos are preserved -- only the unit files and `/opt/claude-secure/webhook/` contents are refreshed.
+
+```bash
+sudo ./install.sh --with-webhook
+```
+
 ## Testing
 
 ### Quick Start
