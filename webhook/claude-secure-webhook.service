@@ -1,0 +1,50 @@
+# /etc/systemd/system/claude-secure-webhook.service
+# Installed by install.sh --with-webhook (copies this file verbatim).
+# Source of truth: webhook/claude-secure-webhook.service in the claude-secure repo.
+#
+# Directives locked by .planning/phases/14-webhook-listener/14-CONTEXT.md D-23..D-26.
+# Do not add hardening (NoNewPrivileges, ProtectSystem, PrivateTmp, CapabilityBoundingSet)
+# without empirical testing -- every one of those directives breaks Docker socket access
+# for the `claude-secure spawn` subprocess this listener invokes. Phase 17 may revisit.
+
+[Unit]
+Description=claude-secure GitHub webhook listener
+Documentation=https://github.com/igorthetigor/claude-secure
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/claude-secure/webhook/listener.py --config /etc/claude-secure/webhook.json
+
+# Restart policy (D-25): always restart on crash, throttle at 5s to avoid tight loops
+# if the config file is broken.
+Restart=always
+RestartSec=5s
+
+# Logging (D-25): listener lifecycle (startup, shutdown, crashes) goes to the journal.
+# Application-level structured logs still go to ~/.claude-secure/logs/webhook.jsonl
+# (written by the listener's JsonlHandler).
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=claude-secure-webhook
+
+# User (D-24): root is required because the listener shells out to `docker compose`,
+# which needs /var/run/docker.sock access. A dedicated user would need `usermod -aG docker`
+# which is equivalent to root for security purposes (docker group = root). The listener
+# itself delegates ALL real work to `bin/claude-secure spawn`, which invokes the hardened
+# container stack -- this unit is only the transport layer, not a new security boundary.
+User=root
+Group=root
+
+# Hardening directives deliberately NOT added (each would break docker compose):
+#   NoNewPrivileges=true     -- blocks subprocess privilege transitions inside claude-secure
+#   ProtectSystem=strict     -- Docker volume-mount machinery writes outside the allowed set
+#   ReadOnlyPaths=...        -- same reason
+#   PrivateTmp=true          -- proxy/validator containers may touch /tmp during bootstrap
+#   CapabilityBoundingSet=...-- docker daemon communication needs broader caps than we can predict
+# Phase 17 hardening can re-evaluate each with an empirical test matrix.
+
+[Install]
+WantedBy=multi-user.target
