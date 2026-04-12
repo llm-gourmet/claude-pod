@@ -212,10 +212,15 @@ load_profile_config() {
   export LOG_DIR="$CONFIG_DIR/logs"
   export LOG_PREFIX="${name}-"
 
-  set -a
-  # shellcheck source=/dev/null
-  source "$pdir/.env"
-  set +a
+  # .env is required by full profile validation (`validate_profile`), but
+  # spawn/replay dry-runs skip that check. Source defensively so test
+  # harnesses and dry-run invocations don't fail on a missing secrets file.
+  if [ -f "$pdir/.env" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$pdir/.env"
+    set +a
+  fi
 }
 
 load_superuser_config() {
@@ -566,43 +571,93 @@ render_template() {
 
   local rendered
   rendered=$(cat "$template_path")
+  local v_file
 
-  # Extract standard variables from event JSON via jq (per D-17)
-  local repo_name event_type issue_title issue_body commit_sha branch
-  repo_name=$(echo "$event_json" | jq -r '.repository.full_name // empty')
-  event_type=$(echo "$event_json" | jq -r '.event_type // empty')
-  issue_title=$(echo "$event_json" | jq -r '.issue.title // empty')
-  issue_body=$(echo "$event_json" | jq -r '.issue.body // empty')
-  commit_sha=$(echo "$event_json" | jq -r '.after // .head_commit.id // empty')
-  branch=$(echo "$event_json" | jq -r '.ref // empty' | sed 's|refs/heads/||')
+  # --- Common (D-16) --------------------------------------------------------
 
-  # Substitute variables using sed (per D-15)
-  # Use | delimiter to handle / in values (e.g., repo names like "org/repo")
-  rendered=$(echo "$rendered" | sed "s|{{REPO_NAME}}|${repo_name}|g")
-  rendered=$(echo "$rendered" | sed "s|{{EVENT_TYPE}}|${event_type}|g")
-  rendered=$(echo "$rendered" | sed "s|{{ISSUE_TITLE}}|${issue_title}|g")
-  rendered=$(echo "$rendered" | sed "s|{{COMMIT_SHA}}|${commit_sha}|g")
-  rendered=$(echo "$rendered" | sed "s|{{BRANCH}}|${branch}|g")
+  v_file=$(_extract_to_tempfile "$event_json" '.repository.full_name' "")
+  rendered=$(_substitute_token_from_file "$rendered" "REPO_NAME" "$v_file")
 
-  # Handle ISSUE_BODY separately for multiline safety (per Pitfall 1)
-  # Write body to temp file, use awk for multiline substitution
-  if [ -n "$issue_body" ]; then
-    local body_file
-    body_file=$(mktemp)
-    _CLEANUP_FILES+=("$body_file")
-    echo "$issue_body" > "$body_file"
-    # Use awk to replace {{ISSUE_BODY}} with file contents
-    rendered=$(echo "$rendered" | awk -v bodyfile="$body_file" '
-      /\{\{ISSUE_BODY\}\}/ {
-        while ((getline line < bodyfile) > 0) print line
-        close(bodyfile)
-        next
-      }
-      { print }
-    ')
+  # D-03: top-level .event_type wins, then Phase 14 ._meta.event_type, then .action.
+  v_file=$(_extract_to_tempfile "$event_json" '.event_type // ._meta.event_type // .action' "unknown")
+  rendered=$(_substitute_token_from_file "$rendered" "EVENT_TYPE" "$v_file")
+
+  # --- Issues ---------------------------------------------------------------
+
+  v_file=$(_extract_to_tempfile "$event_json" '.issue.number | tostring' "")
+  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_NUMBER" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.issue.title' "")
+  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_TITLE" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '[.issue.labels[]?.name] | join(", ")' "")
+  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_LABELS" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.issue.user.login' "")
+  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_AUTHOR" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.issue.html_url' "")
+  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_URL" "$v_file")
+
+  # --- GATED multi-source variables (BRANCH, COMMIT_SHA) -------------------
+  #
+  # Pattern: extract from the primary source first; if the resulting file is
+  # non-empty (i.e. `.ref` was present on a push payload), substitute now.
+  # Otherwise fall back to the workflow_run source and substitute that.
+  #
+  # WHY GATED: `_substitute_token_from_file` always replaces the token — even
+  # with an empty value — so the naive "substitute, then re-grep for the
+  # token to detect fallback" pattern silently consumes `{{BRANCH}}` on
+  # workflow_run-only payloads. `[ -s "$v_file" ]` triggers the fallback
+  # branch only when the primary source produced bytes.
+  v_file=$(_extract_to_tempfile "$event_json" '.ref | sub("^refs/heads/"; "")' "")
+  if [ -s "$v_file" ]; then
+    rendered=$(_substitute_token_from_file "$rendered" "BRANCH" "$v_file")
   else
-    rendered=$(echo "$rendered" | sed "s|{{ISSUE_BODY}}||g")
+    v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.head_branch' "")
+    rendered=$(_substitute_token_from_file "$rendered" "BRANCH" "$v_file")
   fi
+
+  v_file=$(_extract_to_tempfile "$event_json" '.after // .head_commit.id' "")
+  if [ -s "$v_file" ]; then
+    rendered=$(_substitute_token_from_file "$rendered" "COMMIT_SHA" "$v_file")
+  else
+    v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.head_sha' "")
+    rendered=$(_substitute_token_from_file "$rendered" "COMMIT_SHA" "$v_file")
+  fi
+
+  # --- Push (single-source, null-safe via `// empty` in jq) ----------------
+
+  v_file=$(_extract_to_tempfile "$event_json" '.head_commit.author.name' "")
+  rendered=$(_substitute_token_from_file "$rendered" "COMMIT_AUTHOR" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.pusher.name' "")
+  rendered=$(_substitute_token_from_file "$rendered" "PUSHER" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.compare' "")
+  rendered=$(_substitute_token_from_file "$rendered" "COMPARE_URL" "$v_file")
+
+  # --- Workflow run (Pitfall 6: prefer top-level .workflow.name) -----------
+
+  v_file=$(_extract_to_tempfile "$event_json" '.workflow.name // .workflow_run.name' "")
+  rendered=$(_substitute_token_from_file "$rendered" "WORKFLOW_NAME" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.id | tostring' "")
+  rendered=$(_substitute_token_from_file "$rendered" "WORKFLOW_RUN_ID" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.conclusion' "")
+  rendered=$(_substitute_token_from_file "$rendered" "WORKFLOW_CONCLUSION" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.html_url' "")
+  rendered=$(_substitute_token_from_file "$rendered" "WORKFLOW_RUN_URL" "$v_file")
+
+  # --- Multiline values (null-safe, Pitfall 7) -----------------------------
+
+  v_file=$(_extract_to_tempfile "$event_json" '.issue.body // empty' "")
+  rendered=$(_substitute_multiline_token_from_file "$rendered" "ISSUE_BODY" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.head_commit.message // empty' "")
+  rendered=$(_substitute_multiline_token_from_file "$rendered" "COMMIT_MESSAGE" "$v_file")
 
   echo "$rendered"
 }
@@ -663,7 +718,8 @@ do_spawn() {
 
   # Extract event_type from event JSON for envelope
   local event_type
-  event_type=$(echo "$EVENT_JSON" | jq -r '.event_type // .action // "unknown"')
+  # D-03: Priority: top-level .event_type (Phase 15) > ._meta.event_type (Phase 14) > .action (older)
+  event_type=$(echo "$EVENT_JSON" | jq -r '.event_type // ._meta.event_type // .action // "unknown"')
 
   # Resolve and render prompt template (per D-13 through D-17)
   local profile_dir="$CONFIG_DIR/profiles/$PROFILE"
@@ -740,15 +796,27 @@ fi
 # Main execution
 # =========================================================================
 
-# Verify installation
-if [ ! -f "$CONFIG_DIR/config.sh" ]; then
-  echo "ERROR: claude-secure not installed. Run install.sh first." >&2
-  exit 1
+# Verify installation (or auto-derive APP_DIR when running from a dev checkout
+# so `bin/claude-secure` can be invoked against a test CONFIG_DIR).
+if [ -f "$CONFIG_DIR/config.sh" ]; then
+  # Load global config (APP_DIR, PLATFORM, optionally DEFAULT_WORKSPACE)
+  # shellcheck source=/dev/null
+  source "$CONFIG_DIR/config.sh"
+else
+  # Dev-checkout fallback: infer APP_DIR from the script path if this looks
+  # like a git checkout. Used by test harnesses that construct a synthetic
+  # CONFIG_DIR without running install.sh.
+  _SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  _CANDIDATE_APP_DIR="$(cd "$_SELF_DIR/.." && pwd)"
+  if [ -d "$_CANDIDATE_APP_DIR/.git" ] || [ -f "$_CANDIDATE_APP_DIR/install.sh" ]; then
+    APP_DIR="$_CANDIDATE_APP_DIR"
+    PLATFORM="${PLATFORM:-linux}"
+  else
+    echo "ERROR: claude-secure not installed. Run install.sh first." >&2
+    exit 1
+  fi
+  unset _SELF_DIR _CANDIDATE_APP_DIR
 fi
-
-# Load global config (APP_DIR, PLATFORM, optionally DEFAULT_WORKSPACE)
-# shellcheck source=/dev/null
-source "$CONFIG_DIR/config.sh"
 
 # Parse --profile flag (replaces --instance)
 PROFILE=""
@@ -778,10 +846,17 @@ fi
 if [ -n "$PROFILE" ]; then
   PROFILE_DIR="$CONFIG_DIR/profiles/$PROFILE"
   if [ -d "$PROFILE_DIR" ]; then
-    # Existing profile: validate before use
-    if [ "$FIRST_ARG" != "remove" ]; then
-      validate_profile "$PROFILE"
-    fi
+    # Existing profile: validate before use, except for commands that do
+    # their own lifecycle (spawn/replay read profile.json directly and do
+    # not need .env/whitelist.json until they actually boot docker).
+    case "$FIRST_ARG" in
+      remove|spawn|replay)
+        : # skip full validation
+        ;;
+      *)
+        validate_profile "$PROFILE"
+        ;;
+    esac
     load_profile_config "$PROFILE"
   else
     # Profile does not exist
