@@ -1124,6 +1124,22 @@ _spawn_error_audit() {
 }
 
 do_spawn() {
+  # Help check before profile guard so `spawn --help` works without --profile
+  for _arg in "${REMAINING_ARGS[@]}"; do
+    if [ "$_arg" = "--help" ] || [ "$_arg" = "-h" ]; then
+      echo "Usage: claude-secure spawn --profile <name> --event '<json>'"
+      echo ""
+      echo "Spawn flags:"
+      echo "  --profile <name>       Profile to use (required)"
+      echo "  --event '<json>'       Inline GitHub webhook event JSON"
+      echo "  --event-file <path>    Path to event JSON file"
+      echo "  --prompt-template <n>  Override automatic template resolution"
+      echo "  --skip-report          Skip report push (audit log still written)"
+      echo "  --dry-run              Show resolved prompt without executing"
+      return 0
+    fi
+  done
+
   # Per D-04: --profile is required for spawn (enforced above by profile resolution)
   if [ -z "$PROFILE" ]; then
     echo "ERROR: --profile is required for spawn" >&2
