@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Headless Agent Mode
-status: executing
-stopped_at: "Completed 16-result-channel/16-04-PLAN.md (Phase 16 complete: all 4 plans, all 33 tests green)"
+status: phase_complete
+stopped_at: "Phase 16 complete — all 4 plans, 33/33 tests green, OPS-01/OPS-02 satisfied"
 last_updated: "2026-04-12T12:50:36.159Z"
 last_activity: 2026-04-12
 progress:
