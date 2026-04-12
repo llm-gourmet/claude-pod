@@ -5,5 +5,14 @@
   "profiles_dir": "__REPLACED_BY_INSTALLER__PROFILES__",
   "events_dir": "__REPLACED_BY_INSTALLER__EVENTS__",
   "logs_dir": "__REPLACED_BY_INSTALLER__LOGS__",
-  "claude_secure_bin": "/usr/local/bin/claude-secure"
+  "claude_secure_bin": "/usr/local/bin/claude-secure",
+  "_phase16_profile_schema": [
+    "Phase 16 adds three OPTIONAL fields to profile.json for report publishing:",
+    "  report_repo:        full HTTPS URL of the docs repo (e.g. https://github.com/user/docs.git)",
+    "  report_branch:      target branch name (default: 'main')",
+    "  report_path_prefix: optional directory inside the repo (default: 'reports')",
+    "When report_repo is empty or unset, report push is skipped silently (audit still written).",
+    "The PAT for push auth lives in the profile .env as REPORT_REPO_TOKEN and is redacted by the Anthropic proxy.",
+    "See .planning/phases/16-result-channel/16-CONTEXT.md decisions D-01, D-02, D-08, D-14."
+  ]
 }
