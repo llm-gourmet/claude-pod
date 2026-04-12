@@ -13,8 +13,9 @@
 #   4. Orphan cleanup            -- backdated sentinel container reaped by
 #                                   `claude-secure reap`; real containers untouched
 #
-# Wave 0 contract (Nyquist): all 4 scenarios + the budget gate FAIL as
-# NOT IMPLEMENTED until 17-03 (Wave 1b) wires the real integration.
+# Wired in 17-03 (Wave 1b): all four scenarios run against a live listener
+# subprocess, a runtime-injected file:// bare report repo, and the Phase 16
+# CLAUDE_SECURE_FAKE_CLAUDE_STDOUT envelope stub (no real Anthropic / GitHub).
 #
 # Guardrails:
 #   - INSTANCE_PREFIX=cs-e2e- so the suite never collides with the operator's
@@ -236,29 +237,219 @@ EOF
 # SCENARIOS (Wave 0 sentinels -- flipped green by 17-03)
 # =========================================================================
 
+# -------------------------------------------------------------------------
+# Scenario 1 / D-14.1: HMAC rejection
+# Sends a webhook POST with sha256=deadbeef (invalid signature) and asserts:
+#   - HTTP 401
+#   - No e2e-executions.jsonl audit entry (no spawn invoked)
+# -------------------------------------------------------------------------
 scenario_hmac_rejection() {
-  echo "NOT IMPLEMENTED: flipped green by 17-03 (E2E wiring: wrong HMAC sig -> 401, no spawn, audit unchanged)"
-  return 1
+  local body='{"action":"opened","issue":{"title":"e2e-hmac","number":1},"repository":{"full_name":"e2e/test"}}'
+  local resp
+  resp=$(curl -sS -o /dev/null -w '%{http_code}' \
+    -X POST "http://127.0.0.1:$LISTENER_PORT/webhook" \
+    -H 'X-Hub-Signature-256: sha256=deadbeef' \
+    -H 'X-GitHub-Event: issues' \
+    -H 'X-GitHub-Delivery: e2e-hmac-test' \
+    -d "$body")
+  [ "$resp" = "401" ] || { echo "FAIL hmac: expected 401, got $resp" >&2; return 1; }
+
+  # Audit JSONL must be absent or empty after a rejected request.
+  # LOG_PREFIX is "${profile}-" so the file is e2e-executions.jsonl.
+  local jsonl="$CONFIG_DIR/logs/e2e-executions.jsonl"
+  if [ -f "$jsonl" ]; then
+    local audit_count
+    audit_count=$(wc -l < "$jsonl" 2>/dev/null || echo 0)
+    [ "$audit_count" -eq 0 ] \
+      || { echo "FAIL hmac: audit grew to $audit_count lines after rejection" >&2; return 1; }
+  fi
+  return 0
 }
 
+# -------------------------------------------------------------------------
+# Scenario 2 / D-14.2: Concurrent execution
+# POSTs 3 HMAC-valid payloads in parallel against the Phase 14 Semaphore(3)
+# bound and asserts:
+#   - 3 JSONL audit lines appear (each jq-parseable under concurrent writes)
+#   - Bare report repo has >= 4 commits on main (seed + 3 reports)
+# D-12 gate: this also proves the 17-02 D-11 hardening directives did not
+# break the listener's ability to process real webhooks end-to-end.
+# -------------------------------------------------------------------------
 scenario_concurrent_execution() {
-  echo "NOT IMPLEMENTED: flipped green by 17-03 (3 parallel valid POSTs -> 3 audit lines + 3 reports, no jsonl corruption)"
-  return 1
+  local secret="e2e-test-secret"
+  local body='{"action":"opened","issue":{"title":"e2e-concurrent","number":2},"repository":{"full_name":"e2e/test"}}'
+  local sig
+  # Pitfall: printf '%s' (NOT echo) so no trailing newline pollutes the HMAC.
+  sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$secret" -binary | xxd -p -c256)
+
+  # Delivery IDs must have >=8 char tails so Phase 16 delivery_id_short
+  # (last 8 chars of the after-last-dash segment) yields unique per-request
+  # report filenames. Short ids collapse to empty for <8 char tails which
+  # would point all 3 pushes at the same path and serialize the race.
+  for i in 1 2 3; do
+    curl -sS -X POST "http://127.0.0.1:$LISTENER_PORT/webhook" \
+      -H "X-Hub-Signature-256: sha256=$sig" \
+      -H 'X-GitHub-Event: issues' \
+      -H "X-GitHub-Delivery: e2e-concurrent-abcdef0$i" \
+      -d "$body" >/dev/null &
+  done
+  wait
+
+  # Poll for 3 audit lines, bounded by an inner 60s deadline. The audit
+  # file may not exist until the first spawn completes, so redirect the
+  # inner `wc` stderr to /dev/null instead of relying on the command
+  # substitution which shows bash-level "No such file" warnings.
+  local jsonl="$CONFIG_DIR/logs/e2e-executions.jsonl"
+  local deadline=$((SECONDS + 60))
+  local n=0
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if [ -f "$jsonl" ]; then
+      n=$(wc -l < "$jsonl" 2>/dev/null || echo 0)
+      [ "$n" -ge 3 ] && break
+    fi
+    sleep 0.5
+  done
+
+  local audit_count
+  audit_count=$(wc -l < "$jsonl" 2>/dev/null || echo 0)
+  [ "$audit_count" -eq 3 ] \
+    || { echo "FAIL concurrent: $audit_count audit lines (expected 3)" >&2; cat "$jsonl" 2>/dev/null >&2 || true; return 1; }
+
+  # Every line must be jq-parseable (no JSONL corruption from concurrent writes).
+  if ! jq -c . < "$jsonl" >/dev/null 2>&1; then
+    echo "FAIL concurrent: corrupt JSONL line detected" >&2
+    return 1
+  fi
+
+  # Bare repo must have received 3 report pushes (seed + 3 = >= 4 commits on main).
+  local bare="$TEST_TMPDIR/e2e-reports.git"
+  local commits
+  commits=$(git -C "$bare" rev-list --count main 2>/dev/null || echo 0)
+  [ "$commits" -ge 4 ] \
+    || { echo "FAIL concurrent: report repo has $commits commits (expected >=4)" >&2; return 1; }
+
+  return 0
 }
 
+# -------------------------------------------------------------------------
+# Scenario 3 / D-14.3: Orphan cleanup
+# Pitfall 4: Docker does NOT let us backdate Container Created timestamps,
+# so we set REAPER_ORPHAN_AGE_SECS=0 to count ALL ages as orphan. A real
+# busybox sentinel is spawned with the exact com.docker.compose.project
+# label format the reaper matches, then we invoke `claude-secure reap` and
+# assert the sentinel is gone from `docker ps -a`.
+# -------------------------------------------------------------------------
 scenario_orphan_cleanup() {
-  echo "NOT IMPLEMENTED: flipped green by 17-03 (uses REAPER_ORPHAN_AGE_SECS=0 per Pitfall 4; sentinel cs-e2e- container reaped)"
-  return 1
+  # Pre-pull busybox quietly so the pull latency doesn't inflate the budget.
+  docker pull busybox >/dev/null 2>&1 || true
+
+  # The reaper's teardown is `docker compose -p <proj> down -v`, which only
+  # works against containers registered with a full compose project label
+  # set (service, config_files, config_hash, etc). A plain `docker run`
+  # with just the project label is NOT torn down by `compose down`, so the
+  # sentinel must be created via a real compose file. We write a minimal
+  # compose.yml under $TEST_TMPDIR and drive it with `docker compose up -d`.
+  local orphan_project="cs-e2e-fakeorph"
+  local orphan_dir="$TEST_TMPDIR/orphan"
+  mkdir -p "$orphan_dir"
+  cat > "$orphan_dir/compose.yml" <<'EOF'
+services:
+  sentinel:
+    image: busybox
+    command: ["sleep", "3600"]
+EOF
+
+  if ! (cd "$orphan_dir" && docker compose -p "$orphan_project" up -d >/dev/null 2>&1); then
+    echo "FAIL orphan: docker compose up failed for sentinel" >&2
+    (cd "$orphan_dir" && docker compose -p "$orphan_project" down -v --remove-orphans >/dev/null 2>&1 || true)
+    return 1
+  fi
+
+  # Sanity: sentinel container is visible under the compose project label.
+  docker ps -q --filter "label=com.docker.compose.project=$orphan_project" | grep -q . \
+    || { echo "FAIL orphan: sentinel did not start" >&2; \
+         (cd "$orphan_dir" && docker compose -p "$orphan_project" down -v --remove-orphans >/dev/null 2>&1 || true); \
+         return 1; }
+
+  # Run reap with zero-age threshold (Pitfall 4) so any age qualifies.
+  REAPER_ORPHAN_AGE_SECS=0 INSTANCE_PREFIX="cs-e2e-" \
+    "$PROJECT_DIR/bin/claude-secure" reap >/dev/null 2>&1 || true
+
+  # docker ps -a catches stopped-but-not-removed as well as running state.
+  if docker ps -aq --filter "label=com.docker.compose.project=$orphan_project" | grep -q .; then
+    echo "FAIL orphan: sentinel survived reap" >&2
+    (cd "$orphan_dir" && docker compose -p "$orphan_project" down -v --remove-orphans >/dev/null 2>&1 || true)
+    return 1
+  fi
+  return 0
 }
 
+# -------------------------------------------------------------------------
+# Scenario 4 / D-14.4: Resource limit enforcement (Pitfall 5)
+# The FAKE Claude stub used for scenario 2 bypasses `docker compose up`, so
+# no cs-e2e-<uuid> claude containers from the spawn path exist to inspect.
+# Instead we explicitly create a claude container from the PROJECT docker-
+# compose.yml (which carries `mem_limit: 1g` courtesy of 17-02 Task 3) and
+# assert HostConfig.Memory equals 1073741824 bytes (= 1 GiB).
+# Two-layer check:
+#   (a) `docker compose config` confirms the effective mem_limit value
+#   (b) `docker inspect` on a live container confirms the runtime HostConfig
+# -------------------------------------------------------------------------
 scenario_resource_limits() {
-  echo "NOT IMPLEMENTED: flipped green by 17-03 (depends on 17-02 mem_limit: 1g in docker-compose.yml; docker inspect assertion)"
-  return 1
-}
+  local expected=1073741824  # 1 GiB = docker-compose.yml mem_limit: 1g
 
-test_e2e_budget_under_90s() {
-  echo "NOT IMPLEMENTED: flipped green by 17-03 (final assertion: SECONDS <= E2E_BUDGET after all scenarios complete)"
-  return 1
+  # Layer (a): effective compose config must resolve mem_limit to 1 GiB.
+  local effective_mem
+  effective_mem=$(cd "$PROJECT_DIR" && docker compose config --format json 2>/dev/null \
+                  | jq -r '.services.claude.mem_limit // empty' 2>/dev/null)
+  [ -n "$effective_mem" ] \
+    || { echo "FAIL limits: docker compose config did not expose mem_limit (Pitfall 5 regression)" >&2; return 1; }
+  [ "$effective_mem" = "$expected" ] \
+    || { echo "FAIL limits: compose config mem_limit=$effective_mem, expected $expected" >&2; return 1; }
+
+  # Layer (b): create a live claude container from the compose file so the
+  # runtime docker inspect HostConfig.Memory path is actually exercised.
+  # --no-deps skips proxy/validator; --no-start creates without running, so
+  # we don't pay the container startup cost.
+  local project="cs-e2e-limits"
+  # Required host paths referenced by the compose file's bind mounts:
+  mkdir -p "$PROJECT_DIR/logs" "$PROJECT_DIR/workspace" 2>/dev/null || true
+
+  if ! (cd "$PROJECT_DIR" && docker compose -p "$project" up --no-deps --no-start claude \
+          >"$TEST_TMPDIR/limits-compose.log" 2>&1); then
+    echo "FAIL limits: docker compose up --no-deps --no-start claude failed" >&2
+    tail -20 "$TEST_TMPDIR/limits-compose.log" >&2 || true
+    (cd "$PROJECT_DIR" && docker compose -p "$project" down -v >/dev/null 2>&1 || true)
+    return 1
+  fi
+
+  # Resolve the created container ID via the compose project label.
+  local claude_cid
+  claude_cid=$(docker ps -aq \
+                 --filter "label=com.docker.compose.project=$project" \
+                 --filter "label=com.docker.compose.service=claude" \
+                 | head -1)
+  if [ -z "$claude_cid" ]; then
+    echo "FAIL limits: no claude container found for project $project" >&2
+    (cd "$PROJECT_DIR" && docker compose -p "$project" down -v >/dev/null 2>&1 || true)
+    return 1
+  fi
+
+  local mem_bytes
+  mem_bytes=$(docker inspect --format '{{.HostConfig.Memory}}' "$claude_cid" 2>/dev/null)
+
+  # Tear down the inspect container before asserting so a failure path still
+  # cleans up (and the outer trap's reap pass is a secondary safety net).
+  (cd "$PROJECT_DIR" && docker compose -p "$project" down -v --remove-orphans >/dev/null 2>&1 || true)
+
+  [ -n "$mem_bytes" ] \
+    || { echo "FAIL limits: docker inspect returned empty HostConfig.Memory" >&2; return 1; }
+  [ "$mem_bytes" -gt 0 ] \
+    || { echo "FAIL limits: no memory limit (got $mem_bytes) -- Pitfall 5" >&2; return 1; }
+  [ "$mem_bytes" -eq "$expected" ] \
+    || { echo "FAIL limits: expected $expected, got $mem_bytes" >&2; return 1; }
+
+  return 0
 }
 
 # =========================================================================
@@ -279,24 +470,34 @@ require_tool jq
 require_tool python3
 require_tool git
 
-echo "Phase 17 E2E -- Wave 0 scaffold (all scenarios FAIL as NOT IMPLEMENTED)"
+echo "Phase 17 E2E -- four scenario integration suite"
 echo "Budget: ${E2E_BUDGET} seconds"
 echo ""
 
 SECONDS=0
 
 setup_e2e_profile || { echo "FAIL: setup_e2e_profile"; exit 1; }
+start_listener    || { echo "FAIL: start_listener"; exit 1; }
+check_budget
 
-run_test "hmac rejection"       scenario_hmac_rejection
+# Scenario order rationale:
+#   1. HMAC rejection first -- cheap 401 path, validates listener is accepting
+#      requests before any spawn has a chance to write to the audit log.
+#   2. Concurrent execution next -- drives 3 parallel spawns that produce the
+#      3 audit lines + 3 report commits the D-14.2 assertion checks.
+#   3. Resource limits third -- creates its own cs-e2e-limits compose project
+#      for the docker inspect HostConfig.Memory assertion.
+#   4. Orphan cleanup last -- sentinel-only, fully independent of any prior
+#      scenario state.
+run_test scenario_hmac_rejection       scenario_hmac_rejection
 check_budget
-run_test "concurrent execution" scenario_concurrent_execution
+run_test scenario_concurrent_execution scenario_concurrent_execution
 check_budget
-run_test "resource limits"      scenario_resource_limits
+run_test scenario_resource_limits      scenario_resource_limits
 check_budget
-run_test "orphan cleanup"       scenario_orphan_cleanup
+run_test scenario_orphan_cleanup       scenario_orphan_cleanup
 check_budget
-run_test "budget under 90s"     test_e2e_budget_under_90s
 
 echo ""
-echo "Phase 17 E2E: $PASS/$TOTAL passed, $FAIL failed (in ${SECONDS}s, budget ${E2E_BUDGET}s)"
-[ $FAIL -eq 0 ] || exit 1
+echo "Phase 17 E2E: $PASS passed, $FAIL failed (in ${SECONDS} seconds, budget $E2E_BUDGET)"
+[ "$FAIL" -eq 0 ]
