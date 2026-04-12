@@ -4,6 +4,11 @@ services:
     stdin_open: true
     tty: true
     command: ["sleep", "infinity"]
+    # Phase 17 D-14 / Pitfall 5: explicit memory cap so the E2E scenario 4
+    # resource-limit assertion has a concrete value to verify via docker inspect.
+    # Short form (mem_limit) is honored by `docker compose up`; deploy.resources
+    # is Swarm-only and silently ignored, so do NOT switch to that form.
+    mem_limit: 1g
     env_file:
       - ${SECRETS_FILE:-/dev/null}
     environment:
