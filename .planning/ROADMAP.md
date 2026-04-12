@@ -74,11 +74,13 @@ Plans:
   1. A systemd service runs on the host listening for GitHub webhook POST requests and survives restarts
   2. Every incoming webhook is verified via HMAC-SHA256 signature against the raw payload body -- invalid signatures are rejected with 401
   3. Multiple simultaneous webhooks execute safely, each with a unique compose project name and isolated workspace -- no cross-contamination between concurrent runs
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 14-01: TBD
-- [ ] 14-02: TBD
+- [ ] 14-01-PLAN.md — Test harness, fixtures, and test-map update (Wave 0)
+- [ ] 14-02-PLAN.md — webhook/listener.py + config.example.json (Wave 1, HOOK-02/HOOK-06)
+- [ ] 14-03-PLAN.md — systemd unit file claude-secure-webhook.service (Wave 1, HOOK-01)
+- [ ] 14-04-PLAN.md — install.sh --with-webhook extension (Wave 2, HOOK-01)
 
 ### Phase 15: Event Handlers
 **Goal**: Incoming GitHub events are routed to the correct profile and dispatched with appropriate prompts
