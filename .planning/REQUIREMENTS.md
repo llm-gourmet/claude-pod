@@ -25,9 +25,9 @@ Requirements for headless agent mode. Each maps to roadmap phases.
 
 - [x] **HOOK-01**: Webhook listener runs as a host-side systemd service receiving GitHub webhooks
 - [x] **HOOK-02**: Every incoming webhook is verified via HMAC-SHA256 signature against raw payload body
-- [ ] **HOOK-03**: Listener handles Issue events (opened, labeled) and dispatches to correct profile
-- [ ] **HOOK-04**: Listener handles Push-to-Main events and dispatches to correct profile
-- [ ] **HOOK-05**: Listener handles CI Failure events (workflow_run completed with failure) and dispatches to correct profile
+- [x] **HOOK-03**: Listener handles Issue events (opened, labeled) and dispatches to correct profile
+- [x] **HOOK-04**: Listener handles Push-to-Main events and dispatches to correct profile
+- [x] **HOOK-05**: Listener handles CI Failure events (workflow_run completed with failure) and dispatches to correct profile
 - [x] **HOOK-06**: Multiple simultaneous webhooks execute safely with unique compose project names and isolated workspaces
 - [ ] **HOOK-07**: User can replay a stored webhook payload for debugging via CLI command
 
@@ -88,9 +88,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HEAD-05 | Phase 13 | Complete |
 | HOOK-01 | Phase 14 | Complete |
 | HOOK-02 | Phase 14 | Complete |
-| HOOK-03 | Phase 15 | Pending |
-| HOOK-04 | Phase 15 | Pending |
-| HOOK-05 | Phase 15 | Pending |
+| HOOK-03 | Phase 15 | Complete |
+| HOOK-04 | Phase 15 | Complete |
+| HOOK-05 | Phase 15 | Complete |
 | HOOK-06 | Phase 14 | Complete |
 | HOOK-07 | Phase 15 | Pending |
 | OPS-01 | Phase 16 | Pending |
