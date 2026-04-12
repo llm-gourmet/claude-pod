@@ -94,7 +94,7 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 15-01-PLAN.md — Test scaffold: test-phase15.sh, 9 fixtures, test-map.json update
+- [x] 15-01-PLAN.md — Test scaffold: test-phase15.sh, 9 fixtures, test-map.json update
 - [ ] 15-02-PLAN.md — Default templates + listener.py event-type filter and top-level event_type injection
 - [ ] 15-03-PLAN.md — bin/claude-secure extract_payload_field, render_template sed-bug fix, resolve_template fallback, replay subcommand
 - [ ] 15-04-PLAN.md — install.sh copies webhook/templates/ to /opt/claude-secure/webhook/templates/
@@ -146,6 +146,6 @@ Phases execute in numeric order: 12 -> 13 -> 14 -> 15 -> 16 -> 17
 | 12. Profile System | v2.0 | 0/2 | Complete    | 2026-04-11 |
 | 13. Headless CLI Path | v2.0 | 3/3 | Complete    | 2026-04-11 |
 | 14. Webhook Listener | v2.0 | 4/4 | Complete   | 2026-04-12 |
-| 15. Event Handlers | v2.0 | 0/? | Not started | - |
+| 15. Event Handlers | v2.0 | 1/4 | In Progress|  |
 | 16. Result Channel | v2.0 | 0/? | Not started | - |
 | 17. Operational Hardening | v2.0 | 0/? | Not started | - |

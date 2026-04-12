@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Headless Agent Mode
-status: phase_complete
-stopped_at: Phase 14 verified PASS
-last_updated: "2026-04-12T09:25:00.000Z"
+status: executing
+stopped_at: Completed 15-01-PLAN.md
+last_updated: "2026-04-12T10:25:18.084Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 6
-  completed_phases: 4
-  total_plans: 9
-  completed_plans: 9
-  percent: 67
+  completed_phases: 3
+  total_plans: 13
+  completed_plans: 10
+  percent: 17
 ---
 
 # Project State
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** Phase 14 — webhook-listener
+**Current focus:** Phase 15 — event-handlers
 
 ## Current Position
 
-Phase: 14 (webhook-listener) — COMPLETE
-Plan: 4 of 4
-Status: Verified PASS — ready for next phase
+Phase: 15 (event-handlers) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
 Last activity: 2026-04-12
 
 Progress: [██░░░░░░░░] 2/2 plans (17%)
@@ -60,6 +60,7 @@ Progress: [██░░░░░░░░] 2/2 plans (17%)
 | Phase 14 P03 | 3min | 1 tasks | 1 files |
 | Phase 14-webhook-listener P02 | 35min | 2 tasks | 2 files |
 | Phase 14 P04 | 8min | 1 tasks | 1 files |
+| Phase 15-event-handlers P01 | 8min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,7 @@ Recent decisions affecting current work:
 - [Phase 14]: Hardening directives (NoNewPrivileges, ProtectSystem, PrivateTmp, CapabilityBoundingSet) deliberately omitted from webhook unit file — each breaks docker compose subprocess; Phase 17 may revisit
 - [Phase 14-webhook-listener]: Plan 14-02: HMAC-SHA256 verified on raw body bytes (never re-serialized); ThreadingHTTPServer + Semaphore(3) for bounded async dispatch; SIGTERM dispatches shutdown() on worker thread to avoid 90s hang
 - [Phase 14]: install.sh --with-webhook added: parse_args() + install_webhook_service() with WSL2 warn-don't-block gate, idempotent listener.py refresh, never-overwrite webhook.json
+- [Phase 15-event-handlers]: [Phase 15-01]: Wave 0 test scaffold — 28 named test functions + 9 fixtures encoding Pitfalls 1/4/7, LISTENER_PORT=19015, inline harness helpers
 
 ### Pending Todos
 
@@ -95,6 +97,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-12T09:22:15.409Z
-Stopped at: Completed 14-04-PLAN.md
+Last session: 2026-04-12T10:25:09.725Z
+Stopped at: Completed 15-01-PLAN.md
 Resume file: None
