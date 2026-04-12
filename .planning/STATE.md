@@ -121,10 +121,11 @@ Recent decisions affecting current work:
 | 260410-fjy | Update README with logging features and verify update instructions | 2026-04-10 | c332c78 | [260410-fjy-update-readme-with-logging-features-and-](./quick/260410-fjy-update-readme-with-logging-features-and-/) |
 | 260410-ic4 | Log redacted secret mappings in anthropic proxy | 2026-04-10 | b77f0cc | [260410-ic4-log-redacted-secret-mappings-in-anthropi](./quick/260410-ic4-log-redacted-secret-mappings-in-anthropi/) |
 | 260411-mre | Add run-tests.sh script and document testing | 2026-04-11 | dbb11c5 | [260411-mre-add-run-tests-script-and-document-testin](./quick/260411-mre-add-run-tests-script-and-document-testin/) |
+| 260412-q2o | Fix install.sh CONFIG_DIR resolves to /root under sudo | 2026-04-12 | 2e1820a | [260412-q2o-fix-install-sh-config-dir-resolves-to-ro](./quick/260412-q2o-fix-install-sh-config-dir-resolves-to-ro/) |
 
 ## Session Continuity
 
-Last session: 2026-04-11T17:19:30.054Z
-Last activity: 2026-04-11 - Completed quick task 260411-mre: Add run-tests script and document testing in README
-Stopped at: Completed 11-01-PLAN.md
+Last session: 2026-04-12T00:00:00Z
+Last activity: 2026-04-12 - Completed quick task 260412-q2o: Fix install.sh CONFIG_DIR resolves to /root under sudo
+Stopped at: Completed quick-260412-q2o
 Resume file: None
