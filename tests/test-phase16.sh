@@ -216,6 +216,55 @@ test_no_force_push_grep() {
   return 0
 }
 
+test_installer_ships_report_templates() {
+  # Wave 2 static invariant: install.sh must ship webhook/report-templates/
+  # to /opt/claude-secure/webhook/report-templates/ via a step mirroring 5b.
+  # D-12 always-refresh: cp individual files but NEVER rm -rf the directory,
+  # so operator-added custom templates survive reinstall.
+  local inst="$PROJECT_DIR/install.sh"
+  [ -f "$inst" ] || { echo "install.sh missing" >&2; return 1; }
+
+  # bash -n syntax check
+  if ! bash -n "$inst" 2>/dev/null; then
+    echo "install.sh failed bash -n syntax check" >&2
+    return 1
+  fi
+
+  # Production path referenced at least 3 times (mkdir, cp, chmod)
+  local path_count
+  path_count=$(grep -c '/opt/claude-secure/webhook/report-templates' "$inst")
+  if [ "$path_count" -lt 3 ]; then
+    echo "Expected >=3 refs to /opt/claude-secure/webhook/report-templates in install.sh, got $path_count" >&2
+    return 1
+  fi
+
+  # Step 5c comment marker present
+  if ! grep -q '# 5c' "$inst"; then
+    echo "Expected '# 5c' step marker in install.sh" >&2
+    return 1
+  fi
+
+  # NEVER rm -rf the report-templates directory (D-12 always-refresh)
+  if grep -E 'rm[[:space:]]+-rf[^#]*report-templates' "$inst" >/dev/null; then
+    echo "FORBIDDEN: install.sh contains 'rm -rf ... report-templates' (D-12 violation)" >&2
+    return 1
+  fi
+
+  # Log line announcing the copy
+  if ! grep -q 'Copied default report templates' "$inst"; then
+    echo "Expected 'Copied default report templates' log line in install.sh" >&2
+    return 1
+  fi
+
+  # Source directory exists in the repo checkout
+  [ -d "$PROJECT_DIR/webhook/report-templates" ] || {
+    echo "webhook/report-templates missing from repo checkout" >&2
+    return 1
+  }
+
+  return 0
+}
+
 # =========================================================================
 # Helper: run do_spawn end-to-end in a subshell with fake claude stdout.
 #
@@ -1084,6 +1133,7 @@ main() {
   run_test "fixtures exist"                     test_fixtures_exist
   run_test "templates exist"                    test_templates_exist
   run_test "no force-push in bin"               test_no_force_push_grep
+  run_test "installer ships report templates"   test_installer_ships_report_templates
   echo ""
 
   echo "--- OPS-01: Report push ---"
