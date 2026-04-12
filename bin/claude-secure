@@ -1745,8 +1745,10 @@ else
   #     config or whitelist merge is required. load_superuser_config would
   #     `read -rp` for DEFAULT_WORKSPACE when config.sh is absent and block
   #     forever in a non-interactive service context.
+  #   - spawn: requires --profile; if called without one do_spawn will print
+  #     its own error. Superuser merge is not valid for spawn.
   case "$FIRST_ARG" in
-    list|help|--help|-h|replay|reap)
+    list|help|--help|-h|replay|reap|spawn)
       : # skip superuser load
       ;;
     *)
