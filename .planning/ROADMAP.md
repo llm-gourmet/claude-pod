@@ -111,7 +111,7 @@ Plans:
 Plans:
 - [x] 16-01-PLAN.md — Wave 0 test scaffold: harness, fixtures, default report templates (Nyquist self-healing)
 - [x] 16-02-PLAN.md — Wave 1a: resolve_report_template + config schema documentation
-- [ ] 16-03-PLAN.md — Wave 1b: render + redact + publish + audit wired into do_spawn (OPS-01 + OPS-02 core)
+- [x] 16-03-PLAN.md — Wave 1b: render + redact + publish + audit wired into do_spawn (OPS-01 + OPS-02 core)
 - [ ] 16-04-PLAN.md — Wave 2: installer ships report templates + README operator docs
 
 ### Phase 17: Operational Hardening
