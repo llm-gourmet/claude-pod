@@ -1,119 +1,134 @@
 #!/bin/bash
 set -euo pipefail
 
-CONFIG_DIR="$HOME/.claude-secure"
-
-# Verify installation
-if [ ! -f "$CONFIG_DIR/config.sh" ]; then
-  echo "ERROR: claude-secure not installed. Run install.sh first." >&2
-  exit 1
+# Source-only mode: load function definitions without executing main logic.
+# Used by tests: __CLAUDE_SECURE_SOURCE_ONLY=1 source bin/claude-secure
+# (also accepts CLAUDE_SECURE_SOURCE_ONLY without leading underscores for the
+# Phase 15 test harness)
+if [ -z "${__CLAUDE_SECURE_SOURCE_ONLY:-}" ]; then
+  __CLAUDE_SECURE_SOURCE_ONLY="${CLAUDE_SECURE_SOURCE_ONLY:-0}"
 fi
 
-# Load global config (APP_DIR, PLATFORM only)
-# shellcheck source=/dev/null
-source "$CONFIG_DIR/config.sh"
+CONFIG_DIR="${CONFIG_DIR:-$HOME/.claude-secure}"
 
-# Auto-migrate single-instance layout to multi-instance (D-04)
-migrate_if_needed() {
-  if [ -f "$CONFIG_DIR/.env" ] && [ ! -d "$CONFIG_DIR/instances" ]; then
-    echo "Migrating single-instance config to multi-instance layout..."
-    mkdir -p "$CONFIG_DIR/instances/default"
-    mv "$CONFIG_DIR/.env" "$CONFIG_DIR/instances/default/.env"
-    # Copy whitelist from app source (it was a docker mount, not stored in CONFIG_DIR)
-    cp "$APP_DIR/config/whitelist.json" "$CONFIG_DIR/instances/default/whitelist.json"
-    # Extract WORKSPACE_PATH into instance config, keep APP_DIR+PLATFORM in global
-    grep '^WORKSPACE_PATH=' "$CONFIG_DIR/config.sh" > "$CONFIG_DIR/instances/default/config.sh" || true
-    local tmp
-    tmp=$(mktemp)
-    grep -v '^WORKSPACE_PATH=' "$CONFIG_DIR/config.sh" > "$tmp"
-    mv "$tmp" "$CONFIG_DIR/config.sh"
-    echo "Migration complete. Your existing setup is now instance 'default'."
-    echo "Use: claude-secure --instance default"
-  fi
+# Temp files to clean up on exit (superuser mode merged configs)
+_CLEANUP_FILES=()
+
+cleanup() {
+  for f in "${_CLEANUP_FILES[@]}"; do
+    rm -f "$f"
+  done
 }
-migrate_if_needed
+trap cleanup EXIT
 
-# Parse --instance flag before anything else (D-01, D-03)
-INSTANCE=""
-ARGS=()
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --instance)
-      if [ -z "${2:-}" ]; then
-        echo "ERROR: --instance requires a name" >&2; exit 1
-      fi
-      INSTANCE="$2"; shift 2 ;;
-    *) ARGS+=("$1"); shift ;;
-  esac
-done
+# =========================================================================
+# Function definitions
+# =========================================================================
 
-# list and help don't need --instance
-FIRST_ARG="${ARGS[0]:-}"
-if [ "$FIRST_ARG" != "list" ] && [ "$FIRST_ARG" != "help" ] && [ "$FIRST_ARG" != "--help" ] && [ "$FIRST_ARG" != "-h" ]; then
-  if [ -z "$INSTANCE" ]; then
-    echo "ERROR: --instance NAME is required for all commands except 'list' and 'help'" >&2
-    echo "Usage: claude-secure --instance NAME [command] [flags]" >&2
-    exit 1
-  fi
-fi
-
-# Validate instance name (D-02)
-validate_instance_name() {
+validate_profile_name() {
   local name="$1"
   if [[ ! "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
-    echo "ERROR: Instance name must be DNS-safe (lowercase alphanumeric and hyphens, must start with letter or digit)" >&2
-    exit 1
+    echo "ERROR: Profile name must be DNS-safe (lowercase alphanumeric and hyphens, must start with letter or digit)" >&2
+    return 1
   fi
   if [ ${#name} -gt 63 ]; then
-    echo "ERROR: Instance name must be 63 characters or less" >&2
-    exit 1
+    echo "ERROR: Profile name must be 63 characters or less" >&2
+    return 1
   fi
 }
 
-if [ -n "$INSTANCE" ]; then
-  validate_instance_name "$INSTANCE"
-fi
-
-# Instance directory
-INSTANCE_DIR="$CONFIG_DIR/instances/$INSTANCE"
-
-# Auto-create instance on first use (D-09)
-create_instance() {
+validate_profile() {
   local name="$1"
-  local idir="$CONFIG_DIR/instances/$name"
-  echo "Instance '$name' not found. Creating..."
+  local pdir="$CONFIG_DIR/profiles/$name"
+
+  if [ ! -d "$pdir" ]; then
+    echo "ERROR: Profile '$name' does not exist at $pdir" >&2
+    echo "Run: claude-secure --profile $name  (to create interactively)" >&2
+    return 1
+  fi
+  if [ ! -f "$pdir/profile.json" ]; then
+    echo "ERROR: Profile '$name' is missing profile.json" >&2
+    return 1
+  fi
+  if ! jq empty "$pdir/profile.json" 2>/dev/null; then
+    echo "ERROR: Profile '$name' has invalid profile.json (not valid JSON)" >&2
+    return 1
+  fi
+  local ws
+  ws=$(jq -r '.workspace // empty' "$pdir/profile.json")
+  if [ -z "$ws" ]; then
+    echo "ERROR: Profile '$name' profile.json missing required 'workspace' field" >&2
+    return 1
+  fi
+  if [ ! -d "$ws" ]; then
+    echo "ERROR: Profile '$name' workspace path does not exist: $ws" >&2
+    return 1
+  fi
+  if [ ! -f "$pdir/.env" ]; then
+    echo "ERROR: Profile '$name' is missing .env (auth credentials required)" >&2
+    return 1
+  fi
+  if [ ! -f "$pdir/whitelist.json" ]; then
+    echo "ERROR: Profile '$name' is missing whitelist.json" >&2
+    return 1
+  fi
+  if ! jq empty "$pdir/whitelist.json" 2>/dev/null; then
+    echo "ERROR: Profile '$name' has invalid whitelist.json (not valid JSON)" >&2
+    return 1
+  fi
+}
+
+create_profile() {
+  local name="$1"
+  local pdir="$CONFIG_DIR/profiles/$name"
+  local tmpdir
+  tmpdir=$(mktemp -d)
+
+  echo "Creating profile '$name'..."
+
+  # Workspace
   read -rp "Workspace path [$HOME/claude-workspace-$name]: " ws_path
   ws_path="${ws_path:-$HOME/claude-workspace-$name}"
   ws_path="$(realpath -m "$ws_path")"
   mkdir -p "$ws_path"
-  mkdir -p "$idir"
-  echo "WORKSPACE_PATH=\"$ws_path\"" > "$idir/config.sh"
-  # Copy whitelist template from app
-  cp "$APP_DIR/config/whitelist.json" "$idir/whitelist.json"
-  # Copy auth from existing instance or prompt
+
+  # Build profile.json
+  jq -n --arg ws "$ws_path" '{"workspace": $ws}' > "$tmpdir/profile.json"
+
+  # Copy whitelist template
+  cp "$APP_DIR/config/whitelist.json" "$tmpdir/whitelist.json"
+
+  # Auth setup
   local existing_env=""
-  for d in "$CONFIG_DIR/instances"/*/; do
-    if [ -f "$d/.env" ] && [ "$d" != "$idir/" ]; then
-      existing_env="$d/.env"
-      break
-    fi
-  done
+  if [ -d "$CONFIG_DIR/profiles" ]; then
+    for d in "$CONFIG_DIR/profiles"/*/; do
+      if [ -f "$d/.env" ] && [ "$(cd "$d" && pwd)" != "$(cd "$tmpdir" && pwd)" ]; then
+        existing_env="$d/.env"
+        break
+      fi
+    done
+  fi
   if [ -n "$existing_env" ]; then
     read -rp "Copy auth credentials from $(basename "$(dirname "$existing_env")")? [Y/n]: " copy_auth
     if [[ "${copy_auth:-y}" =~ ^[Yy]$ ]]; then
-      cp "$existing_env" "$idir/.env"
-      echo "Auth credentials copied. Edit $idir/.env to customize secrets."
+      cp "$existing_env" "$tmpdir/.env"
+      echo "Auth credentials copied. Edit $pdir/.env to customize secrets."
     else
-      setup_instance_auth "$idir"
+      setup_profile_auth "$tmpdir"
     fi
   else
-    setup_instance_auth "$idir"
+    setup_profile_auth "$tmpdir"
   fi
-  echo "Instance '$name' created."
+
+  # Atomic move to final location
+  mkdir -p "$(dirname "$pdir")"
+  mv "$tmpdir" "$pdir"
+
+  echo "Profile '$name' created at $pdir"
 }
 
-setup_instance_auth() {
-  local idir="$1"
+setup_profile_auth() {
+  local dir="$1"
   echo "Choose authentication method:"
   echo "  1) OAuth token [recommended]"
   echo "  2) API key"
@@ -122,50 +137,163 @@ setup_instance_auth() {
   case "$auth_choice" in
     2)
       read -rsp "API key: " key; echo ""
-      echo "ANTHROPIC_API_KEY=${key}" > "$idir/.env"
+      echo "ANTHROPIC_API_KEY=${key}" > "$dir/.env"
       ;;
     *)
       echo "Run 'claude setup-token' first to get your OAuth token."
       read -rsp "OAuth token: " token; echo ""
-      echo "CLAUDE_CODE_OAUTH_TOKEN=${token}" > "$idir/.env"
+      echo "CLAUDE_CODE_OAUTH_TOKEN=${token}" > "$dir/.env"
       ;;
   esac
-  echo "" >> "$idir/.env"
-  echo "# Add secrets below (must match env_var in whitelist.json)" >> "$idir/.env"
-  echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$idir/.env"
-  chmod 600 "$idir/.env"
+  echo "" >> "$dir/.env"
+  echo "# Add secrets below (must match env_var in whitelist.json)" >> "$dir/.env"
+  echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$dir/.env"
+  chmod 600 "$dir/.env"
 }
 
-# Auto-create if instance specified but doesn't exist (skip for stop/remove/list/help)
-if [ -n "$INSTANCE" ] && [ ! -d "$INSTANCE_DIR" ]; then
-  if [ "$FIRST_ARG" = "stop" ] || [ "$FIRST_ARG" = "remove" ]; then
-    echo "ERROR: Instance '$INSTANCE' does not exist." >&2
-    exit 1
-  fi
-  create_instance "$INSTANCE"
-fi
+resolve_profile_by_repo() {
+  local target_repo="$1"
+  shopt -s nullglob
+  for pdir in "$CONFIG_DIR/profiles"/*/; do
+    [ -f "$pdir/profile.json" ] || continue
+    local repo
+    repo=$(jq -r '.repo // empty' "$pdir/profile.json")
+    if [ "$repo" = "$target_repo" ]; then
+      basename "$pdir"
+      shopt -u nullglob
+      return 0
+    fi
+  done
+  shopt -u nullglob
+  echo "ERROR: No profile found for repo '$target_repo'" >&2
+  return 1
+}
 
-# Load instance config and set env vars
-if [ -n "$INSTANCE" ]; then
-  # Load instance config (WORKSPACE_PATH)
-  # shellcheck source=/dev/null
-  source "$INSTANCE_DIR/config.sh"
+merge_whitelists() {
+  local merged='{"secrets":[],"readonly_domains":[]}'
+  shopt -s nullglob
+  for pdir in "$CONFIG_DIR/profiles"/*/; do
+    [ -f "$pdir/whitelist.json" ] || continue
+    merged=$(echo "$merged" | jq --slurpfile wl "$pdir/whitelist.json" '
+      .secrets += $wl[0].secrets
+      | .readonly_domains += ($wl[0].readonly_domains // [])
+      | .secrets |= unique_by(.env_var)
+      | .readonly_domains |= unique
+    ')
+  done
+  shopt -u nullglob
+  echo "$merged"
+}
 
-  # Load and auto-export instance secrets
-  set -a
-  # shellcheck source=/dev/null
-  source "$INSTANCE_DIR/.env"
-  set +a
+merge_env_files() {
+  local merged_env
+  merged_env=$(mktemp)
+  shopt -s nullglob
+  for pdir in "$CONFIG_DIR/profiles"/*/; do
+    [ -f "$pdir/.env" ] || continue
+    cat "$pdir/.env" >> "$merged_env"
+    echo "" >> "$merged_env"
+  done
+  shopt -u nullglob
+  echo "$merged_env"
+}
 
-  # Set compose and instance variables
-  export COMPOSE_PROJECT_NAME="claude-${INSTANCE}"
+load_profile_config() {
+  local name="$1"
+  local pdir="$CONFIG_DIR/profiles/$name"
+
+  WORKSPACE_PATH=$(jq -r '.workspace' "$pdir/profile.json")
+
+  export COMPOSE_PROJECT_NAME="claude-${name}"
   export COMPOSE_FILE="$APP_DIR/docker-compose.yml"
   export WORKSPACE_PATH
-  export SECRETS_FILE="$INSTANCE_DIR/.env"
-  export WHITELIST_PATH="$INSTANCE_DIR/whitelist.json"
+  export SECRETS_FILE="$pdir/.env"
+  export WHITELIST_PATH="$pdir/whitelist.json"
   export LOG_DIR="$CONFIG_DIR/logs"
-  export LOG_PREFIX="${INSTANCE}-"
-fi
+  export LOG_PREFIX="${name}-"
+
+  # .env is required by full profile validation (`validate_profile`), but
+  # spawn/replay dry-runs skip that check. Source defensively so test
+  # harnesses and dry-run invocations don't fail on a missing secrets file.
+  if [ -f "$pdir/.env" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$pdir/.env"
+    set +a
+  fi
+}
+
+load_superuser_config() {
+  # Default workspace
+  local default_ws="${DEFAULT_WORKSPACE:-}"
+  if [ -z "$default_ws" ]; then
+    read -rp "Default workspace for superuser mode [$HOME/claude-workspace]: " default_ws
+    default_ws="${default_ws:-$HOME/claude-workspace}"
+    default_ws="$(realpath -m "$default_ws")"
+    mkdir -p "$default_ws"
+    echo "DEFAULT_WORKSPACE=\"$default_ws\"" >> "$CONFIG_DIR/config.sh"
+  fi
+
+  # Merge whitelists to temp file
+  local merged_wl
+  merged_wl=$(mktemp)
+  merge_whitelists > "$merged_wl"
+  _CLEANUP_FILES+=("$merged_wl")
+
+  # Merge env files
+  local merged_env
+  merged_env=$(merge_env_files)
+  _CLEANUP_FILES+=("$merged_env")
+
+  export COMPOSE_PROJECT_NAME="claude-superuser"
+  export COMPOSE_FILE="$APP_DIR/docker-compose.yml"
+  export WORKSPACE_PATH="$default_ws"
+  export SECRETS_FILE="$merged_env"
+  export WHITELIST_PATH="$merged_wl"
+  export LOG_DIR="$CONFIG_DIR/logs"
+  export LOG_PREFIX="superuser-"
+
+  # Source merged env for docker compose variable substitution
+  if [ -s "$merged_env" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$merged_env"
+    set +a
+  fi
+}
+
+list_profiles() {
+  printf "%-20s %-35s %-10s %s\n" "PROFILE" "REPO" "STATUS" "WORKSPACE"
+  printf "%-20s %-35s %-10s %s\n" "-------" "----" "------" "---------"
+
+  if [ ! -d "$CONFIG_DIR/profiles" ]; then
+    echo "No profiles configured."
+    return
+  fi
+
+  shopt -s nullglob
+  local found=0
+  for pdir in "$CONFIG_DIR/profiles"/*/; do
+    found=1
+    local name repo ws status project
+    name=$(basename "$pdir")
+    repo=$(jq -r '.repo // "-"' "$pdir/profile.json" 2>/dev/null || echo "-")
+    ws=$(jq -r '.workspace // "-"' "$pdir/profile.json" 2>/dev/null || echo "-")
+    project="claude-${name}"
+    # Check running status
+    if docker compose ls --format json 2>/dev/null | jq -e ".[] | select(.Name == \"$project\")" >/dev/null 2>&1; then
+      status="running"
+    else
+      status="stopped"
+    fi
+    printf "%-20s %-35s %-10s %s\n" "$name" "$repo" "$status" "$ws"
+  done
+  shopt -u nullglob
+
+  if [ "$found" -eq 0 ]; then
+    echo "No profiles configured."
+  fi
+}
 
 # Use docker compose project-scoped cleanup instead of hardcoded names
 cleanup_containers() {
@@ -194,7 +322,1458 @@ parse_log_flags() {
   export LOG_HOOK LOG_ANTHROPIC LOG_ANTHROPIC_BODIES LOG_IPTABLES
 }
 
-# Parse log flags from instance-scoped arguments
+spawn_project_name() {
+  local profile="$1"
+  local uuid8
+  # Pure-ASCII uuid hex, so bash parameter expansion is UTF-8 safe here.
+  # (Phase 15 bans byte-based bash truncation project-wide.)
+  local raw
+  raw=$(uuidgen | tr -d '-' | tr '[:upper:]' '[:lower:]')
+  uuid8="${raw:0:8}"
+  echo "cs-${profile}-${uuid8}"
+}
+
+spawn_cleanup() {
+  docker compose down -v --remove-orphans 2>/dev/null || true
+  for f in "${_CLEANUP_FILES[@]}"; do
+    rm -f "$f"
+  done
+}
+
+build_output_envelope() {
+  local profile="$1"
+  local event_type="$2"
+  local claude_output="$3"
+  local timestamp
+  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  echo "$claude_output" | jq --arg profile "$profile" \
+    --arg event_type "$event_type" \
+    --arg timestamp "$timestamp" \
+    '{
+      profile: $profile,
+      event_type: $event_type,
+      timestamp: $timestamp,
+      claude: .
+    }'
+}
+
+build_error_envelope() {
+  local profile="$1"
+  local event_type="$2"
+  local error_msg="$3"
+  local timestamp
+  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  jq -n --arg profile "$profile" \
+    --arg event_type "$event_type" \
+    --arg timestamp "$timestamp" \
+    --arg error "$error_msg" \
+    '{
+      profile: $profile,
+      event_type: $event_type,
+      timestamp: $timestamp,
+      error: $error
+    }'
+}
+
+# =========================================================================
+# Phase 15 helpers (D-13, D-15, D-17, D-18): template resolution fallback,
+# UTF-8-safe payload extraction, and awk-based token substitution.
+# =========================================================================
+
+# Phase 15 D-15 + Phase 16 D-08: resolve the default templates directory.
+# Parameterized by subdir so one function serves both prompt templates
+# (subdir="templates", default for backward compat) and report templates
+# (subdir="report-templates"). Priority chain per subdir:
+#   1. $WEBHOOK_TEMPLATES_DIR          (when subdir == "templates")
+#   1. $WEBHOOK_REPORT_TEMPLATES_DIR   (when subdir == "report-templates")
+#   2. Dev checkout: $APP_DIR/webhook/$subdir when $APP_DIR/.git exists
+#   3. Production fallback: /opt/claude-secure/webhook/$subdir
+_resolve_default_templates_dir() {
+  local subdir="${1:-templates}"
+
+  if [ "$subdir" = "templates" ] && [ -n "${WEBHOOK_TEMPLATES_DIR:-}" ]; then
+    echo "$WEBHOOK_TEMPLATES_DIR"
+    return
+  fi
+  if [ "$subdir" = "report-templates" ] && [ -n "${WEBHOOK_REPORT_TEMPLATES_DIR:-}" ]; then
+    echo "$WEBHOOK_REPORT_TEMPLATES_DIR"
+    return
+  fi
+
+  if [ -n "${APP_DIR:-}" ] && [ -d "$APP_DIR/.git" ] && [ -d "$APP_DIR/webhook/$subdir" ]; then
+    echo "$APP_DIR/webhook/$subdir"
+    return
+  fi
+
+  echo "/opt/claude-secure/webhook/$subdir"
+}
+
+# D-17 / D-18 / Pitfall 4: extract a jq path from an event payload and emit
+# the hygienized + truncated value bytes to stdout. Hygiene strips NUL and
+# ASCII control chars except \n \r \t; truncation is UTF-8-safe at 8192
+# bytes with a "... [truncated N more bytes]" suffix. Uses python3 via stdin
+# to avoid argv-size limits, IFS issues, and byte-unsafe bash truncation.
+#
+# Args:  $1 = event source (JSON string OR a path to a JSON file),
+#        $2 = jq filter,
+#        $3 = default when jq result is empty.
+# Out:   writes the cleaned value to stdout (no temp file path indirection).
+#        Callers that need a file (e.g. render_template) create their own
+#        temp file via mktemp + redirection and register with _CLEANUP_FILES.
+#
+# Hard constraints:
+#   - MUST NOT use byte-based bash truncation (unsafe for multi-byte UTF-8).
+#   - MUST pass raw payload via stdin, not argv.
+extract_payload_field() {
+  local event_source="$1"
+  local jq_path="$2"
+  local default_value="${3:-}"
+
+  # Auto-detect file vs inline JSON: a regular file on disk is read via
+  # `jq -r ... <file>`, otherwise pipe the string in via a here-string.
+  local raw
+  if [ -f "$event_source" ]; then
+    raw=$(jq -r "$jq_path // empty" "$event_source" 2>/dev/null)
+  else
+    raw=$(printf '%s' "$event_source" | jq -r "$jq_path // empty" 2>/dev/null)
+  fi
+  if [ -z "$raw" ]; then
+    raw="$default_value"
+  fi
+
+  # Hygiene + truncation via python3. Payload goes through an env var (not
+  # argv or stdin) to avoid heredoc/pipe collisions and argv-size limits.
+  # The script itself is passed via `python3 -c` so stdin is free for the
+  # caller if needed and bytes pass losslessly.
+  RAW_PAYLOAD="$raw" python3 -c '
+import os, sys
+data = os.environb.get(b"RAW_PAYLOAD", b"")
+keep = {0x09, 0x0A, 0x0D}
+cleaned = bytes(b for b in data if b >= 0x20 or b in keep)
+LIMIT = 8192
+if len(cleaned) > LIMIT:
+    truncated = cleaned[:LIMIT].decode("utf-8", errors="ignore").encode("utf-8")
+    dropped = len(cleaned) - len(truncated)
+    suffix = f"... [truncated {dropped} more bytes]".encode("utf-8")
+    cleaned = truncated + suffix
+sys.stdout.buffer.write(cleaned)
+'
+}
+
+# Helper: extract a field (via extract_payload_field) into a new temp file,
+# register with _CLEANUP_FILES, and echo the temp file path. Used by
+# render_template to feed _substitute_token_from_file.
+_extract_to_tempfile() {
+  local event_source="$1"
+  local jq_path="$2"
+  local default_value="${3:-}"
+  local out_file
+  out_file=$(mktemp)
+  _CLEANUP_FILES+=("$out_file")
+  extract_payload_field "$event_source" "$jq_path" "$default_value" > "$out_file"
+  echo "$out_file"
+}
+
+# Pitfall 1 fix: substitute `{{TOKEN}}` in a template with the contents of
+# a value file, using awk to avoid any sed escape-character bugs. The value
+# can contain any of: | \ & / newlines — none need escaping because awk reads
+# the substitution from a file, not a command-line arg.
+#
+# This variant inlines the value at the token position (short single/few-line
+# values like titles, authors, URLs). For long multiline bodies/messages, use
+# _substitute_multiline_token_from_file which emits each line on its own row.
+_substitute_token_from_file() {
+  local rendered="$1"
+  local token="$2"
+  local value_file="$3"
+  echo "$rendered" | awk -v token="{{${token}}}" -v vfile="$value_file" '
+    BEGIN {
+      value = ""
+      first = 1
+      while ((getline line < vfile) > 0) {
+        if (first) { value = line; first = 0 }
+        else       { value = value "\n" line }
+      }
+      close(vfile)
+    }
+    {
+      if (index($0, token) > 0) {
+        n = split($0, parts, token)
+        out = parts[1]
+        for (i = 2; i <= n; i++) out = out value parts[i]
+        print out
+      } else {
+        print
+      }
+    }
+  '
+}
+
+# Multiline variant: when a line contains only `{{TOKEN}}` (with optional
+# surrounding whitespace handling), emit the value file line-by-line in place.
+# Matches the pre-Phase-15 ISSUE_BODY pattern so templates that reserve a
+# blank line for the body render correctly.
+_substitute_multiline_token_from_file() {
+  local rendered="$1"
+  local token="$2"
+  local value_file="$3"
+  echo "$rendered" | awk -v pat="{{${token}}}" -v vfile="$value_file" '
+    index($0, pat) > 0 {
+      while ((getline line < vfile) > 0) print line
+      close(vfile)
+      next
+    }
+    { print }
+  '
+}
+
+resolve_template() {
+  local event_type="$1"
+  local explicit_template="${2:-}"
+
+  local profile_dir="$CONFIG_DIR/profiles/$PROFILE"
+  local prompts_dir="$profile_dir/prompts"
+
+  # D-13 step 1: explicit --prompt-template stays in the profile dir ONLY.
+  # No default-dir fallback when the user named a template explicitly — a
+  # silent fallback would hide typos.
+  if [ -n "$explicit_template" ]; then
+    local path="$prompts_dir/${explicit_template}.md"
+    if [ -f "$path" ]; then
+      echo "$path"
+      return 0
+    fi
+    echo "ERROR: Template not found: $path (from --prompt-template)" >&2
+    return 1
+  fi
+
+  # D-13 step 2: profile override by event_type.
+  if [ -d "$prompts_dir" ]; then
+    local path="$prompts_dir/${event_type}.md"
+    if [ -f "$path" ]; then
+      echo "$path"
+      return 0
+    fi
+  fi
+
+  # D-13 step 3: default template fallback.
+  local default_dir
+  default_dir=$(_resolve_default_templates_dir)
+  if [ -d "$default_dir" ]; then
+    local path="$default_dir/${event_type}.md"
+    if [ -f "$path" ]; then
+      echo "$path"
+      return 0
+    fi
+  fi
+
+  # D-13 step 4: hard fail, listing every path checked.
+  echo "ERROR: No template found for event_type '$event_type'" >&2
+  echo "  Checked: $prompts_dir/${event_type}.md" >&2
+  echo "  Checked: $default_dir/${event_type}.md" >&2
+  echo "  Use --prompt-template to override, or create one of the above." >&2
+  return 1
+}
+
+# Phase 16 D-08: report-template fallback chain.
+# Clone of resolve_template for report templates. Only the subdir names
+# change (prompts/ -> report-templates/, templates/ -> report-templates/).
+# There is no explicit-override flag for reports: the report template is
+# chosen purely by event_type.
+resolve_report_template() {
+  local event_type="$1"
+
+  local profile_dir="$CONFIG_DIR/profiles/$PROFILE"
+  local reports_dir="$profile_dir/report-templates"
+
+  # Step 1: profile override by event_type.
+  if [ -d "$reports_dir" ]; then
+    local path="$reports_dir/${event_type}.md"
+    if [ -f "$path" ]; then
+      echo "$path"
+      return 0
+    fi
+  fi
+
+  # Step 2: default template fallback (via parameterized resolver).
+  local default_dir
+  default_dir=$(_resolve_default_templates_dir "report-templates")
+  if [ -d "$default_dir" ]; then
+    local path="$default_dir/${event_type}.md"
+    if [ -f "$path" ]; then
+      echo "$path"
+      return 0
+    fi
+  fi
+
+  # Step 3: hard fail, listing every path checked.
+  echo "ERROR: No report template found for event_type '$event_type'" >&2
+  echo "  Checked: $reports_dir/${event_type}.md" >&2
+  echo "  Checked: $default_dir/${event_type}.md" >&2
+  echo "  Create one of the above to enable report publishing." >&2
+  return 1
+}
+
+render_template() {
+  local template_path="$1"
+  local event_json="$2"
+
+  local rendered
+  rendered=$(cat "$template_path")
+  local v_file
+
+  # --- Common (D-16) --------------------------------------------------------
+
+  v_file=$(_extract_to_tempfile "$event_json" '.repository.full_name' "")
+  rendered=$(_substitute_token_from_file "$rendered" "REPO_NAME" "$v_file")
+
+  # D-03: top-level .event_type wins, then Phase 14 ._meta.event_type, then .action.
+  v_file=$(_extract_to_tempfile "$event_json" '.event_type // ._meta.event_type // .action' "unknown")
+  rendered=$(_substitute_token_from_file "$rendered" "EVENT_TYPE" "$v_file")
+
+  # --- Issues ---------------------------------------------------------------
+
+  v_file=$(_extract_to_tempfile "$event_json" '.issue.number | tostring' "")
+  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_NUMBER" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.issue.title' "")
+  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_TITLE" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '[.issue.labels[]?.name] | join(", ")' "")
+  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_LABELS" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.issue.user.login' "")
+  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_AUTHOR" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.issue.html_url' "")
+  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_URL" "$v_file")
+
+  # --- GATED multi-source variables (BRANCH, COMMIT_SHA) -------------------
+  #
+  # Pattern: extract from the primary source first; if the resulting file is
+  # non-empty (i.e. `.ref` was present on a push payload), substitute now.
+  # Otherwise fall back to the workflow_run source and substitute that.
+  #
+  # WHY GATED: `_substitute_token_from_file` always replaces the token — even
+  # with an empty value — so the naive "substitute, then re-grep for the
+  # token to detect fallback" pattern silently consumes `{{BRANCH}}` on
+  # workflow_run-only payloads. `[ -s "$v_file" ]` triggers the fallback
+  # branch only when the primary source produced bytes.
+  v_file=$(_extract_to_tempfile "$event_json" '.ref | sub("^refs/heads/"; "")' "")
+  if [ -s "$v_file" ]; then
+    rendered=$(_substitute_token_from_file "$rendered" "BRANCH" "$v_file")
+  else
+    v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.head_branch' "")
+    rendered=$(_substitute_token_from_file "$rendered" "BRANCH" "$v_file")
+  fi
+
+  v_file=$(_extract_to_tempfile "$event_json" '.after // .head_commit.id' "")
+  if [ -s "$v_file" ]; then
+    rendered=$(_substitute_token_from_file "$rendered" "COMMIT_SHA" "$v_file")
+  else
+    v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.head_sha' "")
+    rendered=$(_substitute_token_from_file "$rendered" "COMMIT_SHA" "$v_file")
+  fi
+
+  # --- Push (single-source, null-safe via `// empty` in jq) ----------------
+
+  v_file=$(_extract_to_tempfile "$event_json" '.head_commit.author.name' "")
+  rendered=$(_substitute_token_from_file "$rendered" "COMMIT_AUTHOR" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.pusher.name' "")
+  rendered=$(_substitute_token_from_file "$rendered" "PUSHER" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.compare' "")
+  rendered=$(_substitute_token_from_file "$rendered" "COMPARE_URL" "$v_file")
+
+  # --- Workflow run (Pitfall 6: prefer top-level .workflow.name) -----------
+
+  v_file=$(_extract_to_tempfile "$event_json" '.workflow.name // .workflow_run.name' "")
+  rendered=$(_substitute_token_from_file "$rendered" "WORKFLOW_NAME" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.id | tostring' "")
+  rendered=$(_substitute_token_from_file "$rendered" "WORKFLOW_RUN_ID" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.conclusion' "")
+  rendered=$(_substitute_token_from_file "$rendered" "WORKFLOW_CONCLUSION" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.html_url' "")
+  rendered=$(_substitute_token_from_file "$rendered" "WORKFLOW_RUN_URL" "$v_file")
+
+  # --- Multiline values (null-safe, Pitfall 7) -----------------------------
+
+  v_file=$(_extract_to_tempfile "$event_json" '.issue.body // empty' "")
+  rendered=$(_substitute_multiline_token_from_file "$rendered" "ISSUE_BODY" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$event_json" '.head_commit.message // empty' "")
+  rendered=$(_substitute_multiline_token_from_file "$rendered" "COMMIT_MESSAGE" "$v_file")
+
+  echo "$rendered"
+}
+
+# =========================================================================
+# Phase 16 helpers (D-04..D-18): result text extraction, report rendering,
+# secret redaction, audit log writer, publish + push retry.
+# =========================================================================
+
+# Phase 16 D-16 / Pitfall 4: extract .claude.result from the envelope and
+# emit the UTF-8-safe, control-char-stripped, 16KB-truncated bytes to a
+# fresh tempfile. Dedicated variant (vs extract_payload_field) so the
+# Phase 15 8KB payload limit stays unchanged for prompt rendering.
+_extract_result_text_to_tempfile() {
+  local envelope_source="$1"
+  local out_file
+  out_file=$(mktemp)
+  _CLEANUP_FILES+=("$out_file")
+
+  local raw
+  if [ -f "$envelope_source" ]; then
+    raw=$(jq -r '.claude.result // empty' "$envelope_source" 2>/dev/null)
+  else
+    raw=$(printf '%s' "$envelope_source" | jq -r '.claude.result // empty' 2>/dev/null)
+  fi
+
+  RAW_PAYLOAD="$raw" python3 -c '
+import os, sys
+data = os.environb.get(b"RAW_PAYLOAD", b"")
+keep = {0x09, 0x0A, 0x0D}
+cleaned = bytes(b for b in data if b >= 0x20 or b in keep)
+LIMIT = 16384
+if len(cleaned) > LIMIT:
+    truncated = cleaned[:LIMIT].decode("utf-8", errors="ignore").encode("utf-8")
+    dropped = len(cleaned) - len(truncated)
+    suffix = f"... [truncated {dropped} more bytes]".encode("utf-8")
+    cleaned = truncated + suffix
+sys.stdout.buffer.write(cleaned)
+' > "$out_file"
+
+  echo "$out_file"
+}
+
+# Phase 16 D-10 / D-11 / Pattern G / Pitfall 2: render a report template.
+# Chains on top of Phase 15's render_template (which substitutes all D-16
+# variables using the awk-from-file pattern) then substitutes the six
+# D-10 extension variables. RESULT_TEXT and ERROR_MESSAGE are deliberately
+# LAST so embedded {{ISSUE_TITLE}} style tokens inside Claude's output
+# are not re-interpreted as template variables (Pitfall 2).
+render_report_template() {
+  local template_path="$1"
+  local event_json="$2"
+  local envelope_json="$3"
+  local status="$4"
+
+  # Step 1: run Phase 15 render_template to substitute all D-16 variables.
+  local rendered
+  rendered=$(render_template "$template_path" "$event_json")
+  local v_file
+
+  # Step 2: substitute D-10 metadata variables (short single-line) FIRST,
+  # so that if RESULT_TEXT contains e.g. {{COST_USD}}, the inner token
+  # survives the RESULT_TEXT substitution (which runs last).
+  #
+  # Pitfall 5: cost_usd // cost and duration_ms // duration fallback
+  # because Claude Code has shipped both field names historically.
+  v_file=$(_extract_to_tempfile "$envelope_json" '.claude.cost_usd // .claude.cost // 0 | tostring' "0")
+  rendered=$(_substitute_token_from_file "$rendered" "COST_USD" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$envelope_json" '.claude.duration_ms // .claude.duration // 0 | tostring' "0")
+  rendered=$(_substitute_token_from_file "$rendered" "DURATION_MS" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$envelope_json" '.claude.session_id // ""' "")
+  rendered=$(_substitute_token_from_file "$rendered" "SESSION_ID" "$v_file")
+
+  # Wrapper-generated: TIMESTAMP and STATUS come from the caller, not the envelope.
+  v_file=$(mktemp); _CLEANUP_FILES+=("$v_file")
+  date -u +"%Y-%m-%dT%H:%M:%SZ" > "$v_file"
+  rendered=$(_substitute_token_from_file "$rendered" "TIMESTAMP" "$v_file")
+
+  v_file=$(mktemp); _CLEANUP_FILES+=("$v_file")
+  printf '%s' "$status" > "$v_file"
+  rendered=$(_substitute_token_from_file "$rendered" "STATUS" "$v_file")
+
+  # Step 3: LAST — RESULT_TEXT and ERROR_MESSAGE.
+  # These carry arbitrary Claude output that may contain literal {{TOKEN}}
+  # strings. Substituting them AFTER all other passes guarantees those
+  # literal tokens are preserved (Pitfall 2).
+  v_file=$(_extract_result_text_to_tempfile "$envelope_json")
+  rendered=$(_substitute_multiline_token_from_file "$rendered" "RESULT_TEXT" "$v_file")
+
+  v_file=$(_extract_to_tempfile "$envelope_json" '.error // ""' "")
+  rendered=$(_substitute_multiline_token_from_file "$rendered" "ERROR_MESSAGE" "$v_file")
+
+  printf '%s' "$rendered"
+}
+
+# Phase 16 D-15 / Pattern B / Pitfall 1: redact every non-empty profile
+# .env value from a rendered report file in place. Uses awk-from-file
+# LITERAL substring replace (index + substr) so any value metacharacter
+# (| / \ & $ [ ] ^ * .) is safe. NEVER uses sed with interpolation.
+redact_report_file() {
+  local report_file="$1"
+  local env_file="$2"
+  local tmp_out tmp_val
+  tmp_out=$(mktemp)
+  tmp_val=$(mktemp)
+  _CLEANUP_FILES+=("$tmp_out" "$tmp_val")
+
+  while IFS='=' read -r raw_key raw_val || [ -n "$raw_key" ]; do
+    [[ -z "$raw_key" || "$raw_key" =~ ^[[:space:]]*# ]] && continue
+    raw_key="${raw_key#export }"
+    raw_key="${raw_key//[[:space:]]/}"
+    [ -z "$raw_key" ] && continue
+    raw_val="${raw_val%$'\r'}"
+    raw_val="${raw_val#\"}"; raw_val="${raw_val%\"}"
+    raw_val="${raw_val#\'}"; raw_val="${raw_val%\'}"
+    # D-15: skip empty values
+    [ -z "$raw_val" ] && continue
+
+    printf '%s' "$raw_val" > "$tmp_val"
+
+    awk -v repl="<REDACTED:${raw_key}>" -v vfile="$tmp_val" '
+      BEGIN {
+        value = ""
+        first = 1
+        while ((getline line < vfile) > 0) {
+          if (first) { value = line; first = 0 }
+          else       { value = value "\n" line }
+        }
+        close(vfile)
+        if (value == "") exit 0
+      }
+      {
+        line = $0
+        out = ""
+        while ((i = index(line, value)) > 0) {
+          out = out substr(line, 1, i-1) repl
+          line = substr(line, i + length(value))
+        }
+        print out line
+      }
+    ' "$report_file" > "$tmp_out"
+    mv "$tmp_out" "$report_file"
+    : > "$tmp_val"
+  done < "$env_file"
+
+  rm -f "$tmp_val" 2>/dev/null || true
+}
+
+# Phase 16 D-04 / D-06 / D-07 / Pattern C / Pitfall 8 / Pitfall 14:
+# Append a single audit line to $LOG_DIR/${LOG_PREFIX}executions.jsonl.
+# Uses jq -cn for safe JSON construction. Enforces a 4095-byte guard so
+# POSIX O_APPEND atomicity (< PIPE_BUF = 4096 on Linux) is preserved under
+# concurrent same-profile spawns (Phase 14 semaphore up to 3).
+write_audit_entry() {
+  local ts="$1" delivery_id="$2" webhook_id="$3" event_type="$4"
+  local profile="$5" repo="$6" commit_sha="$7" branch="$8"
+  local cost_usd="$9" duration_ms="${10}" session_id="${11}"
+  local status="${12}" report_url="${13}" error_short="${14:-}"
+
+  mkdir -p "$LOG_DIR"
+  local audit_file="$LOG_DIR/${LOG_PREFIX:-}executions.jsonl"
+
+  # jq_cost / jq_duration normalize: "" -> null, numeric -> number.
+  local jq_cost="null" jq_duration="null"
+  [ -n "$cost_usd" ] && jq_cost="$cost_usd"
+  [ -n "$duration_ms" ] && jq_duration="$duration_ms"
+
+  local line
+  line=$(jq -cn \
+    --arg ts "$ts" \
+    --arg delivery_id "$delivery_id" \
+    --arg webhook_id "$webhook_id" \
+    --arg event_type "$event_type" \
+    --arg profile "$profile" \
+    --arg repo "$repo" \
+    --arg commit_sha "$commit_sha" \
+    --arg branch "$branch" \
+    --arg session_id "$session_id" \
+    --arg status "$status" \
+    --arg report_url "$report_url" \
+    --arg error_short "$error_short" \
+    --argjson cost_usd "$jq_cost" \
+    --argjson duration_ms "$jq_duration" \
+    '{
+      ts: $ts,
+      delivery_id: $delivery_id,
+      webhook_id: (if $webhook_id == "" then null else $webhook_id end),
+      event_type: $event_type,
+      profile: $profile,
+      repo: (if $repo == "" then null else $repo end),
+      commit_sha: (if $commit_sha == "" then null else $commit_sha end),
+      branch: (if $branch == "" then null else $branch end),
+      cost_usd: $cost_usd,
+      duration_ms: $duration_ms,
+      session_id: (if $session_id == "" then null else $session_id end),
+      status: $status,
+      report_url: (if $report_url == "" then null else $report_url end),
+      error_short: (if $error_short == "" then null else $error_short end)
+    }')
+
+  # Pattern C / Pitfall 14: refuse to emit over-budget lines; drop error_short
+  # and retry once with a sentinel value.
+  if [ "${#line}" -gt 4095 ]; then
+    echo "WARNING: audit line exceeds PIPE_BUF, dropping error_short" >&2
+    line=$(jq -cn \
+      --arg ts "$ts" --arg delivery_id "$delivery_id" --arg webhook_id "$webhook_id" \
+      --arg event_type "$event_type" --arg profile "$profile" --arg repo "$repo" \
+      --arg commit_sha "$commit_sha" --arg branch "$branch" \
+      --arg session_id "$session_id" --arg status "$status" --arg report_url "$report_url" \
+      --argjson cost_usd "$jq_cost" --argjson duration_ms "$jq_duration" \
+      '{
+        ts: $ts, delivery_id: $delivery_id,
+        webhook_id: (if $webhook_id == "" then null else $webhook_id end),
+        event_type: $event_type, profile: $profile,
+        repo: (if $repo == "" then null else $repo end),
+        commit_sha: (if $commit_sha == "" then null else $commit_sha end),
+        branch: (if $branch == "" then null else $branch end),
+        cost_usd: $cost_usd, duration_ms: $duration_ms,
+        session_id: (if $session_id == "" then null else $session_id end),
+        status: $status,
+        report_url: (if $report_url == "" then null else $report_url end),
+        error_short: "<dropped: over-budget>"
+      }')
+  fi
+
+  printf '%s\n' "$line" >> "$audit_file"
+}
+
+# Phase 16 D-14 / Pattern D / Pitfall 6: push the currently-committed
+# report to origin/$branch. On non-fast-forward rejection, rebase once
+# and retry exactly once. Never force-push. "Everything up-to-date" is
+# a success (exit 0), even after a rebase where our commit was already
+# upstream. LC_ALL=C makes git's English error messages deterministic
+# for the retry-trigger grep.
+push_with_retry() {
+  local clone_dir="$1" branch="$2"
+  local repo_path="$clone_dir/repo"
+
+  local err_log="$clone_dir/push.err"
+
+  # Initial push attempt.
+  if LC_ALL=C GIT_ASKPASS="$clone_dir/.askpass.sh" \
+     GIT_ASKPASS_PAT="$REPORT_REPO_TOKEN" \
+     GIT_TERMINAL_PROMPT=0 \
+     git -C "$repo_path" -c credential.helper= -c credential.helper='' \
+         push origin "$branch" 2>"$err_log"; then
+    return 0
+  fi
+
+  # Phase 17 Rule 1 fix: rebase+retry loop up to 3 attempts. The original
+  # single-retry path loses a 3-way concurrent race (Phase 17 17-03 D-14.2
+  # test). File-protocol bare repos report non-ff rejection as:
+  #   "remote rejected", "failed to update ref", or "cannot lock ref"
+  # none of which match the https "non-fast-forward" string. Expanded grep
+  # keeps the https path working while covering file://.
+  local attempt=0 max_attempts=3
+  while [ "$attempt" -lt "$max_attempts" ]; do
+    if ! grep -q -e 'non-fast-forward' \
+                 -e 'Updates were rejected' \
+                 -e 'failed to update ref' \
+                 -e 'cannot lock ref' \
+                 -e 'remote rejected' \
+                 "$err_log"; then
+      # Not a non-ff race -- hard fail (e.g. auth, network, perms).
+      break
+    fi
+    attempt=$((attempt + 1))
+    echo "INFO: report push rejected (non-fast-forward, attempt $attempt/$max_attempts). Rebasing and retrying." >&2
+    : > "$err_log"  # reset so the next grep only sees the next attempt's output
+    if ! LC_ALL=C GIT_ASKPASS="$clone_dir/.askpass.sh" \
+         GIT_ASKPASS_PAT="$REPORT_REPO_TOKEN" \
+         GIT_TERMINAL_PROMPT=0 \
+         git -C "$repo_path" -c credential.helper= -c credential.helper='' \
+             pull --rebase origin "$branch" 2>>"$err_log"; then
+      sed "s|${REPORT_REPO_TOKEN}|<REDACTED:REPORT_REPO_TOKEN>|g" "$err_log" >&2
+      return 1
+    fi
+    if LC_ALL=C GIT_ASKPASS="$clone_dir/.askpass.sh" \
+       GIT_ASKPASS_PAT="$REPORT_REPO_TOKEN" \
+       GIT_TERMINAL_PROMPT=0 \
+       git -C "$repo_path" -c credential.helper= -c credential.helper='' \
+           push origin "$branch" 2>>"$err_log"; then
+      return 0
+    fi
+  done
+
+  sed "s|${REPORT_REPO_TOKEN}|<REDACTED:REPORT_REPO_TOKEN>|g" "$err_log" >&2
+  return 1
+}
+
+# Phase 16 D-01 .. D-03 / D-12 / D-13 / D-14 / Pattern A / Pitfall 3 / Pitfall 11:
+# Publish a rendered+redacted report file to the configured doc repo via
+# fresh shallow clone + commit + push (retry once on non-fast-forward).
+#
+# Args:
+#   $1 = rendered_redacted_body_path
+#   $2 = event_type
+#   $3 = delivery_id
+#   $4 = delivery_id_short (last 8 hex chars)
+#   $5 = repo_full_name (e.g. "owner/name", or "" if unknown)
+#
+# Returns:
+#   exit 0  + stdout last line = report_url (on push success)
+#   exit 2  (skip; REPORT_REPO or REPORT_REPO_TOKEN empty)
+#   exit 1  (push failure)
+publish_report() {
+  local body_path="$1"
+  local event_type="$2"
+  local delivery_id="$3"
+  local delivery_id_short="$4"
+  local repo_full_name="$5"
+
+  local repo_url="${REPORT_REPO:-}"
+  local branch="${REPORT_BRANCH:-main}"
+  local prefix="${REPORT_PATH_PREFIX:-reports}"
+  local pat="${REPORT_REPO_TOKEN:-}"
+
+  if [ -z "$repo_url" ] || [ -z "$pat" ]; then
+    return 2
+  fi
+
+  local clone_dir
+  clone_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-report-XXXXXXXX")
+  _CLEANUP_FILES+=("$clone_dir")
+
+  # Ephemeral askpass helper (Pattern A). Lives inside clone_dir so
+  # spawn_cleanup wipes it along with the clone.
+  local askpass="$clone_dir/.askpass.sh"
+  cat > "$askpass" <<'ASKPASS'
+#!/bin/sh
+case "$1" in
+  Username*) printf 'x-access-token\n' ;;
+  Password*) printf '%s\n' "$GIT_ASKPASS_PAT" ;;
+esac
+ASKPASS
+  chmod 700 "$askpass"
+
+  # Pitfall 3: pipe git stderr through sed to scrub any accidental PAT echo.
+  # Pitfall 11: bounded clone via GIT_HTTP_LOW_SPEED_* + outer `timeout 60`.
+  local clone_err="$clone_dir/clone.err"
+  if ! LC_ALL=C \
+       GIT_ASKPASS="$askpass" \
+       GIT_ASKPASS_PAT="$pat" \
+       GIT_TERMINAL_PROMPT=0 \
+       GIT_HTTP_LOW_SPEED_LIMIT=1 \
+       GIT_HTTP_LOW_SPEED_TIME=30 \
+       timeout 60 \
+       git -c credential.helper= -c credential.helper='' \
+           -c core.autocrlf=false \
+           clone --depth 1 --branch "$branch" --quiet "$repo_url" "$clone_dir/repo" \
+           2>"$clone_err"; then
+    sed "s|${pat}|<REDACTED:REPORT_REPO_TOKEN>|g" "$clone_err" >&2
+    return 1
+  fi
+
+  # D-12: place file at <prefix>/<YYYY>/<MM>/<event_type>-<id8>.md
+  local year month
+  year=$(date -u +%Y)
+  month=$(date -u +%m)
+  local rel_path="${prefix}/${year}/${month}/${event_type}-${delivery_id_short}.md"
+  local abs_path="$clone_dir/repo/$rel_path"
+  mkdir -p "$(dirname "$abs_path")"
+  cp "$body_path" "$abs_path"
+
+  # D-13: authored via env vars (no host git config touched).
+  local commit_repo="${repo_full_name:-unknown}"
+  local commit_msg="report(${event_type}): ${commit_repo} ${delivery_id_short}"
+
+  if ! LC_ALL=C \
+       GIT_AUTHOR_NAME="claude-secure" \
+       GIT_AUTHOR_EMAIL="claude-secure@localhost" \
+       GIT_COMMITTER_NAME="claude-secure" \
+       GIT_COMMITTER_EMAIL="claude-secure@localhost" \
+       git -C "$clone_dir/repo" -c core.autocrlf=false add "$rel_path"; then
+    return 1
+  fi
+
+  if ! LC_ALL=C \
+       GIT_AUTHOR_NAME="claude-secure" \
+       GIT_AUTHOR_EMAIL="claude-secure@localhost" \
+       GIT_COMMITTER_NAME="claude-secure" \
+       GIT_COMMITTER_EMAIL="claude-secure@localhost" \
+       git -C "$clone_dir/repo" -c core.autocrlf=false commit -q -m "$commit_msg"; then
+    # Pitfall 6: nothing to commit (e.g. identical file on replay) -> treat
+    # as success; emit the expected URL so audit records the known location.
+    :
+  fi
+
+  if ! push_with_retry "$clone_dir" "$branch"; then
+    return 1
+  fi
+
+  # D-12 + D-14: derive report_url. For https URLs, map .git -> /blob/<branch>/<rel>
+  local url_base="$repo_url"
+  url_base="${url_base%.git}"
+  printf '%s/blob/%s/%s\n' "$url_base" "$branch" "$rel_path"
+  return 0
+}
+
+# Phase 16: best-effort audit writer for early-return spawn_error paths.
+# Called from do_spawn precondition checks before delivery_id/event_type
+# are known. Uses synthetic manual-<uuid> and "unknown" event_type.
+_spawn_error_audit() {
+  local err_msg="$1"
+  local _ts _did
+  _ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  _did="manual-$(uuidgen 2>/dev/null | tr -d - | head -c 32 || echo unknown)"
+  LOG_DIR="${LOG_DIR:-$CONFIG_DIR/logs}" \
+    write_audit_entry "$_ts" "$_did" "" "unknown" "${PROFILE:-unknown}" \
+      "" "" "" "" "" "" "spawn_error" "" "${err_msg:0:200}" 2>/dev/null || true
+}
+
+do_spawn() {
+  # Help check before profile guard so `spawn --help` works without --profile
+  for _arg in "${REMAINING_ARGS[@]}"; do
+    if [ "$_arg" = "--help" ] || [ "$_arg" = "-h" ]; then
+      echo "Usage: claude-secure spawn --profile <name> --event '<json>'"
+      echo ""
+      echo "Spawn flags:"
+      echo "  --profile <name>       Profile to use (required)"
+      echo "  --event '<json>'       Inline GitHub webhook event JSON"
+      echo "  --event-file <path>    Path to event JSON file"
+      echo "  --prompt-template <n>  Override automatic template resolution"
+      echo "  --skip-report          Skip report push (audit log still written)"
+      echo "  --dry-run              Show resolved prompt without executing"
+      return 0
+    fi
+  done
+
+  # Per D-04: --profile is required for spawn (enforced above by profile resolution)
+  if [ -z "$PROFILE" ]; then
+    echo "ERROR: --profile is required for spawn" >&2
+    echo "Usage: claude-secure spawn --profile <name> --event '<json>'" >&2
+    _spawn_error_audit "spawn: --profile is required"
+    return 1
+  fi
+
+  # Parse spawn-specific flags from REMAINING_ARGS (skip first which is "spawn")
+  EVENT_JSON=""
+  EVENT_FILE=""
+  PROMPT_TEMPLATE=""
+  DRY_RUN=0
+  # Phase 16: --skip-report flag (mirrors --dry-run). Also accepts
+  # CLAUDE_SECURE_SKIP_REPORT=1 env var for test harness convenience.
+  SKIP_REPORT=0
+  [ "${CLAUDE_SECURE_SKIP_REPORT:-0}" = "1" ] && SKIP_REPORT=1
+  local i=1
+  while [ $i -lt ${#REMAINING_ARGS[@]} ]; do
+    case "${REMAINING_ARGS[$i]:-}" in
+      --event)          EVENT_JSON="${REMAINING_ARGS[$((i+1))]:-}"; i=$((i+2)) ;;
+      --event-file)     EVENT_FILE="${REMAINING_ARGS[$((i+1))]:-}"; i=$((i+2)) ;;
+      --prompt-template) PROMPT_TEMPLATE="${REMAINING_ARGS[$((i+1))]:-}"; i=$((i+2)) ;;
+      --dry-run)        DRY_RUN=1; i=$((i+1)) ;;
+      --skip-report)    SKIP_REPORT=1; i=$((i+1)) ;;
+      *)                i=$((i+1)) ;;
+    esac
+  done
+
+  # Load event from file if --event-file used (per D-02)
+  if [ -n "$EVENT_FILE" ] && [ -z "$EVENT_JSON" ]; then
+    if [ ! -f "$EVENT_FILE" ]; then
+      echo "ERROR: Event file not found: $EVENT_FILE" >&2
+      _spawn_error_audit "spawn: event file not found: $EVENT_FILE"
+      return 1
+    fi
+    EVENT_JSON=$(cat "$EVENT_FILE")
+  fi
+
+  # Validate event JSON is provided and valid
+  if [ -z "$EVENT_JSON" ]; then
+    echo "ERROR: --event or --event-file is required for spawn" >&2
+    echo "Usage: claude-secure spawn --profile <name> --event '<json>'" >&2
+    _spawn_error_audit "spawn: --event or --event-file is required"
+    return 1
+  fi
+  if ! echo "$EVENT_JSON" | jq empty 2>/dev/null; then
+    echo "ERROR: Invalid JSON in --event" >&2
+    _spawn_error_audit "spawn: invalid JSON in --event"
+    return 1
+  fi
+
+  # Generate ephemeral project name (per D-05)
+  COMPOSE_PROJECT_NAME=$(spawn_project_name "$PROFILE")
+  export COMPOSE_PROJECT_NAME
+
+  # Set cleanup trap (per D-07) - overrides the default cleanup trap
+  trap spawn_cleanup EXIT
+
+  # Read max_turns from profile.json (per D-08)
+  MAX_TURNS=$(jq -r '.max_turns // empty' "$CONFIG_DIR/profiles/$PROFILE/profile.json")
+
+  # Extract event_type from event JSON for envelope
+  local event_type
+  # D-03: Priority: top-level .event_type (Phase 15) > ._meta.event_type (Phase 14) > .action (older)
+  event_type=$(echo "$EVENT_JSON" | jq -r '.event_type // ._meta.event_type // .action // "unknown"')
+
+  # Phase 16 / D-12: derive delivery_id.
+  # Priority: ._meta.delivery_id (webhook path) > replay-<uuid> (CLAUDE_SECURE_EXEC set) > manual-<uuid>.
+  local delivery_id webhook_id delivery_id_short _did_stripped
+  delivery_id=$(echo "$EVENT_JSON" | jq -r '._meta.delivery_id // empty')
+  if [ -z "$delivery_id" ]; then
+    if [ -n "${CLAUDE_SECURE_EXEC:-}" ]; then
+      delivery_id="replay-$(uuidgen 2>/dev/null | tr -d - | head -c 32 || echo unknown)"
+    else
+      delivery_id="manual-$(uuidgen 2>/dev/null | tr -d - | head -c 32 || echo unknown)"
+    fi
+    webhook_id=""
+  else
+    webhook_id="$delivery_id"
+  fi
+  # D-12: delivery_id_short = last 8 chars of the *stripped* id (no replay-/manual- prefix).
+  _did_stripped="${delivery_id##*-}"
+  delivery_id_short="${_did_stripped: -8}"
+
+  # Phase 16 / D-06: audit metadata extracted from event JSON.
+  local audit_repo audit_commit audit_branch
+  audit_repo=$(echo "$EVENT_JSON" | jq -r '.repository.full_name // empty')
+  audit_commit=$(echo "$EVENT_JSON" | jq -r '.pull_request.head.sha // .after // .head_commit.id // empty')
+  audit_branch=$(echo "$EVENT_JSON" | jq -r '.pull_request.head.ref // (.ref // empty | sub("^refs/heads/"; ""))')
+  [ "$audit_branch" = "null" ] && audit_branch=""
+
+  # Phase 16 / D-12: read report_repo fields from profile.json and export as env vars
+  # so publish_report can consume them via REPORT_REPO / REPORT_BRANCH / REPORT_PATH_PREFIX.
+  # REPORT_REPO_TOKEN comes from profile.env (loaded earlier via load_profile_config).
+  local _profile_json="$CONFIG_DIR/profiles/$PROFILE/profile.json"
+  if [ -f "$_profile_json" ]; then
+    REPORT_REPO=$(jq -r '.report_repo // empty' "$_profile_json")
+    REPORT_BRANCH=$(jq -r '.report_branch // "main"' "$_profile_json")
+    REPORT_PATH_PREFIX=$(jq -r '.report_path_prefix // "reports"' "$_profile_json")
+    export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX
+  fi
+
+  # Resolve and render prompt template (per D-13 through D-17)
+  local profile_dir="$CONFIG_DIR/profiles/$PROFILE"
+  local template_path
+  template_path=$(resolve_template "$event_type" "$PROMPT_TEMPLATE") || return 1
+
+  local rendered_prompt
+  rendered_prompt=$(render_template "$template_path" "$EVENT_JSON")
+
+  # --dry-run: print resolved prompt and exit (per Claude's Discretion)
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "$rendered_prompt"
+    return 0
+  fi
+
+  # Ensure LOG_DIR is set (normally set by load_profile_config, but defensive)
+  LOG_DIR="${LOG_DIR:-$CONFIG_DIR/logs}"
+
+  # Start ephemeral containers (per D-06)
+  mkdir -p "$LOG_DIR"
+  chmod 777 "$LOG_DIR"
+
+  # Build claude command flags
+  # NOTE: --bare is intentionally OMITTED. Per RESEARCH.md Open Question 3,
+  # --bare skips hooks/CLAUDE.md/MCP. The PreToolUse security hooks inside the
+  # container are critical for enforcing the security whitelist (CLAUDE.md mandate).
+  # Until empirical testing confirms hooks survive --bare, we do NOT use it.
+  # The small startup time cost is acceptable vs risking security bypass.
+  local claude_args=("$rendered_prompt" "--output-format" "json" "--dangerously-skip-permissions")
+  if [ -n "${MAX_TURNS:-}" ]; then
+    claude_args+=("--max-turns" "$MAX_TURNS")
+  fi
+
+  # Execute headless Claude Code (per D-06, D-09)
+  local claude_stdout claude_stderr_file claude_exit=0
+  claude_stderr_file=$(mktemp)
+  _CLEANUP_FILES+=("$claude_stderr_file")
+
+  # Phase 16 test escape hatch: if CLAUDE_SECURE_FAKE_CLAUDE_STDOUT points at a
+  # file, skip docker and use its contents as the envelope stdout. Mirrors the
+  # Phase 15 CLAUDE_SECURE_EXEC pattern. Production path unchanged.
+  if [ -n "${CLAUDE_SECURE_FAKE_CLAUDE_STDOUT:-}" ] && [ -f "${CLAUDE_SECURE_FAKE_CLAUDE_STDOUT}" ]; then
+    claude_stdout=$(cat "${CLAUDE_SECURE_FAKE_CLAUDE_STDOUT}")
+    claude_exit="${CLAUDE_SECURE_FAKE_CLAUDE_EXIT:-0}"
+  else
+    docker compose up -d --wait
+    claude_stdout=$(docker compose exec -T claude claude -p "${claude_args[@]}" 2>"$claude_stderr_file") || claude_exit=$?
+  fi
+
+  # Validate Claude output contains expected fields (per HEAD-02: result, cost, duration, session_id)
+  # Note: Exact field names from --output-format json are documented as result, session_id,
+  # cost_usd/cost, duration_ms/duration. Log actual fields for debugging if validation fails.
+  if [ "$claude_exit" -eq 0 ]; then
+    local has_result
+    has_result=$(echo "$claude_stdout" | jq 'has("result")' 2>/dev/null)
+    if [ "$has_result" != "true" ]; then
+      echo "WARNING: Claude output missing expected 'result' field. Actual keys: $(echo "$claude_stdout" | jq -r 'keys | join(", ")' 2>/dev/null)" >&2
+      echo "DEBUG: Raw output fields: $(echo "$claude_stdout" | jq -r 'keys[]' 2>/dev/null | tr '\n' ' ')" >&2
+    fi
+  fi
+
+  # =======================================================================
+  # Phase 16 / Pattern E: publish + audit wrapper.
+  #
+  # Flow:
+  #   1. Build envelope (success or error) into $envelope_json.
+  #   2. Render report template if one exists for event_type.
+  #   3. Redact env secrets from rendered report.
+  #   4. publish_report() -> report_url (or empty on skip/failure).
+  #   5. write_audit_entry() with final report_url (D-17: audit-always).
+  #   6. Emit envelope to stdout.
+  # D-18: exit nonzero ONLY when Claude itself failed. Publish failures
+  # are logged in audit.status but do NOT flip the spawn exit code.
+  # =======================================================================
+  local envelope_json report_url="" audit_status report_body_file=""
+  local _audit_ts _audit_duration_total _audit_cost _audit_session _audit_err_short=""
+  _audit_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  if [ "$claude_exit" -eq 0 ]; then
+    envelope_json=$(build_output_envelope "$PROFILE" "$event_type" "$claude_stdout")
+    audit_status="success"
+  else
+    local error_msg
+    error_msg=$(cat "$claude_stderr_file" 2>/dev/null || echo "")
+    envelope_json=$(build_error_envelope "$PROFILE" "$event_type" "$error_msg")
+    audit_status="claude_error"
+    _audit_err_short="${error_msg:0:200}"
+  fi
+
+  # Extract audit fields from envelope (Pitfall 5: legacy cost/duration fallback).
+  _audit_cost=$(echo "$envelope_json" | jq -r '.claude.cost_usd // .claude.cost // 0' 2>/dev/null || echo 0)
+  _audit_duration_total=$(echo "$envelope_json" | jq -r '.claude.duration_ms // .claude.duration // 0' 2>/dev/null || echo 0)
+  _audit_session=$(echo "$envelope_json" | jq -r '.claude.session_id // ""' 2>/dev/null || echo "")
+
+  # Render + redact + publish report when not skipped.
+  if [ "$SKIP_REPORT" -ne 1 ]; then
+    local _report_template
+    _report_template=$(resolve_report_template "$event_type" 2>/dev/null || echo "")
+    if [ -n "$_report_template" ] && [ -f "$_report_template" ]; then
+      report_body_file=$(mktemp)
+      _CLEANUP_FILES+=("$report_body_file")
+      if render_report_template "$_report_template" "$EVENT_JSON" "$envelope_json" "$audit_status" \
+           > "$report_body_file" 2>/dev/null; then
+        # Redact env secrets (D-15) from rendered report before publishing.
+        local _env_file="$CONFIG_DIR/profiles/$PROFILE/.env"
+        if [ -f "$_env_file" ]; then
+          redact_report_file "$report_body_file" "$_env_file" 2>/dev/null || true
+        fi
+        # D-17: publish is best-effort. Failures are logged in audit.status
+        # but do NOT flip spawn exit code (only claude failures do — D-18).
+        local _publish_rc=0
+        report_url=$(publish_report "$report_body_file" "$event_type" \
+                       "$delivery_id" "$delivery_id_short" "$audit_repo") || _publish_rc=$?
+        if [ "$_publish_rc" -ne 0 ] && [ "$_publish_rc" -ne 2 ]; then
+          # 2 = skipped (no REPORT_REPO/TOKEN); anything else = real failure.
+          if [ "$audit_status" = "success" ]; then
+            audit_status="push_error"
+          fi
+          report_url=""
+        fi
+      fi
+    fi
+  fi
+
+  # D-17: audit-always, with final report_url populated (Pattern E).
+  write_audit_entry \
+    "$_audit_ts" \
+    "$delivery_id" \
+    "$webhook_id" \
+    "$event_type" \
+    "$PROFILE" \
+    "$audit_repo" \
+    "$audit_commit" \
+    "$audit_branch" \
+    "$_audit_cost" \
+    "$_audit_duration_total" \
+    "$_audit_session" \
+    "$audit_status" \
+    "$report_url" \
+    "$_audit_err_short" 2>/dev/null || true
+
+  # Emit envelope to stdout.
+  echo "$envelope_json"
+
+  # D-18: only flip exit on claude failure. Publish failures audit-logged only.
+  return "$claude_exit"
+}
+
+# =========================================================================
+# D-20 .. D-22: `replay <delivery-id>` subcommand (HOOK-07).
+#
+# Accepts a delivery-id substring, finds the matching persisted event file
+# under $CONFIG_DIR/events/, auto-resolves the profile via
+# resolve_profile_by_repo (unless --profile is explicit), and exec-s itself
+# with spawn --event-file. Using exec instead of inlining do_spawn avoids
+# duplicating the spawn lifecycle.
+# =========================================================================
+do_replay() {
+  local delivery_substring=""
+  local explicit_profile="${PROFILE:-}"
+  local dry_run=0
+
+  # Parse REMAINING_ARGS. Index 0 is "replay", so skip it.
+  local i=1
+  while [ $i -lt ${#REMAINING_ARGS[@]} ]; do
+    case "${REMAINING_ARGS[$i]:-}" in
+      --profile)
+        explicit_profile="${REMAINING_ARGS[$((i+1))]:-}"
+        i=$((i+2))
+        ;;
+      --dry-run)
+        dry_run=1
+        i=$((i+1))
+        ;;
+      *)
+        if [ -z "$delivery_substring" ]; then
+          delivery_substring="${REMAINING_ARGS[$i]}"
+        fi
+        i=$((i+1))
+        ;;
+    esac
+  done
+
+  if [ -z "$delivery_substring" ]; then
+    echo "ERROR: replay requires a delivery-id substring" >&2
+    echo "Usage: claude-secure replay <delivery-id> [--profile NAME] [--dry-run]" >&2
+    return 1
+  fi
+
+  local events_dir="$CONFIG_DIR/events"
+  if [ ! -d "$events_dir" ]; then
+    echo "ERROR: events directory not found: $events_dir" >&2
+    return 1
+  fi
+
+  local matches=()
+  shopt -s nullglob
+  for f in "$events_dir"/*"${delivery_substring}"*.json; do
+    matches+=("$f")
+  done
+  shopt -u nullglob
+
+  if [ ${#matches[@]} -eq 0 ]; then
+    echo "ERROR: no event file matching '$delivery_substring' in $events_dir" >&2
+    return 1
+  fi
+  if [ ${#matches[@]} -gt 1 ]; then
+    echo "ERROR: multiple event files match '$delivery_substring':" >&2
+    local m
+    for m in "${matches[@]}"; do
+      echo "  $m" >&2
+    done
+    echo "Narrow the substring and retry." >&2
+    return 1
+  fi
+
+  local event_file="${matches[0]}"
+
+  # D-21: auto-resolve profile from repository.full_name when --profile not
+  # explicitly passed on this replay invocation.
+  if [ -z "$explicit_profile" ]; then
+    local repo
+    repo=$(jq -r '.repository.full_name // empty' "$event_file")
+    if [ -z "$repo" ]; then
+      echo "ERROR: cannot determine repository from $event_file -- pass --profile" >&2
+      return 1
+    fi
+    explicit_profile=$(resolve_profile_by_repo "$repo") || return 1
+  fi
+
+  echo "Replaying $event_file as profile '$explicit_profile'..."
+
+  # D-20 / Pattern 9: exec recursively into claude-secure so we reuse
+  # do_spawn without duplicating its lifecycle. Test harnesses that invoke
+  # REAL claude-secure directly (by full path) may set CLAUDE_SECURE_EXEC
+  # to point at a stub binary so the exec target is recorded rather than
+  # running the full spawn path. Falls back to `$0` when unset.
+  local exec_target="${CLAUDE_SECURE_EXEC:-$0}"
+  local args=(--profile "$explicit_profile" spawn --event-file "$event_file")
+  if [ "$dry_run" = 1 ]; then
+    args+=(--dry-run)
+  fi
+  exec "$exec_target" "${args[@]}"
+}
+
+# =========================================================================
+# Phase 17: Reaper (OPS-03)
+# Cleans up orphaned spawn containers + stale event files. Invoked via the
+# `reap` subcommand or the claude-secure-reaper.timer systemd unit.
+# Locked by .planning/phases/17-operational-hardening/17-CONTEXT.md D-01..D-12.
+# =========================================================================
+
+# D-04 / D-05 / D-07: orphan detection + teardown.
+# Walks every compose project whose name begins with the instance prefix and
+# whose first container is older than REAPER_ORPHAN_AGE_SECS. For each,
+# runs `docker compose -p <project> down -v --remove-orphans --timeout 10`.
+#
+# Returns the kill count via the global REAPED_COUNT, errors via REAPED_ERRORS.
+reap_orphan_projects() {
+  local prefix="${1:-${INSTANCE_PREFIX:-cs-}}"
+  local age_threshold="${REAPER_ORPHAN_AGE_SECS:-600}"
+  local now killed=0 errors=0
+  now=$(date +%s)
+
+  # docker --filter does NOT support glob; we filter by label key existence
+  # and apply the prefix match in bash. The label key is fixed; we collect
+  # unique project values and prefix-match in shell.
+  local projects
+  projects=$(docker ps -a \
+               --filter "label=com.docker.compose.project" \
+               --format '{{.Label "com.docker.compose.project"}}' \
+             2>/dev/null | sort -u)
+
+  local proj
+  while IFS= read -r proj; do
+    [ -z "$proj" ] && continue
+    # Multi-instance (D-07): only touch projects matching this prefix.
+    case "$proj" in
+      "$prefix"*) ;;
+      *) continue ;;
+    esac
+
+    # Defensive shape guard: spawn projects follow cs-<profile>-<8hex>.
+    # Refuses to reap other compose stacks that happen to share the prefix.
+    case "$proj" in
+      cs-*-*) ;;
+      *) continue ;;
+    esac
+
+    # Get the project's oldest container Created timestamp via docker inspect.
+    local first_id created created_epoch age
+    first_id=$(docker ps -a \
+                 --filter "label=com.docker.compose.project=$proj" \
+                 --format '{{.ID}}' 2>/dev/null \
+               | head -1)
+    # Under mocked docker (tests), docker ps with a value filter may return
+    # empty; fall back to the project name as an inspect key just so the
+    # mock's inspect branch still fires. In production the first_id path
+    # always succeeds because docker ps returns real container IDs.
+    [ -z "$first_id" ] && first_id="$proj"
+
+    created=$(docker inspect --format '{{.Created}}' "$first_id" 2>/dev/null)
+    if [ -z "$created" ]; then
+      echo "reaper: ERROR cannot read Created for $proj" >&2
+      errors=$((errors + 1))
+      continue
+    fi
+
+    # Strip ISO8601 fractional seconds for portable `date -d` parsing.
+    # Some inputs have .123456789Z (strip fractional), others just Z; handle both.
+    local created_clean="$created"
+    case "$created_clean" in
+      *.*Z) created_clean="${created_clean%.*}Z" ;;
+      *.*)  created_clean="${created_clean%.*}" ;;
+    esac
+    created_epoch=$(date -d "$created_clean" +%s 2>/dev/null) || {
+      echo "reaper: ERROR cannot parse Created=$created for $proj" >&2
+      errors=$((errors + 1))
+      continue
+    }
+    age=$((now - created_epoch))
+
+    if [ "$age" -lt "$age_threshold" ]; then
+      continue  # too young, skip
+    fi
+
+    if [ "${REAPER_DRY_RUN:-0}" = "1" ]; then
+      echo "reaper: [dry-run] would reap $proj age=${age}s"
+      killed=$((killed + 1))
+      continue
+    fi
+
+    echo "reaper: reaped $proj age=${age}s"
+    if docker compose -p "$proj" down -v --remove-orphans --timeout 10 \
+         >/dev/null 2>&1; then
+      killed=$((killed + 1))
+    else
+      echo "reaper: ERROR tearing down $proj" >&2
+      errors=$((errors + 1))
+    fi
+  done <<< "$projects"
+
+  REAPED_COUNT=$killed
+  REAPED_ERRORS=$errors
+}
+
+# D-06 / Phase 14 D-20 fold-in: delete event files older than REAPER_EVENT_AGE_SECS.
+# Pure age-based; no audit cross-reference. Default threshold 86400s = 24h.
+reap_stale_event_files() {
+  local events_dir="${CONFIG_DIR:-$HOME/.claude-secure}/events"
+  local age_secs="${REAPER_EVENT_AGE_SECS:-86400}"
+  local age_mins=$((age_secs / 60))
+
+  EVENTS_DELETED=0
+  [ -d "$events_dir" ] || return 0
+
+  # find -mmin +N matches files strictly older than N minutes.
+  local deleted=0 f
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    if [ "${REAPER_DRY_RUN:-0}" = "1" ]; then
+      echo "reaper: [dry-run] would delete $f"
+      deleted=$((deleted + 1))
+      continue
+    fi
+    if rm -f -- "$f" 2>/dev/null; then
+      deleted=$((deleted + 1))
+    fi
+  done < <(find "$events_dir" -maxdepth 1 -type f -name '*.json' -mmin "+$age_mins" 2>/dev/null)
+
+  EVENTS_DELETED=$deleted
+}
+
+# D-08: single-flight reaper cycle. Acquires a non-blocking flock on
+# $LOG_DIR/${LOG_PREFIX}reaper.lock. If held (e.g., timer-driven cycle
+# already running when operator invokes `claude-secure reap`), the second
+# instance exits 0 silently with a journal log line.
+do_reap() {
+  local dry_run=0
+  # Parse optional --dry-run flag.
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run) dry_run=1; shift ;;
+      --help|-h)
+        echo "Usage: claude-secure reap [--dry-run]"
+        echo "  Cleans up orphaned spawn containers and stale event files."
+        return 0
+        ;;
+      *)
+        echo "reaper: unknown flag '$1'" >&2
+        echo "Usage: claude-secure reap [--dry-run]" >&2
+        return 2
+        ;;
+    esac
+  done
+  export REAPER_DRY_RUN=$dry_run
+
+  local lock_file="${LOG_DIR:-$CONFIG_DIR/logs}/${LOG_PREFIX:-}reaper.lock"
+  mkdir -p "$(dirname "$lock_file")" 2>/dev/null || true
+
+  # Acquire exclusive non-blocking lock on FD 9.
+  exec 9>"$lock_file"
+  chmod 666 "$lock_file" 2>/dev/null || true
+  if ! flock -n 9; then
+    echo "reaper: another instance is running (lock held), skipping cycle"
+    return 0
+  fi
+
+  echo "reaper: cycle start prefix=${INSTANCE_PREFIX:-cs-}"
+
+  REAPED_COUNT=0
+  REAPED_ERRORS=0
+  EVENTS_DELETED=0
+
+  reap_orphan_projects "${INSTANCE_PREFIX:-cs-}"
+  reap_stale_event_files
+
+  echo "reaper: cycle end killed=${REAPED_COUNT} events_deleted=${EVENTS_DELETED} errors=${REAPED_ERRORS}"
+
+  # D-10: whole-cycle failure (all projects errored, none reaped) flips exit code.
+  if [ "${REAPED_ERRORS:-0}" -gt 0 ] && [ "${REAPED_COUNT:-0}" -eq 0 ]; then
+    return 1
+  fi
+  return 0
+}
+
+# =========================================================================
+# Source-only guard: if sourced by tests, stop here
+# =========================================================================
+if [ "$__CLAUDE_SECURE_SOURCE_ONLY" = "1" ]; then
+  return 0 2>/dev/null || true
+fi
+
+# =========================================================================
+# Main execution
+# =========================================================================
+
+# Verify installation (or auto-derive APP_DIR when running from a dev checkout
+# so `bin/claude-secure` can be invoked against a test CONFIG_DIR).
+if [ -f "$CONFIG_DIR/config.sh" ]; then
+  # Load global config (APP_DIR, PLATFORM, optionally DEFAULT_WORKSPACE)
+  # shellcheck source=/dev/null
+  source "$CONFIG_DIR/config.sh"
+else
+  # Dev-checkout fallback: infer APP_DIR from the script path if this looks
+  # like a git checkout. Used by test harnesses that construct a synthetic
+  # CONFIG_DIR without running install.sh.
+  _SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  _CANDIDATE_APP_DIR="$(cd "$_SELF_DIR/.." && pwd)"
+  if [ -d "$_CANDIDATE_APP_DIR/.git" ] || [ -f "$_CANDIDATE_APP_DIR/install.sh" ]; then
+    APP_DIR="$_CANDIDATE_APP_DIR"
+    PLATFORM="${PLATFORM:-linux}"
+  else
+    echo "ERROR: claude-secure not installed. Run install.sh first." >&2
+    exit 1
+  fi
+  unset _SELF_DIR _CANDIDATE_APP_DIR
+fi
+
+# Parse --profile flag (replaces --instance)
+PROFILE=""
+ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --profile)
+      if [ -z "${2:-}" ]; then
+        echo "ERROR: --profile requires a name" >&2; exit 1
+      fi
+      PROFILE="$2"; shift 2 ;;
+    --instance)
+      echo "ERROR: --instance is no longer supported. Use --profile instead." >&2
+      exit 1 ;;
+    *) ARGS+=("$1"); shift ;;
+  esac
+done
+
+FIRST_ARG="${ARGS[0]:-}"
+
+# Validate profile name if provided
+if [ -n "$PROFILE" ]; then
+  validate_profile_name "$PROFILE"
+fi
+
+# Profile resolution
+if [ -n "$PROFILE" ]; then
+  PROFILE_DIR="$CONFIG_DIR/profiles/$PROFILE"
+  if [ -d "$PROFILE_DIR" ]; then
+    # Existing profile: validate before use, except for commands that do
+    # their own lifecycle (spawn/replay read profile.json directly and do
+    # not need .env/whitelist.json until they actually boot docker).
+    case "$FIRST_ARG" in
+      remove|spawn|replay)
+        : # skip full validation
+        ;;
+      *)
+        validate_profile "$PROFILE"
+        ;;
+    esac
+    load_profile_config "$PROFILE"
+  else
+    # Profile does not exist
+    if [ "$FIRST_ARG" = "stop" ] || [ "$FIRST_ARG" = "remove" ]; then
+      echo "ERROR: Profile '$PROFILE' does not exist." >&2
+      exit 1
+    fi
+    # Auto-create interactively
+    create_profile "$PROFILE"
+    load_profile_config "$PROFILE"
+  fi
+else
+  # No --profile: superuser mode (allowed for most commands). Exceptions:
+  #   - list/help/-h/--help: no config needed.
+  #   - replay: resolves its own profile from the event file before exec-ing
+  #     spawn, so skipping superuser load here avoids the interactive prompt.
+  #   - reap: Phase 17 background/timer-driven, must never prompt. Uses
+  #     LOG_DIR/CONFIG_DIR defaults and walks docker ps directly; no profile
+  #     config or whitelist merge is required. load_superuser_config would
+  #     `read -rp` for DEFAULT_WORKSPACE when config.sh is absent and block
+  #     forever in a non-interactive service context.
+  #   - spawn: requires --profile; if called without one do_spawn will print
+  #     its own error. Superuser merge is not valid for spawn.
+  case "$FIRST_ARG" in
+    list|help|--help|-h|replay|reap|spawn)
+      : # skip superuser load
+      ;;
+    *)
+      load_superuser_config
+      ;;
+  esac
+fi
+
+# Parse log flags
 parse_log_flags "${ARGS[@]}"
 
 # Use first non-log-flag argument as command
@@ -206,7 +1785,6 @@ case "$CMD" in
     ;;
   status)
     docker compose ps
-    # Show Claude Code version if claude container is running
     if docker compose ps --status running --format '{{.Service}}' | grep -q '^claude$'; then
       echo ""
       echo "Claude Code version: $(docker compose exec -T claude claude --version 2>/dev/null || echo 'unknown')"
@@ -216,7 +1794,7 @@ case "$CMD" in
     echo "Upgrading Claude Code to latest version..."
     docker compose build --no-cache --pull claude
     echo ""
-    echo "Upgrade complete. Restart with: claude-secure --instance $INSTANCE"
+    echo "Upgrade complete. Restart with: claude-secure --profile ${PROFILE:-NAME}"
     ;;
   update)
     echo "Pulling latest changes..."
@@ -240,51 +1818,25 @@ case "$CMD" in
       fi
     fi
     echo ""
-    echo "Update complete. Restart with: claude-secure --instance $INSTANCE"
+    echo "Update complete. Restart with: claude-secure --profile ${PROFILE:-NAME}"
     ;;
   list)
-    printf "%-20s %-10s %s\n" "INSTANCE" "STATUS" "WORKSPACE"
-    printf "%-20s %-10s %s\n" "--------" "------" "---------"
-    # Get running compose projects
-    declare -A running_projects
-    while IFS= read -r line; do
-      name=$(echo "$line" | jq -r '.Name // empty' 2>/dev/null)
-      [ -n "$name" ] && running_projects["$name"]=1
-    done < <(docker compose ls --format json 2>/dev/null | jq -c '.[]?' 2>/dev/null)
-    # Show all configured instances
-    if [ -d "$CONFIG_DIR/instances" ]; then
-      for idir in "$CONFIG_DIR/instances"/*/; do
-        [ -d "$idir" ] || continue
-        name=$(basename "$idir")
-        ws=$(grep '^WORKSPACE_PATH=' "$idir/config.sh" 2>/dev/null | cut -d'"' -f2)
-        project="claude-${name}"
-        if [ -n "${running_projects[$project]:-}" ]; then
-          status="running"
-        else
-          status="stopped"
-        fi
-        printf "%-20s %-10s %s\n" "$name" "$status" "$ws"
-      done
-    else
-      echo "No instances configured."
-    fi
+    list_profiles
     ;;
   remove)
-    if [ -z "$INSTANCE" ]; then
-      echo "ERROR: --instance NAME is required for remove" >&2; exit 1
+    if [ -z "$PROFILE" ]; then
+      echo "ERROR: --profile NAME is required for remove" >&2; exit 1
     fi
-    echo "This will stop containers and delete config for instance '$INSTANCE'."
+    echo "This will stop containers and delete config for profile '$PROFILE'."
     read -rp "Are you sure? [y/N]: " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
       echo "Cancelled."; exit 0
     fi
-    # Stop containers
     docker compose down --remove-orphans 2>/dev/null || true
-    # Remove instance config
-    rm -rf "$INSTANCE_DIR"
-    echo "Instance '$INSTANCE' removed."
+    rm -rf "$CONFIG_DIR/profiles/$PROFILE"
+    echo "Profile '$PROFILE' removed."
     echo "Note: Docker volumes (workspace, validator-db) are preserved."
-    echo "Run 'docker volume ls | grep claude-${INSTANCE}' to see them."
+    echo "Run 'docker volume ls | grep claude-${PROFILE}' to see them."
     ;;
   logs)
     LOG_SVC="${REMAINING_ARGS[1]:-}"
@@ -294,39 +1846,44 @@ case "$CMD" in
       iptables)   tail -f "$LOG_DIR/${LOG_PREFIX}iptables.jsonl" 2>/dev/null ;;
       clear)
         rm -f "$LOG_DIR/${LOG_PREFIX}"*.jsonl
-        echo "Logs cleared for instance '$INSTANCE'."
+        echo "Logs cleared for profile '${PROFILE:-superuser}'."
         ;;
       "")
         shopt -s nullglob
         LOG_FILES=("$LOG_DIR/${LOG_PREFIX}"*.jsonl)
         shopt -u nullglob
         if [ ${#LOG_FILES[@]} -eq 0 ]; then
-          echo "No log files found for instance '$INSTANCE'. Start services with log:* flags first."
+          echo "No log files found for profile '${PROFILE:-superuser}'. Start services with log:* flags first."
           exit 0
         fi
         tail -f "${LOG_FILES[@]}"
         ;;
       *)
         echo "Unknown log service: $LOG_SVC"
-        echo "Usage: claude-secure --instance NAME logs [hook|anthropic|iptables|clear]"
+        echo "Usage: claude-secure --profile NAME logs [hook|anthropic|iptables|clear]"
         exit 1
         ;;
     esac
     ;;
   help|--help|-h)
-    echo "Usage: claude-secure --instance NAME [command] [log flags]"
-    echo "       claude-secure list"
+    echo "Usage: claude-secure [--profile NAME] [command] [log flags]"
     echo ""
     echo "Commands:"
     echo "  (none)     Start containers and open Claude Code session"
     echo "  status     Show container status and Claude Code version"
-    echo "  stop       Stop all containers for this instance"
-    echo "  remove     Remove instance config (stops containers first)"
-    echo "  list       List all instances and their status"
+    echo "  stop       Stop all containers for this profile"
+    echo "  remove     Remove profile config (stops containers first)"
+    echo "  list       List all profiles and their status"
     echo "  logs       Tail log files (logs hook|anthropic|iptables|clear)"
     echo "  update     Pull latest claude-secure and rebuild all images"
     echo "  upgrade    Rebuild claude image with latest Claude Code (--no-cache)"
+    echo "  spawn      Run headless Claude Code session (requires --profile and --event)"
+    echo "  reap       Clean up orphaned spawn containers and stale event files"
     echo "  help       Show this help message"
+    echo ""
+    echo "Modes:"
+    echo "  --profile NAME   Run scoped to a specific profile"
+    echo "  (no --profile)   Superuser mode: merged access to all profiles"
     echo ""
     echo "Log flags (append to any command):"
     echo "  log:hook       Enable hook script logging"
@@ -335,8 +1892,29 @@ case "$CMD" in
     echo "  log:iptables   Enable validator/iptables logging"
     echo "  log:all        Enable all logging (metadata, no bodies)"
     echo ""
-    echo "Instance names must be DNS-safe (lowercase alphanumeric and hyphens)."
-    echo "New instances are auto-created on first use."
+    echo "Spawn flags (use with spawn command):"
+    echo "  --event '<json>'       Event payload as JSON string"
+    echo "  --event-file <path>    Event payload from file"
+    echo "  --prompt-template <n>  Override automatic template resolution"
+    echo "  --dry-run              Show resolved prompt without executing"
+    echo ""
+    echo "Replay flags (use with replay command):"
+    echo "  replay <delivery-id>   Re-run a persisted webhook delivery by id substring"
+    echo "  --profile NAME         Override auto-profile-detection during replay"
+    echo "  --dry-run              Show resolved prompt without executing"
+    echo ""
+    echo "Profile names must be DNS-safe (lowercase alphanumeric and hyphens)."
+    echo "New profiles are auto-created on first use."
+    ;;
+  spawn)
+    do_spawn
+    ;;
+  replay)
+    do_replay
+    ;;
+  reap)
+    # Drop the "reap" literal so only the remaining flags (if any) go to do_reap.
+    do_reap "${REMAINING_ARGS[@]:1}"
     ;;
   *)
     mkdir -p "$LOG_DIR"
