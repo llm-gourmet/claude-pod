@@ -355,6 +355,21 @@ install_webhook_service() {
     log_warn "Source directory $app_dir/webhook/templates not found -- skipping template copy"
   fi
 
+  # 5c. Copy default Phase 16 report templates (always refresh -- latest templates ship).
+  # Mirrors step 5b for the report-templates directory used by resolve_report_template
+  # as the final fallback in the report-template resolution chain. We cp individual
+  # files (never rm -rf) so operator-added custom templates in the same directory
+  # survive reinstall.
+  sudo mkdir -p /opt/claude-secure/webhook/report-templates
+  if [ -d "$app_dir/webhook/report-templates" ]; then
+    sudo cp "$app_dir/webhook/report-templates/"*.md /opt/claude-secure/webhook/report-templates/
+    sudo chmod 644 /opt/claude-secure/webhook/report-templates/*.md
+    sudo chmod 755 /opt/claude-secure/webhook/report-templates
+    log_info "Copied default report templates to /opt/claude-secure/webhook/report-templates/"
+  else
+    log_warn "Source directory $app_dir/webhook/report-templates not found -- skipping report template copy"
+  fi
+
   # 6. Copy config template (idempotent -- never overwrite existing config)
   sudo mkdir -p /etc/claude-secure
   if [ ! -f /etc/claude-secure/webhook.json ]; then
