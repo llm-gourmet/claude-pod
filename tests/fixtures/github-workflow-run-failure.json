@@ -18,7 +18,12 @@
     "id": 1000001,
     "name": "test-repo",
     "full_name": "test-org/test-repo",
-    "owner": { "login": "test-org" }
+    "owner": {
+      "login": "test-org"
+    }
   },
-  "sender": { "login": "test-user" }
+  "sender": {
+    "login": "test-user"
+  },
+  "event_type": "workflow_run-completed"
 }

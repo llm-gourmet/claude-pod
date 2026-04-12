@@ -5,13 +5,20 @@
     "title": "Test issue title",
     "body": "Test issue body content.",
     "html_url": "https://github.com/test-org/test-repo/issues/42",
-    "user": { "login": "test-user" }
+    "user": {
+      "login": "test-user"
+    }
   },
   "repository": {
     "id": 1000001,
     "name": "test-repo",
     "full_name": "test-org/test-repo",
-    "owner": { "login": "test-org" }
+    "owner": {
+      "login": "test-org"
+    }
   },
-  "sender": { "login": "test-user" }
+  "sender": {
+    "login": "test-user"
+  },
+  "event_type": "issues-opened"
 }
