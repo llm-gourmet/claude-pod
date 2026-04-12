@@ -347,22 +347,22 @@ The audit log is always written. The report push is best-effort -- push failures
 
 ### Audit log
 
-Every spawn appends one JSONL line to `$LOG_DIR/<LOG_PREFIX>executions.jsonl`. For the default instance the path is `~/.claude-secure/logs/executions.jsonl`; multi-instance deployments (e.g. the test instance) get their own prefixed file.
+Every spawn appends one JSONL line to `$LOG_DIR/<LOG_PREFIX>executions.jsonl`. For the default profile the path is `~/.claude-secure/logs/default-executions.jsonl`; multi-instance deployments (e.g. the test instance) get their own prefixed file.
 
 Each line is a single JSON object with mandatory keys: `ts`, `delivery_id`, `webhook_id`, `event_type`, `profile`, `repo`, `commit_sha`, `branch`, `cost_usd`, `duration_ms`, `session_id`, `status`, `report_url`.
 
 ```bash
 # tail successful spawns
-tail -f ~/.claude-secure/logs/executions.jsonl | jq 'select(.status == "success")'
+tail -f ~/.claude-secure/logs/default-executions.jsonl | jq 'select(.status == "success")'
 
 # find push failures
-jq 'select(.status == "report_push_failed")' ~/.claude-secure/logs/executions.jsonl
+jq 'select(.status == "report_push_failed")' ~/.claude-secure/logs/default-executions.jsonl
 
 # total cost per profile
 jq -s 'group_by(.profile)
        | map({profile: .[0].profile,
               total_cost: (map(.cost_usd // 0) | add)})' \
-  ~/.claude-secure/logs/executions.jsonl
+  ~/.claude-secure/logs/default-executions.jsonl
 ```
 
 The `status` field takes one of four values:
@@ -408,6 +408,73 @@ CLAUDE_SECURE_SKIP_REPORT=1 claude-secure spawn --profile <name> --event ...
 - **No force-push, ever.** Force-push is never used by the report publisher. If a concurrent writer pushes to the same branch first, the spawn rebases with `git pull --rebase` and retries exactly once. A second failure is recorded in the audit log with `status=report_push_failed`; the doc repo history is never rewritten.
 - **Result text is bounded at 16KB.** Larger Claude outputs are truncated UTF-8-safely with a `... [truncated N more bytes]` suffix so that long sessions cannot produce multi-megabyte commits.
 - **Audit lines are append-only.** Per-instance JSONL files respect the `LOG_PREFIX` multi-instance convention, so two instances on the same host write to distinct files and cannot race each other. Within one instance, POSIX `O_APPEND` guarantees atomic writes because each line stays under 4KB (`PIPE_BUF`).
+
+## Webhook Listener
+
+The webhook listener is an optional component that receives GitHub webhook POSTs,
+verifies HMAC-SHA256 signatures, and dispatches `claude-secure spawn` for matching
+events. Install it with `--with-webhook` (see Installation).
+
+### Installing
+
+```bash
+sudo ./install.sh --with-webhook
+```
+
+This installs `claude-secure-listener.service` (the webhook HTTP server) and
+`claude-secure-reaper.timer` (the orphan cleanup timer). After installation:
+
+```bash
+sudo systemctl enable --now claude-secure-listener.service
+```
+
+### webhook.json configuration
+
+The listener reads `/etc/claude-secure/webhook.json` on startup. The installer
+writes a default from `webhook/config.example.json` if the file does not exist (never
+overwrites):
+
+```json
+{
+  "bind": "127.0.0.1",
+  "port": 9000,
+  "max_concurrent_spawns": 3,
+  "profiles_dir": "/home/<user>/.claude-secure/profiles",
+  "events_dir": "/home/<user>/.claude-secure/events",
+  "logs_dir": "/home/<user>/.claude-secure/logs",
+  "claude_secure_bin": "/usr/local/bin/claude-secure"
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `bind` | Address to listen on. Use `127.0.0.1` (local only) behind a reverse proxy, or `0.0.0.0` to expose directly. |
+| `port` | HTTP port for incoming webhooks. |
+| `max_concurrent_spawns` | Maximum simultaneous headless Claude sessions (default 3). |
+| `profiles_dir` | Path to `~/.claude-secure/profiles/`. |
+| `events_dir` | Directory where raw event JSON files are persisted for replay. |
+| `logs_dir` | Directory for `webhook.jsonl` and per-profile audit logs. |
+| `claude_secure_bin` | Path to the `claude-secure` CLI (must be the system-installed copy). |
+
+### Profile fields required for webhook routing
+
+For the listener to route an incoming event to a profile, the profile's
+`profile.json` must include:
+
+- `repo` -- matches the `repository.full_name` in the GitHub payload (e.g. `"owner/repo"`)
+- `webhook_secret` -- HMAC-SHA256 secret matching the GitHub webhook configuration
+
+### Starting manually (for testing)
+
+```bash
+python3 webhook/listener.py --config /etc/claude-secure/webhook.json
+```
+
+### Tailing webhook logs
+
+```bash
+tail -f ~/.claude-secure/logs/webhook.jsonl | jq .
+```
 
 ## Phase 17 -- Operational Hardening (Container Reaper)
 
@@ -489,9 +556,13 @@ Requires Docker running. All tests use an isolated `claude-test` Docker Compose 
 | test-phase2.sh | Call validation, hook enforcement, iptables rules |
 | test-phase3.sh | Secret redaction in proxy |
 | test-phase4.sh | Installer script |
-| test-phase6.sh | Phase 6 features |
-| test-phase7.sh | Environment file and secret loading |
-| test-phase9.sh | CLI wrapper (bin/claude-secure) |
+| test-phase12.sh | Profile system (create, validate, list, superuser mode) |
+| test-phase13.sh | Headless spawn (output envelope, max-turns, ephemeral lifecycle) |
+| test-phase14.sh | Webhook listener (HMAC verification, dispatch, concurrency) |
+| test-phase15.sh | Event handlers (issue/push/workflow_run filter, replay) |
+| test-phase16.sh | Result channel (report push, JSONL audit log) |
+| test-phase17.sh | Container reaper unit tests (orphan detection, event cleanup) |
+| test-phase17-e2e.sh | End-to-end reaper scenarios (live Docker containers) |
 
 ### Smart Pre-Push Hook
 
