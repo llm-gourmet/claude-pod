@@ -786,6 +786,103 @@ do_spawn() {
 }
 
 # =========================================================================
+# D-20 .. D-22: `replay <delivery-id>` subcommand (HOOK-07).
+#
+# Accepts a delivery-id substring, finds the matching persisted event file
+# under $CONFIG_DIR/events/, auto-resolves the profile via
+# resolve_profile_by_repo (unless --profile is explicit), and exec-s itself
+# with spawn --event-file. Using exec instead of inlining do_spawn avoids
+# duplicating the spawn lifecycle.
+# =========================================================================
+do_replay() {
+  local delivery_substring=""
+  local explicit_profile="${PROFILE:-}"
+  local dry_run=0
+
+  # Parse REMAINING_ARGS. Index 0 is "replay", so skip it.
+  local i=1
+  while [ $i -lt ${#REMAINING_ARGS[@]} ]; do
+    case "${REMAINING_ARGS[$i]:-}" in
+      --profile)
+        explicit_profile="${REMAINING_ARGS[$((i+1))]:-}"
+        i=$((i+2))
+        ;;
+      --dry-run)
+        dry_run=1
+        i=$((i+1))
+        ;;
+      *)
+        if [ -z "$delivery_substring" ]; then
+          delivery_substring="${REMAINING_ARGS[$i]}"
+        fi
+        i=$((i+1))
+        ;;
+    esac
+  done
+
+  if [ -z "$delivery_substring" ]; then
+    echo "ERROR: replay requires a delivery-id substring" >&2
+    echo "Usage: claude-secure replay <delivery-id> [--profile NAME] [--dry-run]" >&2
+    return 1
+  fi
+
+  local events_dir="$CONFIG_DIR/events"
+  if [ ! -d "$events_dir" ]; then
+    echo "ERROR: events directory not found: $events_dir" >&2
+    return 1
+  fi
+
+  local matches=()
+  shopt -s nullglob
+  for f in "$events_dir"/*"${delivery_substring}"*.json; do
+    matches+=("$f")
+  done
+  shopt -u nullglob
+
+  if [ ${#matches[@]} -eq 0 ]; then
+    echo "ERROR: no event file matching '$delivery_substring' in $events_dir" >&2
+    return 1
+  fi
+  if [ ${#matches[@]} -gt 1 ]; then
+    echo "ERROR: multiple event files match '$delivery_substring':" >&2
+    local m
+    for m in "${matches[@]}"; do
+      echo "  $m" >&2
+    done
+    echo "Narrow the substring and retry." >&2
+    return 1
+  fi
+
+  local event_file="${matches[0]}"
+
+  # D-21: auto-resolve profile from repository.full_name when --profile not
+  # explicitly passed on this replay invocation.
+  if [ -z "$explicit_profile" ]; then
+    local repo
+    repo=$(jq -r '.repository.full_name // empty' "$event_file")
+    if [ -z "$repo" ]; then
+      echo "ERROR: cannot determine repository from $event_file -- pass --profile" >&2
+      return 1
+    fi
+    explicit_profile=$(resolve_profile_by_repo "$repo") || return 1
+  fi
+
+  echo "Replaying $event_file as profile '$explicit_profile'..."
+
+  # D-20 / Pattern 9: exec recursively into claude-secure so we reuse
+  # do_spawn without duplicating its lifecycle. Test harnesses that invoke
+  # REAL claude-secure directly (by full path) may set CLAUDE_SECURE_EXEC
+  # to point at a stub binary so the exec target is recorded rather than
+  # running the full spawn path. Falls back to `$0` when unset.
+  local exec_target="${CLAUDE_SECURE_EXEC:-$0}"
+  local args=(--profile "$explicit_profile" spawn --event-file "$event_file")
+  if [ "$dry_run" = 1 ]; then
+    args+=(--dry-run)
+  fi
+  exec "$exec_target" "${args[@]}"
+}
+
+# =========================================================================
 # Source-only guard: if sourced by tests, stop here
 # =========================================================================
 if [ "$__CLAUDE_SECURE_SOURCE_ONLY" = "1" ]; then
@@ -869,10 +966,18 @@ if [ -n "$PROFILE" ]; then
     load_profile_config "$PROFILE"
   fi
 else
-  # No --profile: superuser mode (allowed for all commands)
-  if [ "$FIRST_ARG" != "list" ] && [ "$FIRST_ARG" != "help" ] && [ "$FIRST_ARG" != "--help" ] && [ "$FIRST_ARG" != "-h" ]; then
-    load_superuser_config
-  fi
+  # No --profile: superuser mode (allowed for most commands). Exceptions:
+  #   - list/help/-h/--help: no config needed.
+  #   - replay: resolves its own profile from the event file before exec-ing
+  #     spawn, so skipping superuser load here avoids the interactive prompt.
+  case "$FIRST_ARG" in
+    list|help|--help|-h|replay)
+      : # skip superuser load
+      ;;
+    *)
+      load_superuser_config
+      ;;
+  esac
 fi
 
 # Parse log flags
@@ -999,11 +1104,19 @@ case "$CMD" in
     echo "  --prompt-template <n>  Override automatic template resolution"
     echo "  --dry-run              Show resolved prompt without executing"
     echo ""
+    echo "Replay flags (use with replay command):"
+    echo "  replay <delivery-id>   Re-run a persisted webhook delivery by id substring"
+    echo "  --profile NAME         Override auto-profile-detection during replay"
+    echo "  --dry-run              Show resolved prompt without executing"
+    echo ""
     echo "Profile names must be DNS-safe (lowercase alphanumeric and hyphens)."
     echo "New profiles are auto-created on first use."
     ;;
   spawn)
     do_spawn
+    ;;
+  replay)
+    do_replay
     ;;
   *)
     mkdir -p "$LOG_DIR"

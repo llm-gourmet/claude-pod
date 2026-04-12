@@ -474,7 +474,8 @@ test_replay_finds_single_match() {
   local ev_path stub_before rc
   ev_path=$(seed_event_file "deadbeef" "$PROJECT_DIR/tests/fixtures/github-issues-opened.json")
   stub_before=$(wc -l < "$STUB_LOG" 2>/dev/null || echo 0)
-  PATH="$TEST_TMPDIR/bin:$PROJECT_DIR/bin:$PATH" claude-secure replay deadbeef >"$TEST_TMPDIR/replay1.out" 2>&1
+  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-secure" \
+    "$PROJECT_DIR/bin/claude-secure" replay deadbeef >"$TEST_TMPDIR/replay1.out" 2>&1
   rc=$?
   [ $rc -eq 0 ] || { echo "replay exited $rc: $(cat "$TEST_TMPDIR/replay1.out")" >&2; return 1; }
   local stub_after
@@ -495,7 +496,8 @@ test_replay_ambiguous_errors() {
   cp "$PROJECT_DIR/tests/fixtures/github-issues-opened.json" \
     "$events_dir/${iso}-abcd12349999.json"
   local rc
-  PATH="$TEST_TMPDIR/bin:$PROJECT_DIR/bin:$PATH" claude-secure replay abcd1234 >"$TEST_TMPDIR/replay2.out" 2>&1
+  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-secure" \
+    "$PROJECT_DIR/bin/claude-secure" replay abcd1234 >"$TEST_TMPDIR/replay2.out" 2>&1
   rc=$?
   [ $rc -ne 0 ] || return 1
   grep -q 'abcd1234.json' "$TEST_TMPDIR/replay2.out" || return 1
@@ -505,7 +507,8 @@ test_replay_ambiguous_errors() {
 
 test_replay_no_match_errors() {
   local rc
-  PATH="$TEST_TMPDIR/bin:$PROJECT_DIR/bin:$PATH" claude-secure replay zzzzzzzz >"$TEST_TMPDIR/replay3.out" 2>&1
+  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-secure" \
+    "$PROJECT_DIR/bin/claude-secure" replay zzzzzzzz >"$TEST_TMPDIR/replay3.out" 2>&1
   rc=$?
   [ $rc -ne 0 ] || return 1
   grep -q 'no event file matching' "$TEST_TMPDIR/replay3.out" || return 1
@@ -516,7 +519,8 @@ test_replay_auto_profile() {
   local ev_path stub_before rc
   ev_path=$(seed_event_file "autoprof" "$PROJECT_DIR/tests/fixtures/github-issues-opened.json")
   stub_before=$(wc -l < "$STUB_LOG" 2>/dev/null || echo 0)
-  PATH="$TEST_TMPDIR/bin:$PROJECT_DIR/bin:$PATH" claude-secure replay autoprof >"$TEST_TMPDIR/replay4.out" 2>&1
+  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-secure" \
+    "$PROJECT_DIR/bin/claude-secure" replay autoprof >"$TEST_TMPDIR/replay4.out" 2>&1
   rc=$?
   [ $rc -eq 0 ] || return 1
   local stub_after
