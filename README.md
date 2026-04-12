@@ -232,6 +232,107 @@ Body logs can be large. Use `log:bodies` only for targeted debugging or security
 
 By default, proxy logs never include request or response bodies -- only metadata (HTTP method, path, status code, duration, and redaction count). The `log:bodies` flag opts in to body logging, which is safe because bodies are captured after the redaction layer has replaced all secrets with placeholders.
 
+## Phase 16 -- Result Channel (Report Push + Audit Log)
+
+Every headless execution of `claude-secure spawn` (whether triggered by the webhook listener or invoked manually) produces two durable artifacts:
+
+1. A **structured markdown report** pushed to a dedicated documentation repo on GitHub
+2. A **JSONL audit line** appended to `$LOG_DIR/executions.jsonl` on the host
+
+The audit log is always written. The report push is best-effort -- push failures are non-fatal and are recorded in the audit line.
+
+### One-time setup: documentation repo + PAT
+
+1. Create a new, empty GitHub repo for reports (e.g. `you/claude-reports`). Initialize it with a `main` branch and an initial commit (an empty README is fine -- a clone of an empty repo has no branch to check out).
+
+2. Create a fine-grained GitHub Personal Access Token with the minimum scope: `contents: write` on the report repo ONLY. Do NOT grant scope on any source repo. The token is used exclusively to push report commits.
+
+3. Add the PAT to the **profile** `.env` file (never the global `.env`). The profile `.env` is loaded only when that profile is active, and its values are auto-redacted from committed reports.
+
+   ```bash
+   # ~/.claude-secure/profiles/<name>/.env
+   REPORT_REPO_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+   ```
+
+4. Configure the profile JSON with the report repo fields:
+
+   ```bash
+   jq '.report_repo = "https://github.com/you/claude-reports.git"
+       | .report_branch = "main"
+       | .report_path_prefix = "reports"' \
+     ~/.claude-secure/profiles/<name>/profile.json > /tmp/p.json \
+     && mv /tmp/p.json ~/.claude-secure/profiles/<name>/profile.json
+   ```
+
+   Fields:
+   - `report_repo` -- full HTTPS URL of the documentation repo. Leave unset or empty to skip report push entirely (audit log is still written).
+   - `report_branch` -- target branch (default `main`).
+   - `report_path_prefix` -- directory inside the repo where reports land (default `reports`). Reports are placed at `<prefix>/<YYYY>/<MM>/<event_type>-<delivery_id_short>.md`.
+
+### Audit log
+
+Every spawn appends one JSONL line to `$LOG_DIR/<LOG_PREFIX>executions.jsonl`. For the default instance the path is `~/.claude-secure/logs/executions.jsonl`; multi-instance deployments (e.g. the test instance) get their own prefixed file.
+
+Each line is a single JSON object with mandatory keys: `ts`, `delivery_id`, `webhook_id`, `event_type`, `profile`, `repo`, `commit_sha`, `branch`, `cost_usd`, `duration_ms`, `session_id`, `status`, `report_url`.
+
+```bash
+# tail successful spawns
+tail -f ~/.claude-secure/logs/executions.jsonl | jq 'select(.status == "success")'
+
+# find push failures
+jq 'select(.status == "report_push_failed")' ~/.claude-secure/logs/executions.jsonl
+
+# total cost per profile
+jq -s 'group_by(.profile)
+       | map({profile: .[0].profile,
+              total_cost: (map(.cost_usd // 0) | add)})' \
+  ~/.claude-secure/logs/executions.jsonl
+```
+
+The `status` field takes one of four values:
+
+- `success` -- Claude ran, the report pushed cleanly (or no `report_repo` was configured).
+- `report_push_failed` -- Claude ran successfully but the push failed. Spawn still exits 0 -- push is observability, not the source of truth.
+- `claude_error` -- Claude itself failed (nonzero exit). Spawn exits nonzero.
+- `spawn_error` -- A pre-Claude error (profile load, config, cleanup failure) aborted the spawn.
+
+### Customizing report templates
+
+Report templates are resolved through a fallback chain (first match wins):
+
+1. `~/.claude-secure/profiles/<name>/report-templates/<event>.md` -- profile override (per-profile customization)
+2. `$WEBHOOK_REPORT_TEMPLATES_DIR/<event>.md` -- env override (primarily for tests)
+3. `<repo-checkout>/webhook/report-templates/<event>.md` -- dev fallback (when running from a git checkout)
+4. `/opt/claude-secure/webhook/report-templates/<event>.md` -- production default (shipped by `install.sh`)
+
+Default templates live in `webhook/report-templates/` in this repo and are copied to `/opt/claude-secure/webhook/report-templates/` on every `install.sh` run. The installer copies individual files but never `rm -rf`s the directory, so any extra templates you add alongside the defaults (e.g. `pull_request-opened.md`) survive reinstalls.
+
+To customize a default, drop a file of the same name in your profile's `report-templates/` directory -- it takes precedence. Templates use `{{VARIABLE}}` substitution with all Phase 15 variables (`{{ISSUE_TITLE}}`, `{{ISSUE_BODY}}`, `{{REPO_FULL_NAME}}`, `{{COMMIT_SHA}}`, etc.) plus Phase 16 extensions:
+
+- `{{RESULT_TEXT}}` -- Claude's final message body (truncated at 16KB with a `... [truncated N more bytes]` marker)
+- `{{ERROR_MESSAGE}}` -- non-empty on failures
+- `{{COST_USD}}`, `{{DURATION_MS}}`, `{{SESSION_ID}}` -- from the Claude output envelope
+- `{{TIMESTAMP}}` -- ISO-8601 UTC timestamp of the spawn
+- `{{STATUS}}` -- one of `success` / `claude_error` / `spawn_error` / `report_push_failed`
+
+### Skipping publish (local-only runs)
+
+Pass `--skip-report` on the command line or set `CLAUDE_SECURE_SKIP_REPORT=1` in the environment. The audit log line is still written, but no clone or push is attempted. Useful for debugging, offline work, and test harnesses.
+
+```bash
+claude-secure spawn --skip-report --profile <name> --event <path-to-event.json>
+# or
+CLAUDE_SECURE_SKIP_REPORT=1 claude-secure spawn --profile <name> --event ...
+```
+
+### Security notes
+
+- **PAT is never placed in the remote URL or argv.** Git is invoked with a `GIT_ASKPASS` helper script that reads the PAT from an environment variable passed only to the `git` child process. The token never appears in `ps` output, command history, or the remote URL.
+- **Profile `.env` values are auto-redacted from committed reports.** Before `git add`, the rendered report body passes through a redaction pass that replaces every occurrence of each profile `.env` value with `<REDACTED:KEY>`. If Claude's output accidentally echoes `REPORT_REPO_TOKEN`, the committed markdown contains `<REDACTED:REPORT_REPO_TOKEN>` instead. Empty values are skipped (so `EMPTY_VAR=` does not mangle whitespace).
+- **No force-push, ever.** Force-push is never used by the report publisher. If a concurrent writer pushes to the same branch first, the spawn rebases with `git pull --rebase` and retries exactly once. A second failure is recorded in the audit log with `status=report_push_failed`; the doc repo history is never rewritten.
+- **Result text is bounded at 16KB.** Larger Claude outputs are truncated UTF-8-safely with a `... [truncated N more bytes]` suffix so that long sessions cannot produce multi-megabyte commits.
+- **Audit lines are append-only.** Per-instance JSONL files respect the `LOG_PREFIX` multi-instance convention, so two instances on the same host write to distinct files and cannot race each other. Within one instance, POSIX `O_APPEND` guarantees atomic writes because each line stays under 4KB (`PIPE_BUF`).
+
 ## Testing
 
 ### Quick Start
