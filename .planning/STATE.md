@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Headless Agent Mode
-status: executing
-stopped_at: Completed 17-04-PLAN.md
-last_updated: "2026-04-12T14:20:41.153Z"
+status: verifying
+stopped_at: Completed 17-03-PLAN.md
+last_updated: "2026-04-12T14:42:13.527Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 6
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 21
-  completed_plans: 20
+  completed_plans: 21
   percent: 88
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 
 Phase: 17 (operational-hardening) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-12
 
 Progress: [█████████░] 88% (15/17 plans)
@@ -70,6 +70,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 17 P01 | 9min | 3 tasks | 10 files |
 | Phase 17 P02 | 18min | 3 tasks | 6 files |
 | Phase 17 P04 | 4min | 2 tasks | 3 files |
+| Phase 17-operational-hardening P03 | 35min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -115,6 +116,9 @@ Recent decisions affecting current work:
 - [Phase 17]: Phase 17-02: mem_limit: 1g short-form on claude service (Pitfall 5) -- deploy.resources is Swarm-only and silently ignored by docker compose up
 - [Phase 17]: 17-04: Step 5d placed after 5c (files) and before 6 (config); single daemon-reload in step 7 covers both new reaper units AND webhook D-11 refresh.
 - [Phase 17]: 17-04: README Phase 17 section uses operator-facing prose with no D-IDs; placed between Phase 16 and Testing; tuning table for REAPER_ORPHAN_AGE_SECS + REAPER_EVENT_AGE_SECS.
+- [Phase 17]: 17-03: push_with_retry expanded from 1 single-retry to a bounded 3-attempt rebase loop + grep widened to catch file:// remote rejection strings (remote rejected / failed to update ref / cannot lock ref) — fixes concurrent-publish race against Phase 14 Semaphore(3)
+- [Phase 17]: 17-03: reap added to superuser-skip list so timer-driven invocations never hit load_superuser_config's interactive DEFAULT_WORKSPACE prompt — reaper walks docker ps directly and needs no profile/whitelist
+- [Phase 17]: 17-03: scenario 3 sentinel created via minimal compose.yml (not plain docker run --label) so reaper's docker compose -p X down path can tear it down; scenario 4 uses two-layer check (compose config + docker inspect on explicit --no-deps --no-start claude container)
 
 ### Pending Todos
 
@@ -128,6 +132,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-04-12T14:20:41.150Z
-Stopped at: Completed 17-04-PLAN.md
+Last session: 2026-04-12T14:42:13.524Z
+Stopped at: Completed 17-03-PLAN.md
 Resume file: None
