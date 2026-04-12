@@ -216,6 +216,47 @@ test_no_force_push_grep() {
   return 0
 }
 
+test_readme_documents_phase16() {
+  # Wave 2 static invariant: README.md documents the operator onboarding
+  # flow for Phase 16 (report repo, PAT, profile .env, audit log).
+  local readme="$PROJECT_DIR/README.md"
+  [ -f "$readme" ] || { echo "README.md missing" >&2; return 1; }
+
+  local must_haves=(
+    "Phase 16"
+    "REPORT_REPO_TOKEN"
+    "executions.jsonl"
+    "report_repo"
+    "skip-report"
+    "GIT_ASKPASS"
+    "contents: write"
+    "REDACTED"
+  )
+  local item
+  for item in "${must_haves[@]}"; do
+    if ! grep -q -- "$item" "$readme"; then
+      echo "README.md missing required Phase 16 marker: $item" >&2
+      return 1
+    fi
+  done
+
+  # At least 2 references to REPORT_REPO_TOKEN (env var + security note)
+  local tok_count
+  tok_count=$(grep -c 'REPORT_REPO_TOKEN' "$readme")
+  if [ "$tok_count" -lt 2 ]; then
+    echo "Expected >=2 REPORT_REPO_TOKEN references in README.md, got $tok_count" >&2
+    return 1
+  fi
+
+  # force-push security note present
+  if ! grep -qiE 'force[- ]push' "$readme"; then
+    echo "Expected force-push security note in README.md" >&2
+    return 1
+  fi
+
+  return 0
+}
+
 test_installer_ships_report_templates() {
   # Wave 2 static invariant: install.sh must ship webhook/report-templates/
   # to /opt/claude-secure/webhook/report-templates/ via a step mirroring 5b.
@@ -1134,6 +1175,7 @@ main() {
   run_test "templates exist"                    test_templates_exist
   run_test "no force-push in bin"               test_no_force_push_grep
   run_test "installer ships report templates"   test_installer_ships_report_templates
+  run_test "README documents Phase 16"          test_readme_documents_phase16
   echo ""
 
   echo "--- OPS-01: Report push ---"
