@@ -345,6 +345,16 @@ install_webhook_service() {
   sudo chmod 755 /opt/claude-secure/webhook/listener.py
   log_info "Copied listener.py to /opt/claude-secure/webhook/"
 
+  # 5b. Copy default prompt templates (D-12: always refresh -- latest templates ship)
+  sudo mkdir -p /opt/claude-secure/webhook/templates
+  if [ -d "$app_dir/webhook/templates" ]; then
+    sudo cp "$app_dir/webhook/templates/"*.md /opt/claude-secure/webhook/templates/
+    sudo chmod 644 /opt/claude-secure/webhook/templates/*.md
+    log_info "Copied default templates to /opt/claude-secure/webhook/templates/"
+  else
+    log_warn "Source directory $app_dir/webhook/templates not found -- skipping template copy"
+  fi
+
   # 6. Copy config template (idempotent -- never overwrite existing config)
   sudo mkdir -p /etc/claude-secure
   if [ ! -f /etc/claude-secure/webhook.json ]; then
