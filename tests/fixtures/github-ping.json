@@ -1,0 +1,18 @@
+{
+  "zen": "Non-blocking is better than blocking.",
+  "hook_id": 12345,
+  "hook": {
+    "type": "Repository",
+    "id": 12345,
+    "name": "web",
+    "active": true,
+    "events": ["issues", "push", "workflow_run"]
+  },
+  "repository": {
+    "id": 1000001,
+    "name": "test-repo",
+    "full_name": "test-org/test-repo",
+    "owner": { "login": "test-org" }
+  },
+  "sender": { "login": "test-user" }
+}

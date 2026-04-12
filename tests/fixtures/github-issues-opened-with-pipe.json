@@ -1,0 +1,18 @@
+{
+  "action": "opened",
+  "issue": {
+    "number": 44,
+    "title": "fix(api): handle | in header",
+    "body": "Broken on `path\\to\\file` when body contains | pipes",
+    "html_url": "https://github.com/test-org/test-repo/issues/44",
+    "user": { "login": "bug-reporter" },
+    "labels": []
+  },
+  "repository": {
+    "id": 1000001,
+    "name": "test-repo",
+    "full_name": "test-org/test-repo",
+    "owner": { "login": "test-org" }
+  },
+  "sender": { "login": "bug-reporter" }
+}

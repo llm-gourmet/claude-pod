@@ -1,0 +1,24 @@
+{
+  "action": "completed",
+  "workflow_run": {
+    "id": 289782452,
+    "name": "",
+    "head_branch": "main",
+    "head_sha": "abc123def456abc123def456abc123def456abcd",
+    "status": "completed",
+    "conclusion": "success",
+    "html_url": "https://github.com/test-org/test-repo/actions/runs/289782452"
+  },
+  "workflow": {
+    "id": 123,
+    "name": "CI",
+    "path": ".github/workflows/test.yml"
+  },
+  "repository": {
+    "id": 1000001,
+    "name": "test-repo",
+    "full_name": "test-org/test-repo",
+    "owner": { "login": "test-org" }
+  },
+  "sender": { "login": "test-user" }
+}

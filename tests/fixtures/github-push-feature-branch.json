@@ -1,0 +1,25 @@
+{
+  "ref": "refs/heads/feature/xyz",
+  "before": "0000000000000000000000000000000000000000",
+  "after": "abc123def456abc123def456abc123def456abcd",
+  "compare": "https://github.com/test-org/test-repo/compare/abc...def",
+  "head_commit": {
+    "id": "abc123def456abc123def456abc123def456abcd",
+    "message": "Test commit on feature branch",
+    "author": { "name": "test-user", "email": "test@example.com" }
+  },
+  "repository": {
+    "id": 1000001,
+    "name": "test-repo",
+    "full_name": "test-org/test-repo",
+    "owner": { "login": "test-org" }
+  },
+  "pusher": { "name": "test-user", "email": "test@example.com" },
+  "commits": [
+    {
+      "id": "abc123def456abc123def456abc123def456abcd",
+      "message": "Test commit on feature branch",
+      "author": { "name": "test-user", "email": "test@example.com" }
+    }
+  ]
+}

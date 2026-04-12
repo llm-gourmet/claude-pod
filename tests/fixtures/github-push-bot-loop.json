@@ -1,0 +1,25 @@
+{
+  "ref": "refs/heads/main",
+  "before": "0000000000000000000000000000000000000000",
+  "after": "bot1234567890bot1234567890bot1234567890bo",
+  "compare": "https://github.com/test-org/test-repo/compare/bot1...bot2",
+  "head_commit": {
+    "id": "bot1234567890bot1234567890bot1234567890bo",
+    "message": "Automated commit by bot",
+    "author": { "name": "claude-bot", "email": "claude-bot@users.noreply.github.com" }
+  },
+  "repository": {
+    "id": 1000001,
+    "name": "test-repo",
+    "full_name": "test-org/test-repo",
+    "owner": { "login": "test-org" }
+  },
+  "pusher": { "name": "claude-bot", "email": "claude-bot@users.noreply.github.com" },
+  "commits": [
+    {
+      "id": "bot1234567890bot1234567890bot1234567890bo",
+      "message": "Automated commit by bot",
+      "author": { "name": "claude-bot", "email": "claude-bot@users.noreply.github.com" }
+    }
+  ]
+}

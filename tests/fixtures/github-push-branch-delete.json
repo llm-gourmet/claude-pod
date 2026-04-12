@@ -1,0 +1,17 @@
+{
+  "ref": "refs/heads/old-feature",
+  "before": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  "after": "0000000000000000000000000000000000000000",
+  "deleted": true,
+  "created": false,
+  "head_commit": null,
+  "compare": "https://github.com/test-org/test-repo/compare/deadbeef...0000000",
+  "repository": {
+    "id": 1000001,
+    "name": "test-repo",
+    "full_name": "test-org/test-repo",
+    "owner": { "login": "test-org" }
+  },
+  "pusher": { "name": "test-user", "email": "test@example.com" },
+  "commits": []
+}

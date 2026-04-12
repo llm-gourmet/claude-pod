@@ -1,0 +1,22 @@
+{
+  "action": "labeled",
+  "issue": {
+    "number": 43,
+    "title": "Bug: labeled issue test",
+    "body": "This issue has been labeled for triage.",
+    "html_url": "https://github.com/test-org/test-repo/issues/43",
+    "user": { "login": "bug-reporter" },
+    "labels": [
+      { "name": "bug" },
+      { "name": "triage" }
+    ]
+  },
+  "label": { "name": "bug" },
+  "repository": {
+    "id": 1000001,
+    "name": "test-repo",
+    "full_name": "test-org/test-repo",
+    "owner": { "login": "test-org" }
+  },
+  "sender": { "login": "triager" }
+}
