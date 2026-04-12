@@ -36,19 +36,25 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 TEST_TMPDIR=$(mktemp -d -t cs-e2e-XXXXXXXX)
 LISTENER_PID=""
-LISTENER_PORT=19117  # Phase 17 E2E -- avoids collision with unit harness 19017
+LISTENER_PORT="${LISTENER_PORT:-19117}"  # Phase 17 E2E -- avoids collision with unit harness 19017
+CONFIG_DIR=""
 
 cleanup() {
+  local rc=$?
   if [ -n "$LISTENER_PID" ]; then
     kill "$LISTENER_PID" 2>/dev/null || true
     wait "$LISTENER_PID" 2>/dev/null || true
   fi
-  # Best-effort reaper pass: if any cs-e2e- containers survived a failing
-  # scenario, force-reap them so the next run starts clean. Suppress all
-  # errors -- the trap must not mask the original exit code.
-  INSTANCE_PREFIX="cs-e2e-" REAPER_ORPHAN_AGE_SECS=0 \
+  # D-16: force-reap any cs-e2e- containers (orphan sentinel or spawn leaks)
+  # so the next run starts clean. REAPER_ORPHAN_AGE_SECS=0 counts ALL ages as
+  # orphan (Pitfall 4: no backdating). Suppress all errors -- the trap must
+  # not mask the original exit code.
+  REAPER_ORPHAN_AGE_SECS=0 INSTANCE_PREFIX="cs-e2e-" \
     "$PROJECT_DIR/bin/claude-secure" reap >/dev/null 2>&1 || true
+  # Best-effort: also remove the scenario-4 inspect container if it survived.
+  docker rm -f cs-e2e-limits-claude >/dev/null 2>&1 || true
   rm -rf "$TEST_TMPDIR"
+  return $rc
 }
 trap cleanup EXIT
 
@@ -88,23 +94,142 @@ run_test() {
 }
 
 # =========================================================================
-# E2E profile setup. In Wave 0 this is only a presence check against the
-# profile-e2e fixture tree created by 17-01 Task 3. In 17-03 this will be
-# expanded to: clone the fixture to $TEST_TMPDIR/profiles/e2e, generate a
-# bare report repo under $TEST_TMPDIR/report-repo-bare.git, rewrite
-# profile.json report_repo to the file:// URL, start the listener on
-# LISTENER_PORT, etc.
+# Local bare git repo helper -- creates $TEST_TMPDIR/<name>.git seeded with
+# one initial commit on main, echoes the file:// URL.
+# Mirrors tests/test-phase16.sh::setup_bare_repo so publish_report has a
+# real branch to clone --depth 1 --branch main from.
+# =========================================================================
+setup_bare_repo() {
+  local label="${1:-e2e-reports}"
+  local bare="$TEST_TMPDIR/${label}.git"
+  local seed="$TEST_TMPDIR/${label}-seed"
+  rm -rf "$bare" "$seed"
+  git init --bare --initial-branch=main "$bare" >/dev/null 2>&1 \
+    || git init --bare "$bare" >/dev/null 2>&1
+  git clone "$bare" "$seed" >/dev/null 2>&1
+  (
+    cd "$seed"
+    git config user.email "seed@test.local"
+    git config user.name "seed"
+    git checkout -B main >/dev/null 2>&1 || true
+    : > .gitkeep
+    git add .gitkeep
+    git commit -m "seed" >/dev/null 2>&1
+    git push origin main >/dev/null 2>&1
+  )
+  rm -rf "$seed"
+  printf 'file://%s' "$bare"
+}
+
+# =========================================================================
+# E2E profile setup (D-13, D-16). Copies the profile-e2e fixture into a
+# fresh $CONFIG_DIR under $TEST_TMPDIR, runtime-injects a bare file:// repo
+# URL into profile.json .report_repo, adds a workspace field so spawn's
+# validate_profile doesn't balk, verifies Pitfall 13 (no ghp_ prefix in the
+# fixture .env), and points at the Phase 16 envelope stub so no real Claude
+# calls happen.
 # =========================================================================
 setup_e2e_profile() {
   if [ ! -d "$PROJECT_DIR/tests/fixtures/profile-e2e" ]; then
-    echo "FAIL: missing tests/fixtures/profile-e2e (created in 17-01 Task 3)" >&2
+    echo "FAIL setup: missing tests/fixtures/profile-e2e (created in 17-01 Task 3)" >&2
     return 1
   fi
   if [ ! -f "$PROJECT_DIR/tests/fixtures/profile-e2e/profile.json" ]; then
-    echo "FAIL: missing tests/fixtures/profile-e2e/profile.json" >&2
+    echo "FAIL setup: missing tests/fixtures/profile-e2e/profile.json" >&2
     return 1
   fi
+
+  local bare
+  bare=$(setup_bare_repo "e2e-reports")
+  [ -n "$bare" ] || { echo "FAIL setup: bare repo creation returned empty" >&2; return 1; }
+
+  export CONFIG_DIR="$TEST_TMPDIR/.claude-secure"
+  export CLAUDE_SECURE_INSTANCE=e2e
+  export INSTANCE_PREFIX="cs-e2e-"
+  mkdir -p "$CONFIG_DIR/profiles" "$CONFIG_DIR/logs" "$CONFIG_DIR/events" \
+           "$TEST_TMPDIR/workspace-e2e"
+
+  # Copy the fixture tree into the profile location the loader expects.
+  cp -r "$PROJECT_DIR/tests/fixtures/profile-e2e" "$CONFIG_DIR/profiles/e2e"
+
+  # Runtime-inject the bare repo file:// URL into profile.json .report_repo,
+  # and add the .workspace field (required by load_profile_config) pointing
+  # at a throwaway dir. jq tempfile pattern used per fixture.
+  local profile_json="$CONFIG_DIR/profiles/e2e/profile.json"
+  jq --arg url "$bare" --arg ws "$TEST_TMPDIR/workspace-e2e" '.report_repo = $url | .workspace = $ws' "$profile_json" > "$profile_json.new"
+  mv "$profile_json.new" "$profile_json"
+
+  # Pitfall 13 guardrail: verify the fixture .env does NOT carry a ghp_ prefix.
+  if grep -q '^REPORT_REPO_TOKEN=ghp_' "$CONFIG_DIR/profiles/e2e/.env"; then
+    echo "FAIL setup: fixture .env has ghp_ prefix (Pitfall 13 violation)" >&2
+    return 1
+  fi
+
+  # Minimal whitelist so any accidental validate_profile call doesn't break.
+  echo '{}' > "$CONFIG_DIR/profiles/e2e/whitelist.json"
+
+  # Phase 16 stub: point at the envelope fixture so the stubbed Claude
+  # returns a valid envelope (D-13: no real Anthropic calls).
+  export CLAUDE_SECURE_FAKE_CLAUDE_STDOUT="$PROJECT_DIR/tests/fixtures/envelope-success.json"
   return 0
+}
+
+# =========================================================================
+# Listener subprocess lifecycle. Generates a temp webhook.json matching the
+# Phase 14 Config schema, launches python3 webhook/listener.py in the
+# background, polls /health until ready or a 10s deadline, and captures
+# LISTENER_PID for the cleanup trap.
+# =========================================================================
+start_listener() {
+  LISTENER_PORT="${LISTENER_PORT:-19117}"
+
+  local webhook_cfg="$TEST_TMPDIR/webhook.json"
+  cat > "$webhook_cfg" <<EOF
+{
+  "bind": "127.0.0.1",
+  "port": $LISTENER_PORT,
+  "max_concurrent_spawns": 3,
+  "profiles_dir": "$CONFIG_DIR/profiles",
+  "events_dir": "$CONFIG_DIR/events",
+  "logs_dir": "$CONFIG_DIR/logs",
+  "claude_secure_bin": "$PROJECT_DIR/bin/claude-secure"
+}
+EOF
+
+  # Launch listener in background. Env is inherited by subprocess.Popen so
+  # CLAUDE_SECURE_FAKE_CLAUDE_STDOUT and CONFIG_DIR flow into `claude-secure spawn`.
+  (
+    cd "$PROJECT_DIR"
+    PATH="$PROJECT_DIR/bin:$PATH" \
+    CONFIG_DIR="$CONFIG_DIR" \
+    CLAUDE_SECURE_INSTANCE=e2e \
+    INSTANCE_PREFIX="cs-e2e-" \
+    CLAUDE_SECURE_FAKE_CLAUDE_STDOUT="$CLAUDE_SECURE_FAKE_CLAUDE_STDOUT" \
+    python3 webhook/listener.py --config "$webhook_cfg" \
+      >"$TEST_TMPDIR/listener.stdout" 2>"$TEST_TMPDIR/listener.stderr" &
+    echo $! > "$TEST_TMPDIR/listener.pid"
+  )
+  sleep 0.5
+  LISTENER_PID=$(cat "$TEST_TMPDIR/listener.pid" 2>/dev/null)
+  [ -n "$LISTENER_PID" ] \
+    || { echo "FAIL start_listener: no PID captured" >&2; return 1; }
+
+  # Poll /health for up to 10 seconds before giving up.
+  local deadline=$((SECONDS + 10))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$LISTENER_PORT/health" 2>/dev/null | grep -q '^200$'; then
+      return 0
+    fi
+    if ! kill -0 "$LISTENER_PID" 2>/dev/null; then
+      echo "FAIL start_listener: listener died during startup" >&2
+      cat "$TEST_TMPDIR/listener.stderr" >&2 || true
+      return 1
+    fi
+    sleep 0.2
+  done
+  echo "FAIL start_listener: /health not reachable within 10s" >&2
+  cat "$TEST_TMPDIR/listener.stderr" >&2 || true
+  return 1
 }
 
 # =========================================================================
