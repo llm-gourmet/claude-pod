@@ -370,6 +370,19 @@ install_webhook_service() {
     log_warn "Source directory $app_dir/webhook/report-templates not found -- skipping report template copy"
   fi
 
+  # 5d. Install reaper systemd unit + timer (Phase 17).
+  # Mirrors step 7's pattern for the webhook listener: cp into
+  # /etc/systemd/system/, mode 644. daemon-reload happens once in step 7 and
+  # covers BOTH the reaper units (newly added here) and the webhook unit's
+  # updated hardening directives from Phase 17 wave 1a. Always refresh: the
+  # repo copies are the source of truth, no rm -rf of the destination.
+  sudo cp "$app_dir/webhook/claude-secure-reaper.service" /etc/systemd/system/claude-secure-reaper.service
+  sudo chmod 644 /etc/systemd/system/claude-secure-reaper.service
+  sudo cp "$app_dir/webhook/claude-secure-reaper.timer" /etc/systemd/system/claude-secure-reaper.timer
+  sudo chmod 644 /etc/systemd/system/claude-secure-reaper.timer
+  log_info "Installed systemd unit /etc/systemd/system/claude-secure-reaper.service"
+  log_info "Installed systemd unit /etc/systemd/system/claude-secure-reaper.timer"
+
   # 6. Copy config template (idempotent -- never overwrite existing config)
   sudo mkdir -p /etc/claude-secure
   if [ ! -f /etc/claude-secure/webhook.json ]; then
@@ -406,6 +419,23 @@ install_webhook_service() {
     else
       log_warn "Could not enable claude-secure-webhook (systemctl enable failed)."
       log_warn "Manually enable later with: sudo systemctl enable --now claude-secure-webhook"
+    fi
+  fi
+
+  # 8b. Enable + start reaper timer (Phase 17; subject to the same WSL2 gate as step 8).
+  if [ "$wsl2_no_systemd" -eq 1 ]; then
+    log_warn "Skipping 'systemctl enable --now claude-secure-reaper.timer' due to WSL2 systemd gate."
+    log_warn "After enabling systemd in WSL2, run: sudo systemctl enable --now claude-secure-reaper.timer"
+  else
+    if sudo systemctl enable --now claude-secure-reaper.timer 2>/dev/null; then
+      if sudo systemctl is-active --quiet claude-secure-reaper.timer; then
+        log_info "Reaper timer active -- runs every 5 minutes. View activity: journalctl -u claude-secure-reaper -f"
+      else
+        log_warn "Reaper timer enabled but not active yet. Check: systemctl status claude-secure-reaper.timer"
+      fi
+    else
+      log_warn "Could not enable claude-secure-reaper.timer (systemctl enable failed)."
+      log_warn "Manually enable later with: sudo systemctl enable --now claude-secure-reaper.timer"
     fi
   fi
 
