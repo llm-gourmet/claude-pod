@@ -382,20 +382,32 @@ build_error_envelope() {
 # UTF-8-safe payload extraction, and awk-based token substitution.
 # =========================================================================
 
-# D-15: Resolve the default templates directory. Priority chain:
-#   1. $WEBHOOK_TEMPLATES_DIR env var (operator override).
-#   2. Dev checkout: $APP_DIR/webhook/templates when $APP_DIR/.git exists.
-#   3. Production fallback: /opt/claude-secure/webhook/templates.
+# Phase 15 D-15 + Phase 16 D-08: resolve the default templates directory.
+# Parameterized by subdir so one function serves both prompt templates
+# (subdir="templates", default for backward compat) and report templates
+# (subdir="report-templates"). Priority chain per subdir:
+#   1. $WEBHOOK_TEMPLATES_DIR          (when subdir == "templates")
+#   1. $WEBHOOK_REPORT_TEMPLATES_DIR   (when subdir == "report-templates")
+#   2. Dev checkout: $APP_DIR/webhook/$subdir when $APP_DIR/.git exists
+#   3. Production fallback: /opt/claude-secure/webhook/$subdir
 _resolve_default_templates_dir() {
-  if [ -n "${WEBHOOK_TEMPLATES_DIR:-}" ]; then
+  local subdir="${1:-templates}"
+
+  if [ "$subdir" = "templates" ] && [ -n "${WEBHOOK_TEMPLATES_DIR:-}" ]; then
     echo "$WEBHOOK_TEMPLATES_DIR"
     return
   fi
-  if [ -n "${APP_DIR:-}" ] && [ -d "$APP_DIR/.git" ] && [ -d "$APP_DIR/webhook/templates" ]; then
-    echo "$APP_DIR/webhook/templates"
+  if [ "$subdir" = "report-templates" ] && [ -n "${WEBHOOK_REPORT_TEMPLATES_DIR:-}" ]; then
+    echo "$WEBHOOK_REPORT_TEMPLATES_DIR"
     return
   fi
-  echo "/opt/claude-secure/webhook/templates"
+
+  if [ -n "${APP_DIR:-}" ] && [ -d "$APP_DIR/.git" ] && [ -d "$APP_DIR/webhook/$subdir" ]; then
+    echo "$APP_DIR/webhook/$subdir"
+    return
+  fi
+
+  echo "/opt/claude-secure/webhook/$subdir"
 }
 
 # D-17 / D-18 / Pitfall 4: extract a jq path from an event payload and emit
@@ -562,6 +574,45 @@ resolve_template() {
   echo "  Checked: $prompts_dir/${event_type}.md" >&2
   echo "  Checked: $default_dir/${event_type}.md" >&2
   echo "  Use --prompt-template to override, or create one of the above." >&2
+  return 1
+}
+
+# Phase 16 D-08: report-template fallback chain.
+# Clone of resolve_template for report templates. Only the subdir names
+# change (prompts/ -> report-templates/, templates/ -> report-templates/).
+# There is no explicit-override flag for reports: the report template is
+# chosen purely by event_type.
+resolve_report_template() {
+  local event_type="$1"
+
+  local profile_dir="$CONFIG_DIR/profiles/$PROFILE"
+  local reports_dir="$profile_dir/report-templates"
+
+  # Step 1: profile override by event_type.
+  if [ -d "$reports_dir" ]; then
+    local path="$reports_dir/${event_type}.md"
+    if [ -f "$path" ]; then
+      echo "$path"
+      return 0
+    fi
+  fi
+
+  # Step 2: default template fallback (via parameterized resolver).
+  local default_dir
+  default_dir=$(_resolve_default_templates_dir "report-templates")
+  if [ -d "$default_dir" ]; then
+    local path="$default_dir/${event_type}.md"
+    if [ -f "$path" ]; then
+      echo "$path"
+      return 0
+    fi
+  fi
+
+  # Step 3: hard fail, listing every path checked.
+  echo "ERROR: No report template found for event_type '$event_type'" >&2
+  echo "  Checked: $reports_dir/${event_type}.md" >&2
+  echo "  Checked: $default_dir/${event_type}.md" >&2
+  echo "  Create one of the above to enable report publishing." >&2
   return 1
 }
 
