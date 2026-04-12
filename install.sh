@@ -2,7 +2,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_DIR="$HOME/.claude-secure"
+_invoking_user="${SUDO_USER:-$USER}"
+_invoking_home="$(getent passwd "$_invoking_user" | cut -d: -f6)"
+if [ -z "$_invoking_home" ]; then
+  echo "ERROR: Could not resolve home directory for user '$_invoking_user'" >&2
+  exit 1
+fi
+CONFIG_DIR="$_invoking_home/.claude-secure"
 PLATFORM=""
 app_dir=""
 
@@ -169,8 +175,8 @@ setup_auth() {
 }
 
 setup_workspace() {
-  read -rp "Workspace path [$HOME/claude-workspace]: " ws_path
-  ws_path="${ws_path:-$HOME/claude-workspace}"
+  read -rp "Workspace path [$_invoking_home/claude-workspace]: " ws_path
+  ws_path="${ws_path:-$_invoking_home/claude-workspace}"
 
   # Resolve to absolute path
   ws_path="$(realpath -m "$ws_path")"
@@ -254,13 +260,13 @@ install_cli() {
     sudo chmod 755 "$target"
     log_info "Installed CLI to $target (via sudo)"
   else
-    target="$HOME/.local/bin/claude-secure"
-    mkdir -p "$HOME/.local/bin"
+    target="$_invoking_home/.local/bin/claude-secure"
+    mkdir -p "$_invoking_home/.local/bin"
     cp "$cli_src" "$target"
     chmod 755 "$target"
     log_info "Installed CLI to $target"
-    if ! echo "$PATH" | tr ':' '\n' | grep -q "$HOME/.local/bin"; then
-      log_warn "$HOME/.local/bin is not in PATH. Add it to your shell profile."
+    if ! echo "$PATH" | tr ':' '\n' | grep -q "$_invoking_home/.local/bin"; then
+      log_warn "$_invoking_home/.local/bin is not in PATH. Add it to your shell profile."
     fi
   fi
 }
