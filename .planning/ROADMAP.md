@@ -72,7 +72,10 @@
   1. Installer verifies Docker Desktop ≥ 4.44.3 is installed and running on macOS, and warns or blocks with a clear upgrade message if older
   2. Validator container builds from `python:3.11-slim-bookworm` on all platforms and starts cleanly under Docker Desktop without `iptables who?` errors
   3. A smoke test on macOS confirms the claude container boots, the proxy is reachable, the hook fires, and a call-ID is registered with the validator end-to-end
-**Plans**: TBD
+**Plans**: 3 plans
+  - [ ] 19-01-PLAN.md — Wave 0: Phase 19 test scaffolding (test-phase19.sh harness + smoke test + docker-version fixtures)
+  - [ ] 19-02-PLAN.md — Wave 1: COMPAT-01 validator base image pin + iptables_probe() startup helper (parallel to 19-03)
+  - [ ] 19-03-PLAN.md — Wave 1: PLAT-05 check_docker_desktop_version() in install.sh + real fixture-driven tests (parallel to 19-02)
 
 ### Phase 20: Network Enforcement on macOS
 **Goal**: Non-whitelisted outbound calls are blocked at the network layer on macOS via the enforcement strategy chosen by the empirical spike
@@ -131,7 +134,7 @@ v3.0 phases execute strictly in numeric order: 18 -> 19 -> 20 -> 21 -> 22
 | 16. Result Channel | v2.0 | 4/4 | Complete | 2026-04-12 |
 | 17. Operational Hardening | v2.0 | 4/4 | Complete | 2026-04-12 |
 | 18. Platform Abstraction & Bash Portability | v3.0 | 5/5 | Complete    | 2026-04-13 |
-| 19. Docker Desktop Compatibility | v3.0 | 0/0 | Not started | - |
+| 19. Docker Desktop Compatibility | v3.0 | 0/3 | Not started | - |
 | 20. Network Enforcement on macOS | v3.0 | 0/0 | Not started | - |
 | 21. launchd Service Management | v3.0 | 0/0 | Not started | - |
 | 22. macOS Integration Tests | v3.0 | 0/0 | Not started | - |
