@@ -1,586 +1,395 @@
-# Architecture Research
+# Architecture: macOS Port of claude-secure
 
-**Domain:** Headless agent mode integration for claude-secure
-**Researched:** 2026-04-11
-**Confidence:** HIGH
+**Milestone:** v3.0 macOS Support
+**Researched:** 2026-04-13
+**Confidence:** HIGH on enforcement placement and launchd lifecycle, MEDIUM on installer detection edge cases, MEDIUM on Docker Desktop internal-network DNS quirks.
 
-## System Overview
+## TL;DR — Four Load-Bearing Answers
 
-### Current Architecture (v1.0)
-
-```
-HOST
- |
- |  claude-secure --instance NAME
- |       |
- |       v
- |  docker compose up -d
- |  docker compose exec -it claude claude --dangerously-skip-permissions
- |       |
- |       v
- |  +=======================================================+
- |  |           claude-internal (internal: true)             |
- |  |                                                        |
- |  |  +----------+     +-----------+                        |
- |  |  | claude   |<--->| validator |                        |
- |  |  | (Ubuntu) |     | (Python)  |                        |
- |  |  | hooks    |     | iptables  |                        |
- |  |  +----+-----+     | SQLite   |                        |
- |  |       |            +-----------+                       |
- |  |       |          network_mode: service:claude          |
- |  |       v                                                |
- |  |  +----------+                                          |
- |  |  |  proxy   |----> claude-external ---> internet       |
- |  |  | (Node.js)|     (api.anthropic.com only)             |
- |  |  +----------+                                          |
- |  +=======================================================+
- |
- |  Config: ~/.claude-secure/instances/<name>/
- |    - .env (secrets + auth)
- |    - config.sh (WORKSPACE_PATH)
- |    - whitelist.json (domains + placeholders)
-```
-
-### v2.0 Target Architecture (Headless Agent Mode)
-
-```
-HOST
- |
- |  +----------------------------+
- |  | webhook-listener           |  <--- GitHub webhooks (port 9876)
- |  | (systemd user service)     |
- |  | Node.js http stdlib        |
- |  +--------+-------------------+
- |           |
- |           | event dispatch (child_process.execFile)
- |           v
- |  +----------------------------+
- |  | event-handler              |  Bash: map event -> profile + prompt
- |  | (per-profile templates)    |
- |  +--------+-------------------+
- |           |
- |           | claude-secure --profile <name> --headless "<prompt>"
- |           v
- |  +=======================================================+
- |  |    Ephemeral Docker Compose Instance                   |
- |  |    (COMPOSE_PROJECT_NAME=claude-hdls-<timestamp>)      |
- |  |                                                        |
- |  |  +----------+     +-----------+                        |
- |  |  | claude   |<--->| validator |                        |
- |  |  | -p mode  |     |           |                        |
- |  |  | -T exec  |     |           |                        |
- |  |  +----+-----+     +-----------+                        |
- |  |       |                                                |
- |  |  +----------+                                          |
- |  |  |  proxy   |----> api.anthropic.com                   |
- |  |  +----------+                                          |
- |  +=======================================================+
- |           |
- |           | JSON result (stdout capture)
- |           v
- |  +----------------------------+
- |  | report-writer              |  Parse JSON, format markdown,
- |  | (Bash: jq + git)           |  git commit+push to docs repo
- |  +----------------------------+
-```
-
-## New vs Modified Components
-
-### Component Inventory
-
-| Component | Status | Location | Runtime |
-|-----------|--------|----------|---------|
-| webhook-listener | **NEW** | `listener/server.js` | Node.js (host process, systemd) |
-| profile-system | **NEW** | `~/.claude-secure/profiles/<name>/` | Config files (no runtime) |
-| event-handler | **NEW** | `listener/handlers/dispatch.sh` | Bash |
-| report-writer | **NEW** | `listener/report.sh` | Bash + jq + git |
-| bin/claude-secure | **MODIFIED** | `bin/claude-secure` | Bash (add ~80 lines) |
-| docker-compose.yml | **UNCHANGED** | `docker-compose.yml` | Already parameterized |
-| proxy | **UNCHANGED** | `proxy/` | Node.js stdlib |
-| validator | **UNCHANGED** | `validator/` | Python stdlib |
-| pre-tool-use.sh | **UNCHANGED** | `claude/hooks/` | Bash |
-
-### What Does NOT Change (and Why)
-
-| Component | Why Unchanged |
-|-----------|---------------|
-| `docker-compose.yml` | Already fully parameterized via env vars (WHITELIST_PATH, SECRETS_FILE, WORKSPACE_PATH, LOG_DIR, LOG_PREFIX). Profiles produce the same env vars instances do. |
-| `proxy/proxy.js` | Redacts based on whitelist.json content. Does not know or care whether the session is interactive or headless. |
-| `validator/validator.py` | Validates call-IDs from hooks. Works identically regardless of Claude's session type. |
-| `claude/hooks/pre-tool-use.sh` | Reads whitelist, registers with validator. Works in both interactive and `-p` mode since hooks fire on tool use regardless. |
-| `claude/Dockerfile` | Claude Code CLI already installed. `-p` flag is a runtime argument, not a build-time concern. |
-
-## Detailed Component Designs
-
-### 1. Webhook Listener
-
-**Location:** `listener/server.js`
-**Runtime:** Node.js `http` + `crypto` (stdlib only, matching project's zero-dependency pattern)
-**Deployment:** systemd user service
-
-**Why Node.js over Bash:** HMAC-SHA256 signature validation for GitHub webhooks requires `crypto.createHmac`. Pure Bash would need `openssl dgst` piped through `xxd` which is fragile and hard to get right. Node.js `crypto` is reliable, fast, and already available (required for Claude Code).
-
-**Why host-side, not containerized:** The listener must orchestrate Docker Compose instances (start, exec, stop). Running it inside Docker would require Docker-in-Docker or socket mounting, adding complexity and security risk. It also needs host-level access to profile configs and the docs repo for git push.
-
-**Responsibility:**
-1. Listen on configurable port (default 9876)
-2. Validate GitHub webhook HMAC signature
-3. Parse event type from `X-GitHub-Event` header
-4. Parse action from payload
-5. Route to event handler as subprocess
-6. Enforce concurrency limit (default: 2 simultaneous headless runs)
-
-**Key design: No framework needed.** The listener handles one route (`POST /webhook`) with HMAC validation. This is ~60 lines with `http.createServer`, matching the proxy's zero-dependency approach.
-
-```javascript
-// Sketch of core logic (not production code)
-const http = require('http');
-const crypto = require('crypto');
-const { execFile } = require('child_process');
-
-http.createServer((req, res) => {
-  // Validate HMAC
-  const sig = req.headers['x-hub-signature-256'];
-  const body = Buffer.concat(chunks);
-  const expected = 'sha256=' + crypto.createHmac('sha256', SECRET).update(body).digest('hex');
-  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
-    return res.writeHead(401).end();
-  }
-  // Dispatch
-  const event = req.headers['x-github-event'];
-  const payload = JSON.parse(body);
-  execFile('./handlers/dispatch.sh', [event, payload.action], {
-    env: { ...process.env, PAYLOAD_FILE: tmpFile }
-  });
-  res.writeHead(202).end('accepted');
-}).listen(PORT);
-```
-
-### 2. Profile System
-
-**Location:** `~/.claude-secure/profiles/<service-name>/`
-
-**How profiles map to existing config files:**
-
-Profiles contain exactly what instance directories contain today, plus headless-specific additions. The key insight: profiles and instances produce identical Docker Compose environment variables, so docker-compose.yml needs zero changes.
-
-```
-~/.claude-secure/profiles/
-  my-api-service/
-    whitelist.json        # Same format as instance whitelist.json
-    .env                  # Same format: auth token + service secrets
-    config.sh             # WORKSPACE_PATH + new headless vars:
-                          #   DOCS_REPO_PATH="/path/to/docs-repo"
-                          #   MAX_TURNS=50
-                          #   MAX_BUDGET_USD=2.00
-                          #   ALLOWED_TOOLS="Bash,Read,Write,Edit,Glob,Grep"
-                          #   MODEL=sonnet
-    prompt-templates/
-      issue.md            # Template: "Analyze {{ISSUE_TITLE}}..."
-      push.md             # Template: "Review changes in {{COMMITS}}..."
-      ci-failure.md       # Template: "Diagnose CI failure: {{LOG_URL}}..."
-```
-
-**Profile-to-Docker-Compose mapping:**
-
-| Profile File | Docker Compose Variable | Mount Point |
-|-------------|------------------------|-------------|
-| `whitelist.json` | `WHITELIST_PATH=~/.claude-secure/profiles/X/whitelist.json` | `/etc/claude-secure/whitelist.json:ro` |
-| `.env` | `SECRETS_FILE=~/.claude-secure/profiles/X/.env` | `env_file` directive |
-| `config.sh` (WORKSPACE_PATH) | `WORKSPACE_PATH=/path/to/repo` | `/workspace` bind mount |
-
-**Profile vs Instance coexistence:** Profiles live in `~/.claude-secure/profiles/`, instances in `~/.claude-secure/instances/`. They do not interfere. The CLI flag `--profile <name>` loads from profiles instead of instances. This avoids breaking existing interactive workflows.
-
-**Profile-to-repo lookup:** A config file maps repository names to profiles:
-```json
-// ~/.claude-secure/profiles/repo-map.json
-{
-  "myorg/my-api": "my-api-service",
-  "myorg/my-frontend": "my-frontend",
-  "myorg/*": "default-profile"
-}
-```
-
-### 3. Headless CLI Path (bin/claude-secure modification)
-
-The existing CLI wrapper needs a new code path triggered by `--headless` and `--profile` flags.
-
-**Current interactive execution (line 342-348):**
-```bash
-mkdir -p "$LOG_DIR"
-chmod 777 "$LOG_DIR"
-cleanup_containers
-docker compose up -d
-docker compose exec -it claude claude --dangerously-skip-permissions
-```
-
-**New headless execution path:**
-```bash
-headless)
-  if [ -z "$HEADLESS_PROMPT" ]; then
-    echo "ERROR: --headless requires a prompt argument" >&2; exit 1
-  fi
-
-  # Generate ephemeral instance name
-  INSTANCE="hdls-$(date +%s)-$(head -c4 /dev/urandom | xxd -p)"
-  export COMPOSE_PROJECT_NAME="claude-${INSTANCE}"
-
-  mkdir -p "$LOG_DIR"
-  chmod 777 "$LOG_DIR"
-
-  # Start services
-  docker compose up -d
-
-  # Wait for proxy to be reachable
-  docker compose exec -T claude sh -c \
-    'for i in $(seq 1 30); do curl -sf http://proxy:8080/ >/dev/null 2>&1 && break; sleep 1; done'
-
-  # Run Claude headless (capture output to temp file)
-  RESULT_FILE=$(mktemp)
-  EXIT_CODE=0
-  docker compose exec -T claude claude -p "$HEADLESS_PROMPT" \
-    --output-format json \
-    --allowedTools "${ALLOWED_TOOLS:-Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch}" \
-    --max-turns "${MAX_TURNS:-50}" \
-    --max-budget-usd "${MAX_BUDGET_USD:-2.00}" \
-    --dangerously-skip-permissions \
-    --bare \
-    --no-session-persistence \
-    > "$RESULT_FILE" 2>"${RESULT_FILE}.err" || EXIT_CODE=$?
-
-  # Teardown
-  docker compose down --remove-orphans 2>/dev/null
-  docker volume rm "${COMPOSE_PROJECT_NAME}_validator-db" 2>/dev/null || true
-
-  # Output result
-  cat "$RESULT_FILE"
-  rm -f "$RESULT_FILE" "${RESULT_FILE}.err"
-  exit $EXIT_CODE
-  ;;
-```
-
-**Critical flags explained:**
-
-| Flag | Why Required |
-|------|-------------|
-| `-T` on `docker compose exec` | No TTY in headless/systemd context. Without this, Docker fails with "input device is not a TTY". The current interactive path uses `-it` which MUST NOT be used headless. |
-| `-p "prompt"` | Core non-interactive mode. Runs prompt and exits. |
-| `--output-format json` | Returns structured JSON with `result`, `total_cost_usd`, `duration_ms`, `num_turns`, `session_id`, `is_error`. Essential for report generation and cost tracking. |
-| `--allowedTools` | Security: restrict which tools headless Claude can use. Some profiles (review-only) may exclude Bash entirely. |
-| `--max-turns N` | Prevents runaway sessions. Default 50 is generous for most webhook tasks. |
-| `--max-budget-usd N` | Hard cost cap per invocation. Prevents accidental spending on a stuck agent. |
-| `--dangerously-skip-permissions` | Required for non-interactive mode -- no human to approve tool calls. This is safe because claude-secure's hook still enforces domain whitelisting. |
-| `--bare` | Skips auto-discovery of hooks, skills, MCP, CLAUDE.md from the filesystem. Faster startup, deterministic behavior. Note: claude-secure's hooks are mounted at a different path and configured via settings.json, so they still fire. |
-| `--no-session-persistence` | Ephemeral container -- no point persisting sessions to disk. |
-
-**Security note on --dangerously-skip-permissions + --allowedTools:**
-Using `--dangerously-skip-permissions` alone would be reckless outside claude-secure. But inside the Docker container, all four security layers are active: network isolation prevents direct internet access, the hook validates every tool call against the whitelist, the proxy redacts secrets, and the validator enforces iptables rules. Adding `--allowedTools` provides defense-in-depth by restricting WHICH tools Claude can invoke, while the hook restricts WHERE those tools can connect.
-
-### 4. Event Handler
-
-**Location:** `listener/handlers/dispatch.sh`
-
-**Event-to-action mapping:**
-
-| GitHub Event | Action Filter | Profile Source | Prompt Template |
-|-------------|---------------|----------------|-----------------|
-| `issues` | `opened`, `labeled` (label=claude) | `repo.full_name` lookup | `prompt-templates/issue.md` |
-| `push` | ref=`refs/heads/main` | `repo.full_name` lookup | `prompt-templates/push.md` |
-| `check_suite` | `completed` + conclusion=`failure` | `repo.full_name` lookup | `prompt-templates/ci-failure.md` |
-
-**Template substitution:** Prompt templates use shell-style variables that `envsubst` replaces from webhook payload fields:
-
-```markdown
-# prompt-templates/issue.md
-You are analyzing a GitHub issue for the ${REPO_NAME} project.
-
-## Issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}
-
-${ISSUE_BODY}
-
-## Task
-1. Read the codebase to understand the relevant code
-2. Analyze the issue and propose an approach
-3. Write a detailed analysis report
-```
-
-### 5. Report Writer
-
-**Location:** `listener/report.sh`
-
-**Input:** JSON output from `claude -p --output-format json`
-
-**Output JSON structure (from official docs, HIGH confidence):**
-```json
-{
-  "type": "result",
-  "subtype": "success",
-  "result": "The full text response from Claude",
-  "total_cost_usd": 0.42,
-  "is_error": false,
-  "duration_ms": 45000,
-  "num_turns": 12,
-  "session_id": "abc-123"
-}
-```
-
-**Report format:**
-```markdown
-# [Event Type]: [Event Title]
-
-**Date:** 2026-04-11T14:30:00Z
-**Repository:** myorg/my-api
-**Event:** issues.opened #42
-**Cost:** $0.42 | **Turns:** 12 | **Duration:** 45s
+1. **pf enforcement MUST move to the host.** The validator container's `iptables` strategy does not translate cleanly to Docker Desktop on macOS. iptables inside Docker Desktop runs *inside the LinuxKit VM*, not on macOS, and attempting to manipulate iptables with `NET_ADMIN` in that VM has a documented history of crashing Docker Desktop's network stack (v4.39+ also adds its own iptables rules that complicate the picture). Host-side `pfctl` with a dedicated anchor is the supported, safe path. The validator service still exists, but on macOS it becomes an **out-of-container** process that drives host pf anchors instead of container iptables.
+2. **Installer detects via `uname -s` + `/proc/version`**, in that order: `Darwin` -> macOS; `Linux` + `microsoft` in `/proc/version` -> WSL2; `Linux` otherwise -> native Linux. Each branch has its own dependency preflight.
+3. **launchd plists live in `/Library/LaunchDaemons/` for the webhook listener and the pf-anchor loader**, loaded with `launchctl bootstrap system/…` and removed with `launchctl bootout system/…`. The plists are root-owned 0644; the webhook listener script is root-owned and references instance paths the same way the systemd unit does today.
+4. **Build order is: platform abstraction -> Docker Desktop compose compat -> host pf validator -> launchd listener -> tests.** pf enforcement is the highest-risk phase and gates everything downstream because it changes where the validator lives.
 
 ---
 
-[Claude's response text from result field]
+## 1. Existing Architecture Recap (what we're porting)
 
----
-*Generated by claude-secure headless agent*
+```
++------------------------------------------------------+
+|                  Linux / WSL2 host                   |
+|                                                      |
+|  systemd: claude-secure-webhook.service              |
+|     |  (HMAC verify, dispatch to claude-secure spawn)|
+|     v                                                |
+|  docker compose (per profile/instance)               |
+|  +------------------+  +-------------------+         |
+|  |  claude          |  |  validator        |         |
+|  |  (ubuntu 22.04)  |<-+  (python:alpine)  |         |
+|  |  hook -> POST    |  |  network_mode:    |         |
+|  |  /register       |  |  service:claude   |         |
+|  |                  |  |  iptables OUTPUT  |         |
+|  +--------+---------+  +-------------------+         |
+|           |                                          |
+|           | ANTHROPIC_BASE_URL=proxy:8080            |
+|           v                                          |
+|  +------------------+                                |
+|  |  proxy (node 22) |  external network              |
+|  +---------+--------+  -> api.anthropic.com          |
+|            |                                         |
+|            +-- internal network (no egress)          |
++------------------------------------------------------+
 ```
 
-**Commit to docs repo:**
+Key facts that constrain the port:
+- `validator` shares a **network namespace** with `claude` (`network_mode: service:claude`). Its iptables OUTPUT rules apply directly to claude's egress.
+- Hook runs inside `claude`, registers call-IDs via HTTP on the shared loopback, and then performs the allowed network call.
+- `proxy` is on both internal (for `claude`) and external (for `api.anthropic.com`) networks.
+- Webhook listener runs on the **host**, not in a container, because it must bind a real TCP port visible to GitHub (via tunnel/port forward) and spawn `docker compose exec`.
+- Installer is Bash, root-owns `/etc/claude-secure/…`, and currently branches on `/proc/version` for WSL2 quirks.
+
+## 2. Question 1: Can the validator still use pf from inside a Docker Desktop container?
+
+**Answer: No. Move enforcement to the macOS host with `pfctl` anchors.** Container-side iptables is both unsafe and semantically wrong on Docker Desktop.
+
+### 2a. Why container-side enforcement breaks on macOS (HIGH confidence)
+
+Docker Desktop on macOS is not "Docker on macOS". It is a LinuxKit VM running on macOS's Virtualization.framework (or HyperKit on older versions). Every container runs in that single VM. This creates three independent problems for the current iptables strategy:
+
+1. **iptables inside the container still touches the VM kernel.** Any rule the validator adds applies inside the Docker Desktop VM. That's not macOS, it's a shared Linux environment whose network stack is already owned by Docker Desktop. Docker Desktop v4.39+ installs its own iptables rules in the VM to broker host<->container traffic, and there is a well-documented class of bugs where user-added iptables rules in privileged containers break Docker Desktop's entire network path until the VM is restarted. The failure mode is not "the rule doesn't take effect" — it is "Docker Desktop stops responding to `docker ps`" ([Medium writeup: Docker Desktop crash on macOS / iptables](https://medium.com/@chinmayshringi4/docker-bug-docker-desktop-crash-on-macos-understanding-the-host-network-iptables-bug-3d3fc2884149), [docker/for-mac #6297](https://github.com/docker/for-mac/issues/6297), [docker/for-mac #2489](https://github.com/docker/for-mac/issues/2489)).
+2. **`pfctl` is not usable from inside the container at all.** pf is a BSD/Darwin construct. The Docker Desktop VM is Linux; there is no pf in the container. So "just swap iptables for pfctl in the validator container" is not an option — the binary and kernel machinery don't exist where the container lives.
+3. **Even if iptables *did* work safely, it would not buy security.** Because all container traffic is NATed out of the VM through vpnkit, from macOS's point of view every outbound packet appears as a connection originated by the Docker Desktop helper process. That's the surface that macOS pf can see. So the host is where meaningful enforcement happens, and iptables in the VM can at best filter before vpnkit, inside an environment Docker Desktop considers its own ([Docker: How Docker Desktop Networking Works Under the Hood](https://www.docker.com/blog/how-docker-desktop-networking-works-under-the-hood/), [moby/vpnkit](https://github.com/moby/vpnkit)).
+
+### 2b. The host-side enforcement model
+
+New topology on macOS:
+
+```
++-----------------------------------------------------------+
+|                       macOS host                          |
+|                                                           |
+|  launchd: com.claude-secure.webhook.plist                 |
+|  launchd: com.claude-secure.validator.plist  <-- NEW      |
+|     |                                                     |
+|     v                                                     |
+|  validator.py (Python 3.11, stdlib)                       |
+|     - HTTP server on 127.0.0.1:<port>                     |
+|     - SQLite call-ID store (WAL)                          |
+|     - Drives pfctl anchor "claude-secure/<instance>"      |
+|                                                           |
+|  pf anchor "claude-secure/<instance>"                     |
+|    block drop out quick proto { tcp udp } from any        |
+|      to any port { 80 443 } user claude-secure            |
+|    pass  out quick proto tcp to <allowed_ips>             |
+|      port 443 user claude-secure                          |
+|                                                           |
+|  +--- Docker Desktop VM -------------------------------+  |
+|  |  docker compose (same as Linux minus validator svc)|  |
+|  |  +-------------+    +--------+                     |  |
+|  |  |  claude     |--->|  proxy |---> vpnkit -> host  |  |
+|  |  |  (hook:     |    +--------+     (all egress here)| |
+|  |  |   POST to   |                                   |  |
+|  |  |   host.docker.internal:<validator-port>)        |  |
+|  |  +-------------+                                   |  |
+|  +----------------------------------------------------+  |
++-----------------------------------------------------------+
+```
+
+How it enforces (HIGH confidence on pf anchor semantics, MEDIUM on the exact user/uid-based rule shape):
+
+- At install time, `pfctl -a claude-secure -f <base-anchor>` loads a stub anchor that default-blocks egress from a dedicated uid or, alternatively, from the single loopback port the host-side proxy listens on.
+- The validator updates the anchor **dynamically** by piping new rules into the anchor: `echo "<new rule>" | pfctl -a claude-secure/<instance> -f -`. This is the documented pattern for dynamic ruleset manipulation ([OpenBSD PF Anchors](https://www.openbsd.org/faq/pf/anchors.html), [Neil Sabol: pf on macOS](https://blog.neilsabol.site/post/quickly-easily-adding-pf-packet-filter-firewall-rules-macos-osx/), [ss64 pfctl](https://ss64.com/mac/pfctl.html)).
+- Because all container egress appears to macOS as Docker Desktop helper traffic, you cannot distinguish claude-secure traffic by container IP on the host. You must either (a) make the **proxy** a host process bound to a specific uid and filter by uid in pf, or (b) bind the proxy inside the VM but route *all* Claude egress through a single known-port tunnel on macOS and filter that port. Option (a) is simpler and matches pf's uid-based filtering (`user <uid>`), which is available in macOS pf via Darwin's pf port.
+- `-f -` replaces the anchor contents wholesale, so the validator tracks the live set of allowed call-IDs in memory/SQLite and re-materializes the full anchor whenever a call is registered or expires. This is the same "rewrite, not patch" pattern used by typical pfctl automation.
+
+Trade-off this forces into the roadmap: **the proxy probably has to move to the host** on macOS (or at minimum, you need a dedicated host-side egress process the container tunnels through). That's a non-trivial change from the Linux topology where the proxy lives in the same docker-compose project. This is the single biggest architectural delta and the roadmap must make it explicit.
+
+Alternative considered and rejected: running validator + iptables in a privileged container via `--cap-add NET_ADMIN --network host`. Rejected because (1) `network host` on Docker Desktop shares the *VM* network, not macOS, so the rules do not see macOS traffic; (2) this is the exact configuration documented to crash Docker Desktop ([docker/for-mac #6297](https://github.com/docker/for-mac/issues/6297)); (3) it gives false confidence — the filtering happens at a layer macOS cannot actually observe.
+
+### 2c. What this means for existing components
+
+| Component | Linux/WSL2 today | macOS port | Change type |
+|-----------|------------------|------------|-------------|
+| `claude` container | Ubuntu, runs Claude Code + hook | Unchanged | NONE |
+| `proxy` container | Node 22 stdlib, internal+external nets | **Move to host** as a launchd-managed daemon, OR keep in container and add host tunnel | MAJOR |
+| `validator` container | Python stdlib + iptables, `network_mode: service:claude` | **Delete** from docker-compose on macOS; replaced by host validator launchd daemon | MAJOR |
+| Hook (`claude` image) | curls `http://127.0.0.1:<validator>/register` | curls `http://host.docker.internal:<validator>/register` | MINOR (URL only) |
+| docker-compose.yml | 3 services, 2 networks | Profile-gated: on macOS, validator service absent; proxy either absent or tunnel-mode | MODERATE |
+| iptables rules | Added/removed by validator via subprocess | Replaced by pfctl anchor file rewrites | NEW code, same pattern |
+| Whitelist JSON | Shared | Shared | NONE |
+| Secrets redaction logic | Inside proxy | Inside proxy (wherever proxy runs) | NONE if proxy unchanged, MINOR if moved |
+
+Confidence: HIGH that the validator must leave the container. MEDIUM that the proxy must also move, because the alternative (tunneling from the VM to a specific host port and filtering that port) is technically feasible but adds a new component (tunnel) and a new failure mode (what if the container bypasses the tunnel?). The conservative choice is: move both to host; keep only `claude` in Docker Desktop. This also aligns with how the webhook listener already runs.
+
+## 3. Question 2: Platform detection in the installer
+
+**Answer: a three-way branch at the top of every entry point, with preflight functions per platform.**
+
+### 3a. The detection function (HIGH confidence)
+
 ```bash
-DOCS_REPO_PATH="$HOME/docs-repo"  # from profile config.sh
-REPORT_DIR="$DOCS_REPO_PATH/reports/$(date +%Y-%m)"
-mkdir -p "$REPORT_DIR"
-# Write report
-echo "$REPORT_CONTENT" > "$REPORT_DIR/${TIMESTAMP}-${EVENT_TYPE}-${EVENT_ID}.md"
-# Commit and push
-cd "$DOCS_REPO_PATH"
-git add .
-git commit -m "report: ${EVENT_TYPE} ${REPO_NAME} #${EVENT_ID}"
-git push origin main
+detect_platform() {
+  local uname_s
+  uname_s="$(uname -s)"
+  case "$uname_s" in
+    Darwin)
+      echo "macos"
+      ;;
+    Linux)
+      if [[ -r /proc/version ]] && grep -qiE 'microsoft|wsl' /proc/version; then
+        echo "wsl2"
+      else
+        echo "linux"
+      fi
+      ;;
+    *)
+      echo "unsupported:$uname_s"
+      return 1
+      ;;
+  esac
+}
 ```
 
-## Data Flow
+Notes and gotchas (MEDIUM confidence on every edge case):
 
-### Complete Webhook-to-Report Flow
+- `uname -s` is the authoritative first switch. `Darwin` is macOS on both Intel and Apple Silicon. Do not use `$OSTYPE` as the primary signal — it's shell-dependent and you already rely on Bash elsewhere, so `uname` is simpler ([safjan.com: bash detect linux/macos](https://safjan.com/bash-determine-if-linux-or-macos/), [megamorf: detect OS in shell](https://megamorf.gitlab.io/2021/05/08/detect-operating-system-in-shell-script/)).
+- WSL1 vs WSL2: both match `microsoft` in `/proc/version`. The installer only needs to care that it's WSL at all (because Docker Desktop on WSL2 behaves like Linux inside the WSL distro, and WSL1 is unsupported by the project). Grepping `microsoft|wsl` catches WSL2 kernel strings like `5.15.167.4-microsoft-standard-WSL2`.
+- Apple Silicon vs Intel: both are `Darwin`. No branch needed for Phase 1 unless a tool (e.g., Homebrew prefix `/opt/homebrew` vs `/usr/local`) differs. Keep a `detect_arch` helper (`uname -m` -> `arm64|x86_64`) for any brew-path decisions.
+- Homebrew bin path: `/opt/homebrew/bin` (Apple Silicon) or `/usr/local/bin` (Intel). The installer must `PATH`-prepend the right one when invoking `brew`, `jq`, `uuidgen`, because the default macOS shell PATH does not include either on a fresh clam-shell.
 
-```
-GitHub
-  |
-  |  POST /webhook (X-GitHub-Event: issues, X-Hub-Signature-256: sha256=...)
-  |
-  v
-webhook-listener (HOST, port 9876)
-  |
-  |  1. Validate HMAC-SHA256 signature
-  |  2. Parse event type + action
-  |  3. Check concurrency limit
-  |  4. Return 202 Accepted (async processing)
-  |
-  v
-dispatch.sh (HOST, subprocess)
-  |
-  |  5. Extract repo name from payload
-  |  6. Look up profile from repo-map.json
-  |  7. Load profile config.sh
-  |  8. Render prompt template with payload data
-  |
-  v
-claude-secure --profile my-api --headless "$PROMPT" (HOST, subprocess)
-  |
-  |  9. Export WHITELIST_PATH, SECRETS_FILE, WORKSPACE_PATH from profile
-  | 10. Generate ephemeral COMPOSE_PROJECT_NAME
-  | 11. docker compose up -d (starts claude, proxy, validator)
-  | 12. docker compose exec -T claude claude -p "$PROMPT" --output-format json ...
-  |
-  v
-DOCKER (claude-internal network)
-  |
-  | 13. Claude processes prompt using allowed tools
-  | 14. Hook validates each tool call (whitelist, call-ID registration)
-  | 15. Proxy redacts secrets in Anthropic API traffic
-  | 16. Validator enforces iptables per registered call-ID
-  | 17. Claude completes task, returns JSON result to stdout
-  |
-  v
-claude-secure (HOST, continues)
-  |
-  | 18. Capture JSON output
-  | 19. docker compose down --remove-orphans
-  | 20. Delete ephemeral instance config
-  |
-  v
-report.sh (HOST, subprocess)
-  |
-  | 21. Parse JSON result with jq
-  | 22. Format markdown report with metadata
-  | 23. Write to docs repo
-  | 24. git commit + git push
-```
+### 3b. Per-platform preflight (HIGH confidence on the tool list)
 
-### Profile Resolution Flow
+| Check | Linux | WSL2 | macOS |
+|-------|-------|------|-------|
+| Docker | `docker --version` | `docker --version` (via Docker Desktop integration or native engine) | `docker --version` from Docker Desktop |
+| Docker Compose | `docker compose version` | same | same |
+| jq | package manager | package manager | `brew install jq` |
+| uuidgen | coreutils | coreutils | macOS ships `uuidgen` in base system |
+| curl | pre-installed | pre-installed | pre-installed |
+| Firewall tool | `iptables` | `iptables` | `pfctl` (pre-installed, but needs `sudo` every time) |
+| Service manager | `systemctl` | `systemctl` (if systemd enabled in WSL2) or fallback | `launchctl` |
+| Webhook listener runtime | Python 3 (systemd unit) | Python 3 | Python 3 (launchd plist) |
 
-```
-Webhook payload { "repository": { "full_name": "myorg/my-api" } }
-    |
-    v
-repo-map.json: "myorg/my-api" -> "my-api-service"
-    |
-    v
-~/.claude-secure/profiles/my-api-service/
-    |
-    +-- whitelist.json    --> WHITELIST_PATH (mounted into proxy + claude)
-    +-- .env              --> SECRETS_FILE (env_file in compose) + sourced for auth
-    +-- config.sh         --> WORKSPACE_PATH, MAX_TURNS, MAX_BUDGET_USD, DOCS_REPO_PATH
-    +-- prompt-templates/
-         +-- issue.md     --> envsubst with ISSUE_TITLE, ISSUE_BODY, etc.
-```
+The installer should gate on each of these per platform and print actionable install instructions on miss (`brew install jq`, `sudo apt install jq`, etc.).
 
-## Architectural Patterns
+### 3c. Where detection is consumed
 
-### Pattern 1: Profile-as-Config (No New Containers)
+Every file-changing script that touches system state needs to dispatch on platform:
 
-**What:** Profiles are purely a config-layer concept. They produce the same environment variables that instances produce today. No new Docker services, no docker-compose.yml changes.
+- `installer.sh` — top-level
+- `uninstaller.sh` — top-level
+- Anything that writes the webhook listener unit (systemd on Linux/WSL2, launchd on macOS)
+- Anything that writes firewall rules (iptables helper on Linux/WSL2, pfctl helper on macOS)
+- Test harness that spins up/tears down test state (must skip pf-specific tests on Linux, etc.)
 
-**When to use:** Always for headless mode.
+Recommendation: put `detect_platform` in a single sourced file (`lib/platform.sh`) and have every script source it. This is also the cleanest mock point for CI — set `CLAUDE_SECURE_PLATFORM_OVERRIDE=macos` and tests can exercise the macOS code path on a Linux runner.
 
-**Trade-offs:**
-- Pro: Reuses entire existing Docker Compose stack exactly as-is
-- Pro: Profile changes are immediate (no rebuild needed)
-- Pro: Testable: use profiles for interactive sessions too (`--profile X` instead of `--instance Y`)
-- Con: Profiles must be set up on the host before webhook events can be processed
+## 4. Question 3: launchd plist location and lifecycle
 
-### Pattern 2: Ephemeral Instance Lifecycle
+**Answer: `/Library/LaunchDaemons/` for system-wide daemons, root-owned 0644 plists, bootstrap/bootout for load/unload.** (HIGH confidence — this is stock macOS daemon practice.)
 
-**What:** Each headless invocation creates a unique COMPOSE_PROJECT_NAME, runs the task, captures output, tears down all containers, and removes ephemeral config. No state persists between runs.
+### 4a. Where plists live
 
-**When to use:** Every webhook-triggered headless run.
+| Scope | Path | Owner | When to use |
+|-------|------|-------|-------------|
+| System-wide daemon (runs as root, persists across logins) | `/Library/LaunchDaemons/com.claude-secure.<name>.plist` | root:wheel 0644 | Webhook listener, validator (if pf requires root), pf anchor loader |
+| Per-user agent (runs only while user is logged in) | `~/Library/LaunchAgents/com.claude-secure.<name>.plist` | user 0644 | Not recommended for claude-secure — webhook must survive logout |
+| System-wide agent | `/Library/LaunchAgents/` | root:wheel | Not needed |
 
-**Trade-offs:**
-- Pro: Clean isolation between runs, no state leakage, no resource accumulation
-- Pro: Different runs can use different profiles with different secrets and whitelists
-- Con: Cold start penalty (~10-15s for docker compose up + service health). Acceptable for webhook tasks.
-- Con: Docker image layers are cached but container creation is not free
+Naming: launchd expects the plist filename to match the `Label` key inside the plist, by convention. Use reverse-DNS labels: `com.claude-secure.webhook`, `com.claude-secure.validator`, `com.claude-secure.pf-anchor`. ([launchd.info](https://launchd.info/), [Apple: Creating Launch Daemons and Agents](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html), [launchd.plist(5)](https://keith.github.io/xcode-man-pages/launchd.plist.5.html))
 
-### Pattern 3: CLI Subprocess, Not SDK
+### 4b. Plist shape (illustrative — validator example)
 
-**What:** The webhook listener spawns `claude-secure` as a subprocess, not via the Claude Agent SDK.
-
-**When to use:** Always for this project.
-
-**Why this is the only correct approach:** Using the Agent SDK (`claude-agent-sdk` package) directly from the host would run Claude on the host, completely bypassing all four security layers (Docker isolation, hooks, proxy redaction, iptables validation). The `-p` flag via `docker compose exec -T` is the correct integration point because Claude runs inside the security boundary.
-
-**Trade-offs:**
-- Pro: All security layers remain active. Identical security guarantees as interactive mode.
-- Pro: No new dependencies (no `claude-agent-sdk` npm/pip package needed on host)
-- Con: Subprocess output parsing via JSON stdout instead of native message objects
-- Con: Error handling is exit-code-based rather than exception-based
-
-### Pattern 4: Host-Side Orchestrator, Container-Side Agent
-
-**What:** The webhook listener runs on the host (systemd), while Claude runs inside Docker containers.
-
-**When to use:** Always -- this is the fundamental security boundary.
-
-**Network boundary visualization:**
-```
-INTERNET <--[port 9876]--> webhook-listener (HOST)
-                                |
-                                | docker compose exec -T (Docker CLI)
-                                v
-                     Docker internal network (ISOLATED)
-                        claude <-> proxy <-> api.anthropic.com (external only)
-                        claude <-> validator (iptables enforcement)
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.claude-secure.validator</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>/usr/local/libexec/claude-secure/validator.py</string>
+    <string>--config</string>
+    <string>/etc/claude-secure/validator.conf</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/var/log/claude-secure/validator.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/claude-secure/validator.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin</string>
+  </dict>
+</dict>
+</plist>
 ```
 
-The webhook listener communicates with Docker only through the Docker CLI. It never connects to any container over a network socket directly.
+The webhook plist is structurally identical, just different `ProgramArguments`, `Label`, and log paths.
 
-## Anti-Patterns
+### 4c. Install lifecycle
 
-### Anti-Pattern 1: Running Claude Agent SDK Directly on Host
+**Install (root):**
 
-**What people do:** Import `claude-agent-sdk` in the webhook listener and call `query()` directly.
-**Why it's wrong:** Completely bypasses Docker isolation, hooks, proxy redaction, and iptables validation. Claude runs on the host with full network access. Secrets are sent to Anthropic unredacted.
-**Do this instead:** Always use `docker compose exec -T claude claude -p ...` to keep Claude inside the security boundary.
+```bash
+install -o root -g wheel -m 0644 \
+  "$STAGING/com.claude-secure.webhook.plist" \
+  /Library/LaunchDaemons/com.claude-secure.webhook.plist
 
-### Anti-Pattern 2: Persistent Headless Containers
+launchctl bootstrap system \
+  /Library/LaunchDaemons/com.claude-secure.webhook.plist
 
-**What people do:** Keep Docker Compose containers running between webhook events for faster response.
-**Why it's wrong:** State leakage between tasks (workspace files, SQLite entries, env contamination). Different events may need different profiles.
-**Do this instead:** Ephemeral instances. The ~10-15s startup cost is acceptable for webhook tasks that take 30-300 seconds anyway.
-
-### Anti-Pattern 3: Webhook Listener Inside Docker
-
-**What people do:** Add the listener as a Docker Compose service.
-**Why it's wrong:** The listener needs to orchestrate Docker Compose (start/exec/stop other instances). Docker-in-Docker or socket mounting adds complexity and attack surface. The listener also needs host access to profile configs and docs repos.
-**Do this instead:** Run the listener as a systemd user service on the host.
-
-### Anti-Pattern 4: Using -it Flags for Headless Exec
-
-**What people do:** Copy the interactive `docker compose exec -it claude claude ...` pattern for headless.
-**Why it's wrong:** `-it` allocates a TTY and interactive stdin. In systemd/background context, there is no TTY, causing "input device is not a TTY" errors.
-**Do this instead:** Use `docker compose exec -T` (no TTY, no stdin). This is critical and easy to miss.
-
-### Anti-Pattern 5: --dangerously-skip-permissions Without --allowedTools
-
-**What people do:** Use `--dangerously-skip-permissions` and rely solely on claude-secure's hook for security.
-**Why it's wrong:** While the hook enforces domain whitelisting, defense-in-depth requires also restricting which tools are available. Some headless tasks (review, analysis) should not have Bash access at all.
-**Do this instead:** Always pair with explicit `--allowedTools` per profile. Read-only tasks use `"Read,Glob,Grep"`. Full tasks use `"Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch"`.
-
-## Recommended Project Structure (v2.0 additions)
-
-```
-claude-secure/
-  (existing -- unchanged)
-  bin/claude-secure              # MODIFIED: add --profile, --headless
-  docker-compose.yml             # UNCHANGED
-  proxy/                         # UNCHANGED
-  validator/                     # UNCHANGED
-  claude/                        # UNCHANGED
-  config/                        # UNCHANGED
-  tests/                         # UNCHANGED (add new test scripts)
-  install.sh                     # MINOR: optionally install systemd service
-
-  (new)
-  listener/
-    server.js                    # Webhook HTTP server (Node.js stdlib)
-    handlers/
-      dispatch.sh                # Event routing + profile lookup
-    report.sh                    # JSON parse + report format + git push
-    systemd/
-      claude-webhook.service     # systemd user unit file
-    config.example.json          # Example: port, webhook secret, concurrency
-
-  profiles/
-    example-service/             # Example profile (shipped in repo)
-      whitelist.json
-      env.example                # Example .env (no real secrets)
-      config.sh
-      prompt-templates/
-        issue.md
-        push.md
-        ci-failure.md
-    repo-map.example.json        # Example repo-to-profile mapping
+launchctl enable system/com.claude-secure.webhook
+launchctl kickstart -k system/com.claude-secure.webhook
 ```
 
-## Suggested Build Order
+**Uninstall (root):**
 
-Based on dependency analysis, build bottom-up:
+```bash
+launchctl bootout system/com.claude-secure.webhook || true
+rm -f /Library/LaunchDaemons/com.claude-secure.webhook.plist
+```
 
-| Order | Component | Depends On | Can Test With |
-|-------|-----------|------------|---------------|
-| 1 | Profile system | Nothing | Use profiles for interactive sessions |
-| 2 | Headless CLI path | Profiles | `claude-secure --profile test --headless "echo hello"` |
-| 3 | Report writer | Headless CLI output | Captured JSON from step 2 |
-| 4 | Webhook listener | Nothing (independent) | `curl -X POST` with test payloads |
-| 5 | Event handlers + templates | Profiles + listener | Webhook -> profile -> prompt (dry run) |
-| 6 | Integration + lifecycle | All above | End-to-end: webhook -> headless -> report |
+**Status:**
 
-**Rationale:** Profiles first because everything else depends on them. Headless CLI second because it is the core integration point and can be tested manually. Listener can be developed in parallel with steps 2-3 since it is independent until integration. Report writer is simple (jq + git) but depends on knowing the JSON output format from step 2.
+```bash
+launchctl print system/com.claude-secure.webhook
+```
+
+Notes (HIGH confidence):
+- `bootstrap`/`bootout` is the modern replacement for `load`/`unload`. `load` and `unload` still exist but are deprecated and behave unpredictably across macOS versions. Use bootstrap/bootout unconditionally ([ss64: launchctl](https://ss64.com/mac/launchctl.html)).
+- `kickstart -k` force-starts (and restarts if running) the job. Useful in the installer to avoid requiring a reboot to verify install.
+- `launchctl enable` persists the enabled state across reboots independently of bootstrap. Include it so an uninstall-reinstall cycle doesn't leave the job disabled.
+- `|| true` on bootout is intentional — bootout errors if the service isn't loaded, and uninstall must be idempotent.
+- System keychain / `sudo`: bootstrap on the `system` domain requires root. The installer already expects root for `/etc/claude-secure`, so this is not a new requirement.
+
+### 4d. pf anchor persistence across reboots
+
+macOS does **not** automatically re-apply custom pf rules at boot. The installer must create a third launchd plist (`com.claude-secure.pf-loader.plist`) that runs `pfctl -e -f /etc/claude-secure/pf.conf` at `RunAtLoad` with `KeepAlive=false` (one-shot). This plist loads the *base* anchor; the validator daemon populates sub-anchor content at runtime.
+
+Alternative: ship the rule as an addition to `/etc/pf.conf`. Rejected because editing /etc/pf.conf is invasive, conflicts with other tools that manage pf, and is harder to cleanly uninstall. An anchor + one-shot loader plist is the idiomatic pattern ([Neil Sabol: pf on macOS](https://blog.neilsabol.site/post/quickly-easily-adding-pf-packet-filter-firewall-rules-macos-osx/), [Murus OS X PF Manual](https://murusfirewall.com/Documentation/OS%20X%20PF%20Manual.pdf)).
+
+## 5. Question 4: Build order for the macOS phases
+
+The dependency graph is driven by the enforcement relocation. Do not start on launchd until the host-side validator exists; do not start on the host-side validator until the platform abstraction exists; do not ship until integration tests mock the macOS path.
+
+### 5a. Dependency chain
+
+```
+Phase A (foundation)           Phase B (Docker Desktop compat)     Phase C (enforcement)
++-------------------------+    +--------------------------+        +--------------------------+
+| Platform detection      |--->| docker-compose.yml       |------->| Host-side validator      |
+| lib/platform.sh         |    | profile-gated services   |        | (Python, pfctl driver)   |
+| installer branch stubs  |    | hook URL fix             |        | pf anchor base + helper  |
+| preflight per platform  |    | host.docker.internal     |        | Proxy relocation (maybe) |
++-------------------------+    +--------------------------+        +------------+-------------+
+                                                                                |
+                                                                                v
+Phase D (launchd lifecycle)                                        Phase E (tests & hardening)
++--------------------------+                                       +--------------------------+
+| webhook plist install    |  <--- depends on C for validator      | macOS CI path            |
+| validator plist install  |       plist shape                     | mock platform detection  |
+| pf-loader plist install  |                                       | pf anchor teardown check |
+| uninstaller bootout      |                                       | Docker Desktop smoke test|
++--------------------------+                                       +--------------------------+
+```
+
+### 5b. Recommended phase order
+
+1. **Phase A — Platform abstraction (foundation).** `lib/platform.sh`, preflight per platform, installer/uninstaller branch scaffolding, no behavior change on Linux/WSL2. Add a `CLAUDE_SECURE_PLATFORM_OVERRIDE` env var for CI mocking. Low risk, unblocks everything else.
+2. **Phase B — Docker Desktop compose compat.** Verify that the current `claude` container boots under Docker Desktop, fix any Linux-isms (kernel capabilities the image assumes, volume-mount UID gotchas). Add compose profile flag to omit the `validator` service on macOS. Change hook's registration URL from `127.0.0.1` to an abstracted host (env var set per platform; on macOS this becomes `host.docker.internal`, on Linux it stays `127.0.0.1`). This phase is validated by "claude container boots on macOS and can call the proxy, even without enforcement".
+3. **Phase C — Host-side validator + pf anchors.** The big rock. Port the Python validator to run as a host process. Write the pfctl anchor driver (rewrite-the-whole-anchor pattern). Decide and implement whether the proxy also moves to host (strong recommendation: yes). Smoke-test that call-IDs can be registered and pf anchor updates reflect them. This phase has the highest research-debt and may need its own spike before the roadmap finalizes — specifically: can we use `user <uid>` filtering in macOS pf, or does the proxy need to bind a dedicated port we filter by instead? (pf on OpenBSD supports `user`, macOS pf is a Darwin port and the feature set is close but not identical — needs verification during Phase C.)
+4. **Phase D — launchd lifecycle.** Now that there are daemons to manage (webhook, validator, pf loader), write the plists, bootstrap/bootout in installer/uninstaller, logging paths, idempotency. Low-risk mechanical work **only because** Phase C defined what's being managed.
+5. **Phase E — Tests and hardening.** Mock platform detection so Linux CI runs the macOS code paths where possible. Real Docker Desktop smoke test on an actual macOS runner (GitHub Actions has `macos-14` / `macos-15` runners with Docker Desktop pre-installable, but cold-start times are a cost — budget for it). Verify pf anchor cleanup on uninstall and on instance removal. Verify the "Docker Desktop crash" failure mode is not reachable — no iptables code path is executed on macOS.
+
+### 5c. Explicit gating rules
+
+- Phase B must not start until Phase A's platform detection ships, or you'll litter the compose changes with duplicated `if [[ "$OSTYPE" == darwin* ]]` checks.
+- Phase C **gates** Phase D. There is no point in writing a validator launchd plist for a validator that doesn't exist yet.
+- Phase D gates Phase E for the lifecycle tests (you can't test uninstall until install exists), but Phase E's mock-based code-path tests can start in parallel with D.
+- The proxy-relocation decision (host vs container+tunnel) happens in Phase C and is the biggest open risk. If the roadmap needs a spike task, this is where it goes.
+
+## 6. Anti-patterns — things that will look tempting and are wrong
+
+1. **`--network host` + `--cap-add NET_ADMIN` in validator on Docker Desktop.** Documented Docker Desktop crash trigger. Do not use ([docker/for-mac #6297](https://github.com/docker/for-mac/issues/6297)).
+2. **Editing `/etc/pf.conf` directly.** Breaks uninstall cleanliness and collides with other tools. Use anchors.
+3. **Filtering container traffic by container IP on the macOS host.** vpnkit NATs everything; from macOS's perspective, all containers look like one process. Filter by uid or by a single known outbound port ([Docker Desktop networking blog](https://www.docker.com/blog/how-docker-desktop-networking-works-under-the-hood/)).
+4. **Using `launchctl load`/`unload`** instead of `bootstrap`/`bootout`. Deprecated, inconsistent across macOS versions.
+5. **Assuming `uname -s == Linux` implies native Linux.** WSL2 matches this. Check `/proc/version` for `microsoft|wsl`.
+6. **Putting the installer's sudo prompts in the middle of work.** Front-load all root-requiring steps (pf anchor install, plist install, /Library/LaunchDaemons writes) behind a single `sudo -v` at the start of the installer, so the user sees one password prompt, not five.
+7. **Hardcoding `/usr/local/bin` for Homebrew on Apple Silicon.** Use `$(brew --prefix)` or detect `arch`.
+
+## 7. Open questions for the roadmap / future research
+
+1. **Can macOS pf filter by `user <uid>`, or must we filter by port?** OpenBSD supports `user`; Darwin's pf is a fork with drift. Needs verification with a 5-minute `pfctl -nf` test on a real macOS box during Phase C. If `user` doesn't work, the plan becomes "bind proxy to a fixed port and filter by port". Both are workable; picking one affects the pf anchor template.
+2. **Does the proxy also move to the host?** Leaning yes. Alternative is a host-side tunnel process, which adds another moving part. Roadmap should either commit to "proxy as launchd daemon on macOS" or spike both in Phase C.
+3. **Docker Desktop `internal: true` network DNS behavior.** There is a known bug ([docker/for-mac #7262](https://github.com/docker/for-mac/issues/7262)) where DNS resolution can fail on internal bridge networks on Docker Desktop. Needs a quick smoke test during Phase B — the current `claude` container may need `dns:` entries in its compose config on macOS.
+4. **GitHub Actions macOS runner cost and reliability for Phase E.** Budget tokens-per-CI-run before committing to a real macOS integration test in CI.
+5. **Homebrew-installed `coreutils` collision.** macOS's base `uuidgen`, `curl`, `jq` (if installed) work fine, but some users alias GNU versions via `coreutils` brew package. Installer preflight should not assume GNU semantics (e.g., `sed -i` differs between BSD and GNU).
+
+## 8. Component change matrix — what the roadmap must schedule
+
+| Component | Verdict | Phase |
+|-----------|---------|-------|
+| `lib/platform.sh` (new) | NEW | A |
+| `installer.sh` platform branches | MODIFY | A |
+| `uninstaller.sh` platform branches | MODIFY | A |
+| `docker-compose.yml` profile gates | MODIFY | B |
+| `claude` Dockerfile | UNCHANGED (verify only) | B |
+| Hook registration URL | MODIFY (parameterize) | B |
+| `validator.py` — container runner | DELETE on macOS path | C |
+| `validator.py` — host runner | NEW (based on existing code) | C |
+| pf anchor driver module | NEW | C |
+| `/etc/claude-secure/pf.conf` base anchor | NEW | C |
+| `proxy` location (container -> host?) | MAYBE MOVE | C |
+| `com.claude-secure.webhook.plist` | NEW | D |
+| `com.claude-secure.validator.plist` | NEW | D |
+| `com.claude-secure.pf-loader.plist` | NEW | D |
+| `launchctl bootstrap/bootout` helpers | NEW | D |
+| systemd unit (Linux/WSL2) | UNCHANGED | — |
+| iptables helper (Linux/WSL2) | UNCHANGED | — |
+| Integration test harness | MODIFY (platform mock + macOS path) | E |
+| GitHub Actions macOS job | NEW (optional) | E |
+
+## 9. Confidence assessment
+
+| Area | Level | Notes |
+|------|-------|-------|
+| iptables-in-container is unsafe on Docker Desktop | HIGH | Multiple docker/for-mac issues, vendor blog, independent writeups all agree |
+| pfctl anchors are the right mechanism | HIGH | Standard pattern, documented in Apple's own tooling |
+| Host-side validator is required | HIGH | Follows directly from the above two |
+| Proxy must also move to host | MEDIUM | Technically optional; strongly recommended to avoid tunnel complexity |
+| `uname -s` + `/proc/version` detection | HIGH | Well-established bash pattern |
+| launchd `bootstrap`/`bootout` lifecycle | HIGH | Apple-documented, stable since macOS 10.10 |
+| `user <uid>` filtering works in macOS pf | MEDIUM | OpenBSD supports it; Darwin port needs verification |
+| Docker Desktop `internal: true` DNS works reliably | MEDIUM | Known bug exists but has workarounds |
+| GitHub Actions macOS runner is viable for E2E | MEDIUM | Possible but slow; may prefer local manual testing for v3.0 |
 
 ## Sources
 
-- [Claude Code headless documentation](https://code.claude.com/docs/en/headless) -- HIGH confidence, official Anthropic docs. Confirms `-p`, `--output-format json`, `--bare`, `--allowedTools`, `--max-turns`, `--max-budget-usd`, `--no-session-persistence` flags.
-- [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference) -- HIGH confidence, official. Complete flag inventory including `--dangerously-skip-permissions`, `--append-system-prompt`, `--permission-mode`.
-- [Claude Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview) -- HIGH confidence, official. Confirms SDK is for direct programmatic use (NOT appropriate for claude-secure's architecture where Docker isolation is required).
-- [adnanh/webhook](https://github.com/adnanh/webhook) -- Reference for webhook server + systemd integration patterns.
-- Existing claude-secure codebase (`docker-compose.yml`, `bin/claude-secure`, `pre-tool-use.sh`, `install.sh`) -- HIGH confidence, primary source for integration point analysis.
-
----
-*Architecture research for: claude-secure v2.0 headless agent mode*
-*Researched: 2026-04-11*
+- [Medium: Docker Desktop Crash on macOS: Host Network & iptables Bug](https://medium.com/@chinmayshringi4/docker-bug-docker-desktop-crash-on-macos-understanding-the-host-network-iptables-bug-3d3fc2884149)
+- [docker/for-mac #6297 — iptables doesn't work on Intel CentOS 7 container](https://github.com/docker/for-mac/issues/6297)
+- [docker/for-mac #2489 — No longer able to manage TCP packet flow in DockerForMac VM](https://github.com/docker/for-mac/issues/2489)
+- [docker/for-mac #7262 — Internet DNS resolution no longer works in internal bridge network](https://github.com/docker/for-mac/issues/7262)
+- [Docker Docs: iptables and firewall integration](https://docs.docker.com/engine/network/firewall-iptables/)
+- [Docker Docs: Packet filtering and firewalls](https://docs.docker.com/engine/network/packet-filtering-firewalls/)
+- [Docker Blog: How Docker Desktop Networking Works Under the Hood](https://www.docker.com/blog/how-docker-desktop-networking-works-under-the-hood/)
+- [moby/vpnkit](https://github.com/moby/vpnkit)
+- [OpenBSD PF: Anchors](https://www.openbsd.org/faq/pf/anchors.html)
+- [Neil Sabol: Quick and easy pf firewall rules on macOS](https://blog.neilsabol.site/post/quickly-easily-adding-pf-packet-filter-firewall-rules-macos-osx/)
+- [ss64: pfctl command reference](https://ss64.com/mac/pfctl.html)
+- [Murus: OS X PF Manual (PDF)](https://murusfirewall.com/Documentation/OS%20X%20PF%20Manual.pdf)
+- [launchd.info tutorial](https://launchd.info/)
+- [Apple: Creating Launch Daemons and Agents](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html)
+- [launchd.plist(5) man page (Keith Smiley mirror)](https://keith.github.io/xcode-man-pages/launchd.plist.5.html)
+- [ss64: launchctl command reference](https://ss64.com/mac/launchctl.html)
+- [safjan.com: bash detect Linux or macOS](https://safjan.com/bash-determine-if-linux-or-macos/)
+- [megamorf: Detect operating system in shell script](https://megamorf.gitlab.io/2021/05/08/detect-operating-system-in-shell-script/)

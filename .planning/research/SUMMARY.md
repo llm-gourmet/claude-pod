@@ -1,202 +1,208 @@
 # Project Research Summary
 
-**Project:** claude-secure v2.0
-**Domain:** Webhook-triggered ephemeral agent mode for a security-isolated Claude Code wrapper
-**Researched:** 2026-04-11
-**Confidence:** HIGH
+**Project:** claude-secure v3.0 — macOS Support
+**Domain:** Cross-platform port of a Docker-based network-isolation security wrapper from Linux/WSL2 to macOS
+**Researched:** 2026-04-13
+**Confidence:** MEDIUM-HIGH
 
 ## Executive Summary
 
-claude-secure v2.0 adds headless/ephemeral agent execution to an existing four-layer security wrapper. The v1.0 foundation (Docker Compose network isolation, Node.js buffered proxy with secret redaction, Python+iptables call validator, PreToolUse hook scripts) remains entirely unchanged — v2.0 layers event-driven orchestration on top without modifying any existing component. The core insight from research is that Claude Code's `-p` (non-interactive) flag run via `docker compose exec -T` is the only correct integration point: running Claude on the host via the Agent SDK would bypass all four security layers entirely, defeating the product's purpose.
+claude-secure v3.0 adds macOS as a supported platform. The existing four-layer security model (Docker isolation, PreToolUse hook validation, Node.js buffered proxy with secret redaction, Python+iptables call validator) does not need to be redesigned in principle — Docker Desktop provides a full Linux kernel VM where container-level iptables continues to work. However, two macOS-specific differences force meaningful changes: (1) the host service manager is launchd, not systemd, requiring new plist-based daemon definitions; and (2) macOS ships a badly outdated Bash 3.2 and BSD coreutils rather than GNU, which will silently break the approximately 2,300 lines of existing host-side Bash scripts.
 
-The recommended architecture introduces three host-level components: a Node.js webhook listener (systemd user service) that receives GitHub events, a Bash event dispatcher that maps events to profiles and prompt templates, and a report writer that formats and pushes results to a documentation repo. A new profile system — a config-layer concept producing identical Docker Compose environment variables to the existing instance system — provides per-service isolation of secrets, whitelists, and workspaces. No new container types are needed; ephemeral runs use the existing compose stack with a unique COMPOSE_PROJECT_NAME per event and are torn down after each run.
+The biggest unresolved question for this milestone is where network enforcement lives on macOS. The three research agents disagree in a way that cannot be resolved without testing on real hardware. The Stack agent argues iptables still works inside Docker Desktop's LinuxKit VM and pf is not needed. The Architecture agent argues iptables-in-container has a documented history of crashing Docker Desktop's network stack on macOS and enforcement must move to a host-side pfctl anchor driven by a launchd daemon. The Features agent, drawing from those same docker/for-mac issues, concludes the proxy chokepoint is the safer fallback. This conflict is the single biggest open question for v3.0 and must be resolved empirically before Phase C begins. Both possible outcomes (iptables-in-VM stays, or host-side pf replaces it) have clear implementation paths documented in the research.
 
-The primary risks fall into two categories: security correctness and operational reliability. On security: profile misconfiguration that routes an event to the wrong profile can leak secrets to Anthropic via the proxy (wrong whitelist = wrong redaction set), and using the `--bare` flag disables the very security hooks that make headless mode safe. On reliability: without a concurrency cap and container reaper, event bursts can exhaust host resources within minutes. Both risk categories must be addressed before any real webhook connections are established.
+The macOS port is well-understood from an infrastructure standpoint: launchd plists, Homebrew dependency bootstrap, platform detection via uname -s, and the enforcement decision gate the rest. The macOS-specific pitfalls are numerous but well-documented and skew toward silent failure — the most dangerous mode for a security tool. Every macOS implementation phase must include active self-verification tests that fail loudly, not just pass/fail integration tests at the HTTP layer.
+
+---
 
 ## Key Findings
 
-### Recommended Stack
+### Stack Additions for macOS
 
-v2.0 adds zero new container technologies and zero npm/pip dependencies. The webhook listener uses Node.js stdlib (`http`, `crypto`, `child_process`) consistent with the project's zero-dependency security philosophy. The profile system is a JSON/Bash config layer. Report delivery uses `git` CLI already present in the claude container. Process supervision uses systemd user services, already available on all target platforms.
+The v1.0/v2.0 stack (Docker Compose, Node.js 22 stdlib proxy, Python 3.11 stdlib validator, SQLite, Bash hooks) carries forward unchanged inside containers. The macOS delta is entirely on the host side and in one container image change.
 
-**Core technologies (new for v2.0):**
-- Claude Code CLI `-p` flag: headless execution — already in claude container, no new deps; `--output-format json` returns structured result/cost/turns metadata
-- Node.js stdlib `http`+`crypto`: webhook listener — HMAC-SHA256 signature validation and event dispatch in ~60 lines
-- Node.js `child_process.spawn`: Docker orchestration — non-blocking container lifecycle management from the host
-- Bash + `jq`: event handlers and report writer — consistent with existing hook scripts; extracts JSON fields and performs git operations
-- systemd user service: listener process supervision — `Restart=always`, `WatchdogSec=30`, journal logging; already on all target platforms
-- JSON profile files: per-service config — same format as existing `whitelist.json`; no new config schema needed
+**Core technologies added or changed:**
 
-**Explicitly rejected (with rationale):**
-- `@anthropic-ai/claude-agent-sdk`: runs Claude on host, bypasses all security layers, requires API key not OAuth
-- `--bare` flag: documented as "recommended for scripted calls" but disables claude-secure's PreToolUse hooks
-- `@octokit/webhooks` npm package: 5-line `crypto.createHmac` replaces it with no supply-chain risk
-- `--dangerously-skip-permissions` without `--allowedTools`: maximum blast radius from prompt injection
+- **launchd (LaunchDaemon)**: Replaces systemd for all persistent host daemons. Webhook listener and (if pf path is chosen) the validator daemon both become `/Library/LaunchDaemons/` plists loaded via `launchctl bootstrap system`. Use `bootstrap`/`bootout` exclusively — `load`/`unload` are deprecated and unreliable across macOS versions. `KeepAlive` must be a dict (`Crashed=true, SuccessfulExit=false`) with `ThrottleInterval=10` to prevent crash-loop runaway. Plists must be root:wheel 0644 or launchd refuses to load them.
+- **Homebrew bash 5.x**: macOS ships `/bin/bash` 3.2.57 (2007, pre-GPLv3). `declare -A`, `mapfile`, `${var,,}`, `${var^^}`, `|&`, `&>>` all fail or silently misbehave on 3.2. Scripts must self-exec via a PATH-shimmed brew bash 5+ if `BASH_VERSINFO[0] < 4`. Shebang must be `#\!/usr/bin/env bash`, never `#\!/bin/bash`.
+- **Homebrew coreutils (GNU)**: BSD `date`, `sed -i`, `readlink -f`, `stat`, `xargs -r` all have incompatible flags that silently corrupt behavior. Recommended pattern: prepend `$(brew --prefix)/opt/coreutils/libexec/gnubin` to PATH at the top of every host script. Do not scatter `gdate`/`gsed` calls — the PATH-shim approach keeps scripts auditable.
+- **Validator base image switch**: `python:3.11-alpine` < 3.19 ships `iptables-legacy`; Docker Desktop Mac's LinuxKit VM uses the nftables backend. Mismatch causes `can't initialize iptables table 'filter': iptables who?` errors. Switch to `python:3.11-slim-bookworm` (Debian, uses iptables-nft by default). Alternatively pin Alpine 3.19+ with explicit nft-backed iptables install, but the 80MB size delta for slim-bookworm is acceptable for a dev tool.
+- **`host.docker.internal` for hook registration**: On Linux, hooks register call-IDs with the validator via `127.0.0.1:<port>`. On macOS, containers must use `host.docker.internal`. Parameterize as `VALIDATOR_HOST` env var set per platform.
+- **Docker Desktop floor**: Require version 4.44.3+ for CVE-2025-9074 fix. Add to `doctor` preflight.
+- **pf (packet filter) — deferred**: pf is deliberately not added unless the Phase C empirical test confirms iptables-in-container is unreliable on macOS. If added, it uses a dedicated anchor at `/Library/Application Support/claude-secure/` loaded by a one-shot launchd plist. Never modify `/etc/pf.conf` directly (SIP risk, macOS update overwrites it).
 
-### Expected Features
+### Features: macOS Delta
 
-**Must have (table stakes — v2.0 launch):**
-- Profile system (isolated whitelist, .env, workspace, prompt templates per service) — foundation for all other features
-- Webhook listener as systemd service with HMAC-SHA256 signature verification — entry point and first security gate
-- Event routing for three event types (issues.opened, push to main, workflow_run failure) — the stated scope
-- Headless spawn with `-p`, `--output-format json`, `--allowedTools`, `--max-turns`, `--max-budget-usd` — core execution
-- Ephemeral lifecycle (fresh workspace clone per run, `docker compose up`, execute, `docker compose down -v`) — clean state isolation
-- Result reporting (JSON parse -> markdown format -> git commit+push to docs repo) — the output channel
-- Execution audit logging with event metadata (webhook ID, event type, repo, cost, duration) — accountability
+The FEATURES.md file covers v2.0 headless agent mode research; the macOS-specific feature breakdown was provided as inline data:
 
-**Should have (add after validation — v2.x):**
-- Cost tracking aggregation per profile and event type
-- Webhook replay / manual trigger (`claude-secure headless replay <event-id>`)
-- Prompt templates with `envsubst` variable substitution (replaces inline prompt construction)
-- Health monitoring with systemd watchdog and failure alerting
-- `claude-secure headless status` CLI command
+| Status | Count | Representative Examples |
+|--------|-------|------------------------|
+| IDENTICAL — no change on macOS | 17 | Proxy secret redaction, hook validation logic, Docker Compose internal networking, Claude Code invocation |
+| GUARD — platform branch required | 5 | Installer, uninstaller, webhook listener setup, firewall rule management, CLI PATH handling |
+| PORT — macOS-specific implementation | 3 | Service manager (launchd), network enforcement (iptables vs pf — open decision), host dependency bootstrap (Homebrew) |
+| REDESIGN — non-trivial architectural change | 2 | Validator placement (container vs host-side daemon), proxy placement (container vs host-side if pf path chosen) |
+| NOT AVAILABLE | 1 | `flock`-based file locking; substitute with `mkdir` atomicity |
 
-**Defer (v3+):**
-- Multi-event chaining (output of one feeds next)
-- PR creation for code changes (requires careful security review)
-- Notification integrations (Slack/Discord on failure)
-- Web UI dashboard (contradicts solo-dev deployment model)
-- Auto-merge of agent-created PRs (industry consensus: never)
+**Must-have (table stakes) for macOS launch:**
+- All four security layers must be active and verifiable on Docker Desktop 4.44.3+
+- Webhook listener must run on boot without a logged-in user (LaunchDaemon, not LaunchAgent)
+- Installer must complete successfully on both Apple Silicon and Intel Macs
+- Uninstaller must cleanly remove all daemons, anchors, and config without requiring manual steps
 
-**Competitive positioning:** The differentiator is not webhook handling (commodity) but running headless Claude Code with the same four-layer security isolation as interactive mode. No other solution (GitHub Actions, Copilot, Buildkite) redacts secrets from LLM context in headless/CI scenarios.
+**Defer to v3.1:**
+- Host-level pf enforcement of the webhook listener's own egress (new feature, not a port)
+- Colima/OrbStack support as tested alternatives (document as "should work" only)
+- Automated macOS E2E CI if GitHub Actions macOS runner cost is prohibitive
 
 ### Architecture Approach
 
-v2.0 is a host-level orchestration layer around an unchanged Docker stack. The fundamental security boundary — Claude runs inside Docker, orchestration runs on the host via Docker CLI — is never crossed. The webhook listener receives events, validates signatures, dispatches to Bash handlers, which invoke `claude-secure --profile <name> --headless "<prompt>"`. That wrapper exports profile env vars, generates a unique COMPOSE_PROJECT_NAME, runs `docker compose up -d`, executes `docker compose exec -T claude claude -p ...`, captures JSON output, runs `docker compose down -v`, and passes results to the report writer.
+The macOS architecture diverges from Linux/WSL2 at exactly one point: the enforcement layer and the service manager. Everything inside Docker Compose (proxy, claude container, hook scripts) is unchanged. Everything above the Docker boundary (systemd to launchd, iptables-container-managed vs pf-host-managed) is platform-specific.
 
-**Major components (new for v2.0):**
-1. **Webhook Listener** (`listener/server.js`) — Node.js stdlib HTTP server; validates HMAC-SHA256; enforces concurrency limit (default 2-3); returns 202 immediately, dispatches asynchronously
-2. **Profile System** (`~/.claude-secure/profiles/<name>/`) — config directory containing `whitelist.json`, `.env`, `config.sh` (WORKSPACE_PATH, MAX_TURNS, MAX_BUDGET_USD, DOCS_REPO_PATH), `prompt-templates/`; plus `repo-map.json` for repo-to-profile routing
-3. **Event Dispatcher** (`listener/handlers/dispatch.sh`) — maps GitHub event type + action to profile + prompt template; performs `envsubst` substitution; invokes headless CLI path
-4. **Headless CLI Path** (addition to `bin/claude-secure`) — ~80 new lines; generates ephemeral COMPOSE_PROJECT_NAME; runs `docker compose exec -T` with correct flags; handles all exit scenarios
-5. **Report Writer** (`listener/report.sh`) — parses `--output-format json` output with `jq`; formats markdown with metadata; git commit+push to docs repo from outside Claude container
+**The open architectural decision — must be resolved empirically in Phase C:**
 
-**Build order (from dependency analysis):** Profile system -> Headless CLI path -> Report writer -> Webhook listener (can develop in parallel with steps 2-3) -> Event handlers -> Integration + lifecycle
+| Option A: iptables stays in container | Option B: enforcement moves to host pf |
+|--------------------------------------|---------------------------------------|
+| Stack agent recommendation | Architecture and Features agent recommendation |
+| Lower implementation cost | Higher implementation cost |
+| Works if crashes are `--network=host`-specific | Required if NET_ADMIN + bridge networking also crashes |
+| Validator stays a container service | Validator becomes a launchd daemon; container removed from compose on macOS |
+| Proxy stays in container | Proxy likely moves to host as a launchd daemon |
+| pf not added | pf anchor at `/Library/Application Support/claude-secure/` |
+| Resolution: boot Docker Desktop, add NET_ADMIN + bridge, run iptables, observe for 30 min | Same test, watching for crashes |
+
+**Major components and macOS disposition:**
+
+1. **`claude` container** — UNCHANGED. Hook registration URL parameterized to `host.docker.internal` on macOS.
+2. **`proxy` container** — UNCHANGED (Option A). Moved to host launchd daemon (Option B, to enable uid-based pf filtering).
+3. **`validator` container** — UNCHANGED (Option A). Deleted from compose on macOS, replaced by host-side launchd daemon driving pfctl anchors (Option B).
+4. **`lib/platform.sh`** — NEW. Single sourced detection function returning `macos`/`wsl2`/`linux`. `CLAUDE_SECURE_PLATFORM_OVERRIDE` env var for CI mocking.
+5. **`com.claude-secure.webhook.plist`** — NEW. LaunchDaemon replacing the Linux systemd webhook unit.
+6. **`com.claude-secure.validator.plist`** — NEW, Option B only.
+7. **`com.claude-secure.pf-loader.plist`** — NEW, Option B only. One-shot RunAtLoad to restore pf anchor after reboot.
+8. **`installer.sh` / `uninstaller.sh`** — MODIFIED. Platform branches for all system-state operations.
 
 ### Critical Pitfalls
 
-1. **Profile misconfiguration leaks secrets across services** — Profile resolution must fail closed: no match = reject event entirely, never fall back to a default profile. Validate at load time that whitelist.json, .env, and workspace are distinct files (different inodes). Root-own profile directories.
+1. **Docker Desktop iptables silent bypass** — Validator starts successfully, NET_ADMIN is granted, but iptables rules silently fail to apply inside the LinuxKit VM, meaning all outbound calls pass through regardless of whitelist. This is the worst possible failure mode: security appears working but is not. Prevention: validator entrypoint must insert a test rule and verify it appears in `iptables -L`, failing loudly if not. Integration tests must assert TCP-level blocking (not just HTTP 403). Use native arm64 images on Apple Silicon — no Rosetta emulation for containers with NET_ADMIN.
 
-2. **Webhook HMAC validation errors** — Validate `X-Hub-Signature-256` against raw body Buffer BEFORE JSON parsing. Use `crypto.timingSafeEqual`. Strip `sha256=` prefix. Store webhook secret separately from profile secrets. Return 401 silently on failure. Handle `ping` event with 200.
+2. **pf zombie anchors on Ventura+** — `pfctl -a claude-secure -F all` flushes rules but leaves the anchor node in memory until reboot. Old blocking rules can linger after uninstall+reinstall in the same session. Prevention: installer detects stale anchors via `pfctl -sr -a claude-secure` and refuses to proceed; uninstaller warns reboot may be required; integration tests run from a fresh boot or VM snapshot.
 
-3. **Orphaned containers from failed spawns** — Every instance needs a unique COMPOSE_PROJECT_NAME (profile+event-id+timestamp). Two-layer cleanup: inline trap handler runs `docker compose down -v` after every run regardless of exit code; systemd timer reaper runs every 5 minutes to force-remove containers with `claude-secure.ephemeral=true` label older than max lifetime. Ship spawn and reaper together — never one without the other.
+3. **Bash 3.2 silent misbehavior** — macOS `/bin/bash` is 3.2.57. `${var,,}` (lowercase expansion) returns the variable unchanged rather than erroring, causing domain matching to fail open — a security bypass that does not produce errors. Prevention: every host script version-checks `BASH_VERSINFO[0]` at entry and self-execs via Homebrew bash 5+ if below 4. CI must include a Bash 3.2 gate job. Audit all 2,300 existing lines for 4.0+ syntax.
 
-4. **`--bare` flag disabling security hooks** — Do NOT use `--bare` in claude-secure. The PreToolUse hooks are the security layer. Accept the 2-3s startup cost. Verify hook log entries exist after every ephemeral run.
+4. **LaunchAgent vs LaunchDaemon** — If the webhook listener plist lands in `~/Library/LaunchAgents/` instead of `/Library/LaunchDaemons/`, the daemon dies at logout and GitHub webhook events are silently dropped. Prevention: always use `/Library/LaunchDaemons/`, root:wheel 0644, `launchctl bootstrap system`. Document explicitly why LaunchDaemon was chosen.
 
-5. **Concurrent event flood exhausting host resources** — Implement semaphore in webhook listener (default max 2-3). Always return 202 before spawning. Set `mem_limit`/`cpus` at service level (not `deploy:` section, which may be silently ignored on some versions). Verify enforcement with `docker stats --no-stream`.
+5. **BSD coreutils silent data corruption** — `sed -i 's/x/y/' file` on macOS creates a backup file named `s/x/y/` and leaves the original unmodified — no error, config updates silently do not apply. `date -d` errors at runtime. Prevention: PATH-shim GNU coreutils from Homebrew via `$(brew --prefix)/opt/coreutils/libexec/gnubin` at the top of every host script. CI must run integration tests on a macOS runner.
 
-6. **Git credential leakage via report repo** — Report push must happen outside the Claude container. Host-side report.sh does git operations using a fine-grained PAT scoped to the report repo only. If the token must enter the container, it must be in profile's `whitelist.json`. Never use classic PATs with `repo` scope.
+6. **SIP blocks `/etc/pf.conf` edits** — Editing `/etc/pf.conf` may succeed on some macOS versions but is silently overwritten by OS updates. Prevention: never modify `/etc/pf.conf`. Use a dedicated anchor file at a non-SIP path, loaded by a one-shot launchd plist. Verify `csrutil status` remains enabled — SIP disabled is a blocking issue for a security tool.
 
-7. **Prompt injection via event payloads** — Issue titles, commit messages, and CI logs are attacker-controlled. Sanitize and truncate all fields (issue body max 5000 chars). Wrap in clear delimiters. Scope `--allowedTools` narrowly per event type (read-only analysis: `Read,Glob,Grep`; never Bash for issue triage).
+---
 
 ## Implications for Roadmap
 
-### Phase 1: Profile System
-**Rationale:** Everything else depends on correct profile isolation. Profiles must exist and be verified secure before any webhook connection is made. Build order confirmed by both ARCHITECTURE.md and PITFALLS.md independently.
-**Delivers:** Profile directory structure, repo-map.json routing, config.sh schema with headless-specific vars (MAX_TURNS, MAX_BUDGET_USD, DOCS_REPO_PATH, ALLOWED_TOOLS), validation logic (fail-closed resolution, inode checks, path sanitization), non-interactive profile creation script.
-**Addresses:** Profile system (P1), concurrent execution safety (via COMPOSE_PROJECT_NAME isolation)
-**Avoids:** Pitfall 1 (profile misconfiguration -> secret cross-contamination)
-**Research flag:** Standard pattern (mirrors existing instance system exactly). Skip `/gsd:research-phase`.
+### The Enforcement Decision Blocks Phase Ordering
 
-### Phase 2: Headless CLI Path
-**Rationale:** Core integration point. All subsequent phases build on the exact invocation flags and output JSON schema. Must be manually testable (`claude-secure --profile test --headless "echo hello"`) before event handlers are built.
-**Delivers:** `--profile` and `--headless` flags in `bin/claude-secure`; `docker compose exec -T` invocation with correct flags; all exit-code handling (empty result = retry once then fail; max-turns reached = flag incomplete); ephemeral lifecycle (up, execute, `down -v`); resource limits at service level verified by `docker inspect`.
-**Uses:** Claude Code `-p` flag, `--output-format json` schema, `--allowedTools` syntax
-**Implements:** Headless CLI path component
-**Avoids:** Pitfall 3 (orphaned containers), Pitfall 4 (`--bare` flag), resource limits silently ignored
-**Research flag:** Needs validation — known bug #7263 (empty output with large stdin >7000 chars) must be reproduced and worked around. Test `--allowedTools` prefix syntax (`Bash(git *)` with space before `*`).
+The iptables-vs-pf question is not a design preference — it determines whether the validator stays in Docker Compose or moves to a host launchd daemon, which in turn determines whether the proxy moves, how many launchd plists exist, and what the pf anchor lifecycle looks like. Phase D cannot be planned until Phase C commits to an option.
 
-### Phase 3: Webhook Listener
-**Rationale:** Independent of event handlers and report writer — can be developed in parallel with Phase 2. Must be correct before any real webhook is connected. Listener without concurrency control is a resource bomb.
-**Delivers:** `listener/server.js` (Node.js stdlib, single route POST /webhook); HMAC-SHA256 validation on raw body before JSON parsing; `crypto.timingSafeEqual`; `ping` event handling; 202 Accepted before async dispatch; concurrency semaphore (default: 2); `GET /health` endpoint; systemd unit file with `Restart=always`, `WatchdogSec=30`, `MemoryMax=512M`, `User=`; `X-GitHub-Delivery` deduplication log.
-**Addresses:** Webhook listener (P1), GitHub signature verification (P1), concurrent execution safety
-**Avoids:** Pitfall 2 (HMAC validation errors), Pitfall 4 (event flood), Pitfall 9 (listener dies silently)
-**Research flag:** Standard pattern (Node.js crypto HMAC + systemd are well-documented). Skip `/gsd:research-phase`.
+### Suggested Phase Order
 
-### Phase 4: Event Handlers and Prompt Templates
-**Rationale:** Requires both profile system (Phase 1) and headless CLI path (Phase 2) to be working. Webhook listener (Phase 3) can be connected here for first end-to-end test.
-**Delivers:** `listener/handlers/dispatch.sh`; handler scripts for three event types (issues.opened, push to refs/heads/main, check_suite.completed+failure); prompt template files with `envsubst` substitution; payload field sanitization and truncation; per-event-type `--allowedTools` config in profile.
-**Addresses:** Event routing (P1), all three GitHub event types
-**Avoids:** Pitfall 7 (race conditions for same repo), Pitfall 8 (prompt injection)
-**Research flag:** Prompt injection sanitization patterns for LLM context may need research — effective delimiter strategies lack a single authoritative source. Consider `/gsd:research-phase`.
+**Phase A: Platform Abstraction (Foundation)**
+**Rationale:** Every subsequent phase has a platform branch. Without `lib/platform.sh` and the installer skeleton, every file touched later will need duplicate edits. No behavior change on Linux/WSL2.
+**Delivers:** `lib/platform.sh` with `detect_platform()` and `detect_arch()`. `CLAUDE_SECURE_PLATFORM_OVERRIDE` for CI mocking. Installer/uninstaller macOS branches that stub with `die "macOS: not yet implemented"`. Per-platform dependency preflight (Homebrew check, brew install bash/coreutils/jq, Docker Desktop version check). Bash version check + self-exec shim. GNU coreutils PATH shim. `flock` usage audit of existing 2,300 lines.
+**Avoids:** Bash 3.2 silent misbehavior (version check installed here), BSD coreutils silent corruption (PATH shim installed here).
+**Research flag:** Standard patterns, no additional research needed.
 
-### Phase 5: Result Channel (Report Writing)
-**Rationale:** Final link in the chain. Requires structured output from Phase 2 and profile config (DOCS_REPO_PATH) from Phase 1.
-**Delivers:** `listener/report.sh` (jq JSON parsing, markdown formatting with metadata header, per-event unique file path `reports/{profile}/{YYYY-MM}/{timestamp}-{event-type}-{event-id}.md`); git operations outside Claude container using fine-grained PAT; conflict-free write strategy via unique paths; token not present in any ephemeral container environment.
-**Addresses:** Result reporting (P1)
-**Avoids:** Pitfall 5 (git credential leakage), Pitfall 7 (report repo merge conflicts)
-**Research flag:** Standard git operations. Fine-grained PAT scoping is well-documented. Skip `/gsd:research-phase`.
+**Phase B: Docker Desktop Compose Compatibility**
+**Rationale:** Must confirm the `claude` container boots and the existing security layers function under Docker Desktop before investing in enforcement changes. If something is fundamentally broken here, it changes the scope of all later phases.
+**Delivers:** Verified `docker-compose.yml` boots on Docker Desktop. Hook registration URL parameterized (`VALIDATOR_HOST` env var). Validator base image switched to `python:3.11-slim-bookworm`. Compose profile gate so the `validator` service can be conditionally excluded on macOS if Phase C chooses Option B. Smoke test: claude container boots, proxy reachable, hook fires, call-ID registered.
+**Avoids:** Alpine iptables-legacy incompatibility (image switch), `--network=host` anti-pattern (documented prohibition), host-to-container networking pitfall (published ports only, not bridge IP).
+**Research flag:** Needs Docker Desktop smoke test on real macOS hardware to confirm `internal: true` DNS and shared network namespace work correctly. Docker/for-mac #7262 (internal bridge DNS) may require `dns:` workaround.
 
-### Phase 6: Operational Hardening and Integration Testing
-**Rationale:** Security product requires verification that "looks done but isn't" items are actually done. Ten specific checklist items from PITFALLS.md require dedicated integration tests.
-**Delivers:** Container reaper (systemd timer, 5-minute interval, removes containers with `claude-secure.ephemeral=true` label older than max lifetime + corresponding volumes, networks, temp dirs); full integration test suite (end-to-end webhook-to-report, HMAC rejection, concurrent flood, orphan cleanup, resource limit verification, hook log verification per run, git token absence from container env); installer additions for systemd service and profile setup; example profile documentation.
-**Addresses:** Execution audit logging (P1), concurrent execution safety verification
-**Avoids:** All pitfalls via test verification (reaper addresses Pitfall 3; load test verifies Pitfall 4; `docker stats` verifies resource limits)
-**Research flag:** Standard integration testing. Skip `/gsd:research-phase`.
+**Phase C: Enforcement Decision + Implementation (Highest Risk)**
+**Rationale:** This is the open question. Phase C begins with an explicit spike: boot Docker Desktop on macOS, run the validator container with `NET_ADMIN` + bridge network (no `--network=host`), attempt to add and verify iptables OUTPUT rules, observe whether Docker Desktop's network stack remains stable. If stable: take Option A (iptables stays). If rules fail or Docker Desktop crashes: take Option B (host pf).
+**Delivers (Option A):** Validator entrypoint self-test (rule insert + verify, fail loud if absent). Integration test asserting TCP-level block. Native arm64 container images confirmed.
+**Delivers (Option B):** `validator.py` ported as host process with pfctl anchor driver (rewrite-whole-anchor pattern). pf base anchor file at `/Library/Application Support/claude-secure/`. Proxy either moved to host or host-side tunnel established. `docker-compose.yml` on macOS omits validator service. Host validator HTTP server reachable via `host.docker.internal` from containers.
+**Avoids:** iptables silent bypass pitfall, pf zombie anchor pitfall (Option B), SIP pitfall (Option B).
+**Research flag:** REQUIRES empirical verification on macOS hardware before implementation begins. This is the only phase that cannot be fully planned from research alone. Budget 90 minutes for the spike as Phase C task 0.
+
+**Phase D: launchd Lifecycle**
+**Rationale:** Phase C defines which host daemons exist. Phase D writes and installs the plists. Mechanical work with well-documented patterns — safe to execute quickly once Phase C commits to an option.
+**Delivers:** `com.claude-secure.webhook.plist` (LaunchDaemon, always). `com.claude-secure.validator.plist` and `com.claude-secure.pf-loader.plist` (Option B only). Installer: `launchctl bootstrap system`, `launchctl enable system/<label>`, `launchctl kickstart -k`. Uninstaller: `launchctl bootout system/<label>`, plist removal, pf anchor cleanup with reboot warning. Explicit PATH in every plist EnvironmentVariables block.
+**Avoids:** LaunchAgent vs LaunchDaemon pitfall, deprecated `launchctl load` pitfall, PATH-in-daemon pitfall, keychain vs file pitfall (root-readable `/etc/claude-secure/` files only, no System Keychain).
+**Research flag:** Standard patterns, no additional research needed.
+
+**Phase E: Tests and Hardening**
+**Rationale:** macOS failure modes are disproportionately silent. Every feature needs active verification, not just a "did it run" check. This phase closes the CI gap — Linux-only CI is insufficient for a multi-platform tool.
+**Delivers:** Mock-based tests of macOS code paths runnable on Linux CI via `CLAUDE_SECURE_PLATFORM_OVERRIDE=macos`. Negative integration tests asserting TCP-level block on non-whitelisted domains. pf anchor state verification after install and after uninstall (zombie anchor check). Uninstall-reinstall idempotency test. Bash 3.2 compatibility gate CI job. Docker Desktop smoke test on real macOS hardware or macOS GitHub Actions runner.
+**Avoids:** All silent failure pitfalls by enforcing "every macOS code path has an active self-verification test" as a blocking quality gate.
+**Research flag:** GitHub Actions macOS runner cost (`macos-14`/`macos-15`) should be evaluated before committing to automated E2E CI. Consider manual macOS testing for v3.0 with automated tests deferred to v3.1 if cost is prohibitive.
 
 ### Phase Ordering Rationale
 
-- Profile system first because it is a direct dependency of every other phase — no headless spawn, event handler, or report writer can be correctly implemented without the profile contract.
-- Headless CLI path second because it is the core integration point; all subsequent phases build on knowing the exact invocation flags and output JSON schema.
-- Webhook listener third because it is independent of event handlers and can be tested with `curl` payloads before handlers exist.
-- Event handlers fourth because they require both profile system and headless path to be stable.
-- Result channel fifth because it requires known JSON output format (Phase 2) and profile DOCS_REPO_PATH (Phase 1).
-- Hardening last because it can only verify what exists — and the reaper must ship before production use.
+- A before everything: platform detection is load-bearing scaffolding. Without it, every subsequent file needs duplicate edits.
+- B before C: confirms the base case works before investing in the hardest problem. A Docker Desktop incompatibility discovered in B could reframe C's scope.
+- C before D: launchd plists are hollow until the enforcement decision determines which daemons exist.
+- D before E (lifecycle tests): cannot test uninstall until install exists. Mock-based E tests can run in parallel with D.
+- The proxy-relocation decision (Option B only) happens in C and is the highest-risk sub-decision within that phase.
 
 ### Research Flags
 
-Phases likely needing `/gsd:research-phase` during planning:
-- **Phase 4 (Event Handlers):** Prompt injection sanitization patterns for LLM context — effective delimiter strategies are nuanced without a single authoritative source.
+Needs empirical verification before planning commits:
+- **Phase C:** The iptables-vs-pf enforcement question is the only unresolved architectural issue. 90 minutes on macOS hardware resolves it. Do not plan Phase C implementation in detail until the spike result is known.
+- **Phase B:** Docker Desktop `internal: true` DNS has a known bug (docker/for-mac #7262). Needs smoke test during Phase B.
 
-Phases with standard patterns (skip `/gsd:research-phase`):
-- **Phase 1 (Profile System):** Mirrors existing instance system exactly. Config files + Bash + JSON.
-- **Phase 2 (Headless CLI Path):** Official Claude Code docs verified all flags. Prioritize testing bug #7263 workaround at implementation.
-- **Phase 3 (Webhook Listener):** Node.js crypto HMAC + systemd unit files are exceptionally well-documented.
-- **Phase 5 (Result Channel):** Standard git operations + GitHub fine-grained PAT docs are authoritative.
-- **Phase 6 (Hardening):** Integration testing patterns are project-specific; research adds little value.
+Standard patterns, no additional research needed:
+- **Phase A:** `uname -s` detection, Homebrew install, launchd/systemd mapping — all fully documented in STACK.md and ARCHITECTURE.md.
+- **Phase D:** launchd LaunchDaemon patterns are stable since macOS 10.4. All plist keys needed are covered in research.
+- **Phase E:** Testing patterns follow from Phase C decisions.
+
+---
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Official Anthropic docs verified all Claude Code CLI flags. Node.js stdlib APIs stable for years. systemd unit file patterns mature and well-documented. |
-| Features | HIGH | Feature set derived from official Claude Code headless docs, GitHub webhook docs, and competitive analysis of GitHub Actions/Copilot patterns. MVP scope is conservative and validated against existing v1.0 capabilities. |
-| Architecture | HIGH | Validated against existing codebase (docker-compose.yml, bin/claude-secure). All unchanged components verified as unchanged by analyzing responsibilities. Build order validated by two independent research files agreeing. |
-| Pitfalls | HIGH | Sourced from official GitHub docs (HMAC validation), official Claude Code docs (--bare behavior), known bug tracker (issue #7263), Docker docs (deploy.resources.limits), and direct codebase analysis. Ten "looks done but isn't" verification criteria provided. |
+| Stack (launchd, Homebrew, image switch) | HIGH | Stable Apple APIs and Docker documentation. Validator image switch has strong rationale from multiple sources. |
+| Features (macOS delta) | MEDIUM | Based on inline data, not a full FEATURES.md for v3.0. The 17/5/3/2/1 breakdown is directionally correct but not empirically verified per-feature. |
+| Architecture (component topology) | MEDIUM-HIGH | launchd and pf mechanics are HIGH confidence. The enforcement decision itself is MEDIUM until empirical test resolves it. |
+| Pitfalls | HIGH | All major pitfalls are well-sourced (Apple Developer Forums, docker/for-mac issues, official Apple docs). The "silent failure" theme is consistent and actionable. |
 
-**Overall confidence:** HIGH
+**Overall confidence:** MEDIUM-HIGH
 
 ### Gaps to Address
 
-- **Known bug #7263 (empty output with large stdin):** Research documents the bug and workaround (write context to file, use `--append-system-prompt-file`) but does not confirm fix status. Verify at Phase 2 implementation whether the bug affects expected webhook event prompt sizes.
-- **`--allowedTools` prefix match syntax:** Research notes `Bash(git *)` requires a space before `*`. Needs empirical verification during Phase 2 — subtle syntax errors are silent.
-- **Docker Compose `deploy.resources.limits` vs `mem_limit`:** The safe choice (top-level `mem_limit`/`cpus`) is documented but the exact Docker Compose version threshold where `deploy:` syntax works reliably is unclear. Verify with `docker inspect` at Phase 2.
-- **systemd in WSL2:** Requires systemd enabled via `/etc/wsl.conf` (`[boot] systemd=true`). Installer should detect this and configure or provide clear instructions. First-run UX risk.
-- **Report push handoff pattern:** Research recommends keeping git token out of Claude container (host-side report.sh). The exact mechanism for passing report content from container stdout to host-side script needs confirmation at Phase 5 — `--output-format json` stdout capture is the handoff point.
+- **Enforcement architecture open question**: Cannot be resolved by research alone. Must be scheduled as the explicit first task of Phase C. A 90-minute test on macOS hardware resolves it definitively.
+- **`user <uid>` pf filtering on Darwin pf**: macOS pf is forked from OpenBSD 4.6 (2009). Whether `user <uid>` egress filtering is available in the Darwin fork needs a `pfctl -nf` test. If unsupported, enforcement uses port-based filtering instead. Affects pf anchor template design in Option B.
+- **`flock` usage audit**: STACK.md flags `flock` as unavailable on macOS. The existing scripts need to be audited for `flock` usage before Phase A completes. Substitute with `mkdir`-based atomicity.
+- **Bash 4+ syntax audit**: 2,300 lines of existing scripts need scanning for `declare -A`, `mapfile`, `readarray`, `${var,,}`, `${var^^}`, `|&`, `&>>`. Mechanical task, belongs in Phase A.
+- **Docker Desktop `internal: true` DNS**: docker/for-mac #7262 documents DNS failures on internal bridge networks. Needs smoke test in Phase B; may require explicit `dns:` config in docker-compose.yml on macOS.
+
+---
 
 ## Sources
 
-### Primary (HIGH confidence)
-- [Claude Code headless mode docs](https://code.claude.com/docs/en/headless) — `-p`, `--bare`, `--output-format json`, `--max-turns`, `--allowedTools`, `--max-budget-usd`, `--no-session-persistence` flags; output JSON schema
-- [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference) — complete flag inventory
-- [Claude Code permission modes](https://code.claude.com/docs/en/permission-modes) — `--allowedTools` prefix match syntax, `--dangerously-skip-permissions` risks
-- [Claude Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview) — confirmed SDK spawns CLI internally; API key requirement (no OAuth)
-- [GitHub: Validating webhook deliveries](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries) — HMAC-SHA256 validation, raw body requirement, timing-safe comparison
-- [GitHub: Managing personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) — fine-grained vs classic PATs
-- [Docker: Resource constraints](https://docs.docker.com/engine/containers/resource_constraints/) — memory and CPU limits
-- [Docker Compose Deploy Specification](https://docs.docker.com/reference/compose-file/deploy/) — deploy.resources.limits behavior in non-Swarm mode
-- claude-secure v1.0 codebase — docker-compose.yml, bin/claude-secure, pre-tool-use.sh; primary source for integration point analysis
+### Primary (HIGH confidence — official docs or Apple-maintained)
+- Apple Developer Forums thread/745158: pfctl zombie anchors on Ventura+
+- Apple Developer Docs: SIP scope and protected paths
+- launchd.plist(5) man page: RunAtLoad, KeepAlive, EnvironmentVariables keys
+- launchctl man page (ss64): bootstrap/bootout semantics, domain targets
+- docker/for-mac #6297 and #2489: iptables in containers on macOS, LinuxKit VM crashes
+- Docker Blog: How Docker Desktop Networking Works Under the Hood (vpnkit, VM boundary)
+- Docker Docs: Networking on Docker Desktop, Mac permission requirements
 
-### Secondary (MEDIUM confidence)
-- [Anthropic Auto Mode Engineering Blog](https://www.anthropic.com/engineering/claude-code-auto-mode) — headless invocation patterns
-- [GitHub Agentic Workflows Technical Preview](https://github.blog/changelog/2026-02-13-github-agentic-workflows-are-now-in-technical-preview/) — industry patterns for webhook-triggered agents
-- [Claude Code Bug #7263](https://github.com/anthropics/claude-code/issues/7263) — empty output with large stdin (>7000 chars)
-- [adnanh/webhook](https://github.com/adnanh/webhook) — webhook server + systemd integration reference patterns
-- [GitHub: Rate limits for the REST API](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) — secondary rate limits, abuse detection
+### Secondary (MEDIUM confidence — community, multiple sources agree)
+- Neil Sabol: pf on macOS — anchor-based approach, LaunchDaemon pattern
+- launchd.info: LaunchDaemon vs LaunchAgent distinction
+- Medium: Docker Desktop crash on macOS via host network + iptables
+- OpenBSD PF Anchors: dynamic rule rewrite pattern (extrapolated to Darwin pf fork)
+- HackMD: BSD vs GNU vs Busybox utility differences
+- safjan.com and megamorf: bash detect Linux/macOS via uname -s
 
-### Tertiary (LOW confidence)
-- [@octokit/webhooks npm v13.x](https://www.npmjs.com/package/@octokit/webhooks) — version noted from Dec 2025 publish date; referenced only to document rejection rationale
+### Tertiary (LOW confidence — single source or needs empirical validation)
+- Docker Desktop 4.39+ host iptables behavior change: mentioned in one search hit; verify against Docker changelog
+- Whether `user <uid>` filtering works in Darwin pf: needs `pfctl -nf` test on real hardware
+- Exact iptables modules absent from LinuxKit VM: enumerate empirically by running validator on Docker Desktop Mac
 
 ---
-*Research completed: 2026-04-11*
-*Ready for roadmap: yes*
+*Research completed: 2026-04-13*
+*Milestone: v3.0 macOS Support*
+*Ready for roadmap: YES, with Phase C enforcement-decision spike scheduled as first task*
