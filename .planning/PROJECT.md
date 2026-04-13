@@ -39,18 +39,19 @@ No secret ever leaves the isolated environment uncontrolled — every outbound c
 
 ### Active
 
-- [ ] (none — v2.0 Headless Agent Mode milestone complete)
+- [ ] macOS platform support (v3.0)
 
-## Current Milestone: v2.0 Headless Agent Mode
+## Current Milestone: v3.0 macOS Support
 
-**Goal:** Event-driven, ephemeral claude-secure instances triggered via webhooks that autonomously handle tasks and write results to a documentation repo.
+**Goal:** Extend claude-secure to run on macOS with full security parity — pf-based network enforcement, launchd webhook listener, and Docker Desktop compatibility.
 
 **Target features:**
-- Profile system with per-service security context (whitelist, secrets, workspace)
-- Webhook listener as host process receiving GitHub events
-- Event handlers: Issues, Push to Main, CI Failure
-- Headless spawn with automatic teardown
-- Result reports written to dedicated documentation repo
+- Platform detection (Linux/WSL2/macOS) throughout installer and all platform-specific scripts
+- Docker Desktop compatibility — internal network topology works with Docker Desktop's userland networking
+- pf (packet filter) replacing iptables on macOS for network-level call enforcement
+- launchd plist replacing systemd unit for webhook listener on macOS
+- Installer: macOS dependency checking (brew, pfctl, launchctl)
+- Integration tests covering macOS code paths (mockable platform detection for CI)
 
 ### Out of Scope
 
@@ -112,4 +113,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-11 after v2.0 milestone start*
+*Last updated: 2026-04-13 after v3.0 milestone start*

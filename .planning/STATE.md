@@ -1,34 +1,34 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
-milestone_name: Headless Agent Mode
-status: verifying
-stopped_at: "Completed quick-260412-w1y: Update README.md to document v2.0 features"
-last_updated: "2026-04-12T21:12:33.466Z"
-last_activity: 2026-04-12
+milestone: v3.0
+milestone_name: macOS Support
+status: planning
+stopped_at: ""
+last_updated: "2026-04-13T00:00:00.000Z"
+last_activity: 2026-04-13
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 21
-  completed_plans: 21
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-11)
+See: .planning/PROJECT.md (updated 2026-04-13)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** Phase 17 — operational-hardening
+**Current focus:** Defining requirements for v3.0 macOS Support
 
 ## Current Position
 
-Phase: 17
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-04-12
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-13 — Milestone v3.0 started
 
 Progress: [█████████░] 88% (15/17 plans)
 
