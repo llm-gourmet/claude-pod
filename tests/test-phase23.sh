@@ -56,6 +56,7 @@ install_fixture() {
 
 # Helper: source bin/claude-secure in library mode
 source_cs() {
+  export APP_DIR="$PROJECT_DIR"
   export __CLAUDE_SECURE_SOURCE_ONLY=1
   # shellcheck source=/dev/null
   source "$PROJECT_DIR/bin/claude-secure"
@@ -134,10 +135,10 @@ test_docs_vars_exported() {
   install_fixture "profile-23-docs" "docs-bind-vars"
   source_cs
   load_profile_config "docs-bind-vars" 2>/dev/null || return 1
-  [ "$DOCS_REPO"        = "https://github.com/owner/docs-test.git" ] || return 1
-  [ "$DOCS_BRANCH"      = "main" ]                                    || return 1
-  [ "$DOCS_PROJECT_DIR" = "projects/docs-test" ]                      || return 1
-  [ "$DOCS_MODE"        = "report_only" ]                             || return 1
+  [ "${DOCS_REPO:-}"        = "https://github.com/owner/docs-test.git" ] || return 1
+  [ "${DOCS_BRANCH:-}"      = "main" ]                                    || return 1
+  [ "${DOCS_PROJECT_DIR:-}" = "projects/docs-test" ]                      || return 1
+  [ "${DOCS_MODE:-}"        = "report_only" ]                             || return 1
 }
 
 # =============================================================================
@@ -151,9 +152,11 @@ test_projected_env_omits_docs_token() {
   install_fixture "profile-23-docs" "docs-bind-proj"
   source_cs
   load_profile_config "docs-bind-proj" 2>/dev/null || return 1
-  grep -q '^DOCS_REPO_TOKEN=' "$SECRETS_FILE" && return 1   # must be absent
-  grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' "$SECRETS_FILE" || return 1  # must be present
-  grep -q '^GITHUB_TOKEN=' "$SECRETS_FILE" || return 1             # must be present
+  local sf="${SECRETS_FILE:-}"
+  [ -n "$sf" ] || return 1                                        # SECRETS_FILE must be set
+  grep -q '^DOCS_REPO_TOKEN=' "$sf" && return 1                  # must be absent
+  grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' "$sf" || return 1          # must be present
+  grep -q '^GITHUB_TOKEN=' "$sf" || return 1                     # must be present
   return 0
 }
 
@@ -163,7 +166,9 @@ test_projected_env_omits_legacy_token() {
   install_fixture "profile-23-legacy" "legacy-proj"
   source_cs
   load_profile_config "legacy-proj" 2>/dev/null || return 1
-  grep -q '^REPORT_REPO_TOKEN=' "$SECRETS_FILE" && return 1   # must be absent
+  local sf="${SECRETS_FILE:-}"
+  [ -n "$sf" ] || return 1                                        # SECRETS_FILE must be set
+  grep -q '^REPORT_REPO_TOKEN=' "$sf" && return 1                # must be absent
   return 0
 }
 
@@ -183,7 +188,7 @@ test_legacy_report_repo_alias() {
   install_fixture "profile-23-legacy" "legacy-alias"
   source_cs
   load_profile_config "legacy-alias" 2>/dev/null || return 1
-  [ "$DOCS_REPO" = "https://github.com/owner/legacy-test.git" ]
+  [ "${DOCS_REPO:-}" = "https://github.com/owner/legacy-test.git" ]
 }
 
 test_legacy_report_token_alias() {
@@ -191,7 +196,7 @@ test_legacy_report_token_alias() {
   install_fixture "profile-23-legacy" "legacy-token-alias"
   source_cs
   load_profile_config "legacy-token-alias" 2>/dev/null || return 1
-  [ "$DOCS_REPO_TOKEN" = "fake-phase23-legacy-token" ]
+  [ "${DOCS_REPO_TOKEN:-}" = "fake-phase23-legacy-token" ]
 }
 
 test_deprecation_warning_rate_limit() {
@@ -235,6 +240,9 @@ _setup_docs_bare_repo() {
 test_init_docs_creates_layout() {
   # Setup bare repo, point profile at it, run do_profile_init_docs,
   # verify all six layout files exist in the bare repo.
+  # do_profile_init_docs is the Plan 03 addition; until then, NOT IMPLEMENTED.
+  source_cs
+  declare -f do_profile_init_docs >/dev/null 2>&1 || { echo "NOT IMPLEMENTED: do_profile_init_docs" >&2; return 1; }
   local repo_uri
   repo_uri=$(_setup_docs_bare_repo)
   install_fixture "profile-23-docs" "docs-init-layout"
@@ -257,6 +265,9 @@ test_init_docs_creates_layout() {
 
 test_init_docs_single_commit() {
   # After init-docs, clone must have exactly 2 commits (1 seed + 1 init-docs).
+  # do_profile_init_docs is the Plan 03 addition; until then, NOT IMPLEMENTED.
+  source_cs
+  declare -f do_profile_init_docs >/dev/null 2>&1 || { echo "NOT IMPLEMENTED: do_profile_init_docs" >&2; return 1; }
   local repo_uri
   repo_uri=$(_setup_docs_bare_repo)
   install_fixture "profile-23-docs" "docs-init-single"
@@ -277,6 +288,9 @@ test_init_docs_idempotent() {
   # Running do_profile_init_docs twice must:
   #   - Second run exits 0
   #   - No new commit added (total still 2)
+  # do_profile_init_docs is the Plan 03 addition; until then, NOT IMPLEMENTED.
+  source_cs
+  declare -f do_profile_init_docs >/dev/null 2>&1 || { echo "NOT IMPLEMENTED: do_profile_init_docs" >&2; return 1; }
   local repo_uri
   repo_uri=$(_setup_docs_bare_repo)
   install_fixture "profile-23-docs" "docs-init-idem"
@@ -297,6 +311,9 @@ test_init_docs_idempotent() {
 test_init_docs_requires_docs_repo() {
   # A profile with no docs_repo -- do_profile_init_docs must exit NON-zero
   # and stderr must mention docs_repo.
+  # do_profile_init_docs is the Plan 03 addition; until then, NOT IMPLEMENTED.
+  source_cs
+  declare -f do_profile_init_docs >/dev/null 2>&1 || { echo "NOT IMPLEMENTED: do_profile_init_docs" >&2; return 1; }
   # Build an inline profile (profile-e2e lacks whitelist.json).
   local dst="$CONFIG_DIR/profiles/no-docs-init"
   local ws="$TEST_TMPDIR/ws-no-docs-init"
@@ -316,6 +333,9 @@ test_init_docs_requires_docs_repo() {
 
 test_init_docs_pat_scrub_on_error() {
   # DOCS_REPO_TOKEN (a distinctive literal) must NOT appear in stderr on failure.
+  # do_profile_init_docs is the Plan 03 addition; until then, NOT IMPLEMENTED.
+  source_cs
+  declare -f do_profile_init_docs >/dev/null 2>&1 || { echo "NOT IMPLEMENTED: do_profile_init_docs" >&2; return 1; }
   install_fixture "profile-23-docs" "docs-init-scrub"
   local dst="$CONFIG_DIR/profiles/docs-init-scrub"
   local tmp
@@ -324,7 +344,6 @@ test_init_docs_pat_scrub_on_error() {
   jq '.docs_repo = "file:///nonexistent/nowhere.git"' "$dst/profile.json" > "$tmp" && mv "$tmp" "$dst/profile.json"
   # Inject a distinctive fake PAT into .env
   echo "DOCS_REPO_TOKEN=SECRETFAKEPAT-12345" >> "$dst/.env"
-  source_cs
   local stderr_out
   stderr_out=$(do_profile_init_docs "docs-init-scrub" 2>&1 >/dev/null) || true
   # PAT must NOT appear in stderr
