@@ -138,12 +138,90 @@ test_bootstrap_path_macos_with_fake_brew_succeeds() {
 # =========================================================================
 
 test_install_bootstraps_brew_deps() {
-  echo "STUB: implemented in plan 02"
+  local sandbox; sandbox="$(mktemp -d)"
+  local brew_log="$sandbox/brew.log"
+  local fake_prefix="$sandbox/brew"
+  mkdir -p "$fake_prefix/bin" "$fake_prefix/opt/coreutils/libexec/gnubin" "$sandbox/bin"
+  touch "$fake_prefix/bin/bash"; chmod +x "$fake_prefix/bin/bash"
+  touch "$fake_prefix/opt/coreutils/libexec/gnubin/date"; chmod +x "$fake_prefix/opt/coreutils/libexec/gnubin/date"
+
+  cat > "$sandbox/bin/brew" <<STUB
+#!/bin/bash
+printf '%s\n' "\$*" >> "$brew_log"
+case "\$1" in
+  list) exit 1 ;;
+  install) exit 0 ;;
+  --prefix) echo "$fake_prefix"; exit 0 ;;
+esac
+exit 0
+STUB
+  chmod +x "$sandbox/bin/brew"
+
+  cat > "$sandbox/bin/jq" <<'STUB'
+#!/bin/bash
+exit 0
+STUB
+  chmod +x "$sandbox/bin/jq"
+
+  local rc=0 out
+  out="$(
+    export PATH="$sandbox/bin:$PATH"
+    export __INSTALL_SOURCE_ONLY=1
+    export CLAUDE_SECURE_PLATFORM_OVERRIDE=macos
+    source "$REPO_ROOT/install.sh"
+    macos_bootstrap_deps 2>&1
+  )" || rc=$?
+
+  local log_contents=""
+  [ -f "$brew_log" ] && log_contents="$(cat "$brew_log")"
+  rm -rf "$sandbox"
+
+  [ "$rc" = 0 ] || { echo "macos_bootstrap_deps exited $rc; output: $out" >&2; return 1; }
+  echo "$log_contents" | grep -q "install bash" || { echo "brew install bash not invoked. Log: $log_contents" >&2; return 1; }
+  echo "$log_contents" | grep -q "install coreutils" || { echo "brew install coreutils not invoked. Log: $log_contents" >&2; return 1; }
+  echo "$log_contents" | grep -q "install jq" || { echo "brew install jq not invoked. Log: $log_contents" >&2; return 1; }
   return 0
 }
 
 test_install_verifies_post_bootstrap() {
-  echo "STUB: implemented in plan 02"
+  local sandbox; sandbox="$(mktemp -d)"
+  local fake_prefix="$sandbox/brew"
+  # Intentionally CREATE bin/bash but OMIT the gnubin directory — verification must fail
+  mkdir -p "$fake_prefix/bin" "$sandbox/bin"
+  touch "$fake_prefix/bin/bash"; chmod +x "$fake_prefix/bin/bash"
+  # NOTE: $fake_prefix/opt/coreutils/libexec/gnubin deliberately not created
+
+  cat > "$sandbox/bin/brew" <<STUB
+#!/bin/bash
+case "\$1" in
+  list) exit 0 ;;
+  install) exit 0 ;;
+  --prefix) echo "$fake_prefix"; exit 0 ;;
+esac
+exit 0
+STUB
+  chmod +x "$sandbox/bin/brew"
+
+  cat > "$sandbox/bin/jq" <<'STUB'
+#!/bin/bash
+exit 0
+STUB
+  chmod +x "$sandbox/bin/jq"
+
+  local rc=0 out
+  out="$(
+    export PATH="$sandbox/bin:$PATH"
+    export __INSTALL_SOURCE_ONLY=1
+    export CLAUDE_SECURE_PLATFORM_OVERRIDE=macos
+    source "$REPO_ROOT/install.sh"
+    macos_bootstrap_deps 2>&1
+  )" || rc=$?
+
+  rm -rf "$sandbox"
+
+  [ "$rc" -ne 0 ] || { echo "expected macos_bootstrap_deps to fail when gnubin missing; output: $out" >&2; return 1; }
+  echo "$out" | grep -q "Post-bootstrap verification FAILED" || { echo "missing 'Post-bootstrap verification FAILED' message; output: $out" >&2; return 1; }
+  echo "$out" | grep -q "coreutils" || { echo "missing coreutils mention in failure list; output: $out" >&2; return 1; }
   return 0
 }
 
