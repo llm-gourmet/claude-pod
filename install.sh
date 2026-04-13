@@ -2,6 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/platform.sh
+source "$SCRIPT_DIR/lib/platform.sh"
 _invoking_user="${SUDO_USER:-$USER}"
 _invoking_home="$(getent passwd "$_invoking_user" | cut -d: -f6)"
 if [ -z "$_invoking_home" ]; then
@@ -23,6 +25,57 @@ log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
+# PLAT-03 + PLAT-04: detect Homebrew and bootstrap GNU bash + coreutils + jq.
+# Called from check_dependencies() on macOS BEFORE the apt-style command audit.
+macos_bootstrap_deps() {
+  # PLAT-03: detect brew, do NOT auto-install
+  if ! command -v brew >/dev/null 2>&1; then
+    log_error "Homebrew is required on macOS but is not installed."
+    log_error ""
+    log_error "Install Homebrew by running:"
+    log_error "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    log_error ""
+    log_error "Then re-run this installer."
+    exit 1
+  fi
+
+  # PLAT-04: install bash, coreutils, jq via brew BEFORE any other macOS step
+  log_info "Bootstrapping GNU tools via Homebrew..."
+  local formula
+  for formula in bash coreutils jq; do
+    if brew list --formula "$formula" >/dev/null 2>&1; then
+      log_info "  $formula already installed"
+    else
+      log_info "  installing $formula..."
+      if ! brew install "$formula"; then
+        log_error "brew install $formula failed"
+        exit 1
+      fi
+    fi
+  done
+
+  # Post-bootstrap verification — fail loudly if anything is still missing
+  local brew_prefix
+  brew_prefix="$(brew --prefix 2>/dev/null)"
+  if [ -z "$brew_prefix" ]; then
+    log_error "brew --prefix returned empty after install"
+    exit 1
+  fi
+  local missing=()
+  [ -x "$brew_prefix/bin/bash" ] || missing+=("bash (run: brew install bash)")
+  [ -d "$brew_prefix/opt/coreutils/libexec/gnubin" ] || missing+=("coreutils (run: brew install coreutils)")
+  command -v jq >/dev/null 2>&1 || missing+=("jq (run: brew install jq)")
+  if [ "${#missing[@]}" -gt 0 ]; then
+    log_error "Post-bootstrap verification FAILED. Still missing:"
+    for m in "${missing[@]}"; do
+      log_error "  - $m"
+    done
+    exit 1
+  fi
+
+  log_info "macOS bootstrap complete (brew_prefix=$brew_prefix)"
+}
+
 parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -34,6 +87,13 @@ parse_args() {
 
 check_dependencies() {
   local missing=()
+
+  # PLAT-03 + PLAT-04: on macOS, install brew deps BEFORE auditing apt-style packages
+  local _plat
+  _plat="$(detect_platform)"
+  if [ "$_plat" = "macos" ]; then
+    macos_bootstrap_deps
+  fi
 
   command -v docker >/dev/null 2>&1 || missing+=("docker (https://docs.docker.com/engine/install/)")
   command -v curl >/dev/null 2>&1 || missing+=("curl (apt install curl)")
@@ -62,7 +122,7 @@ check_dependencies() {
   log_info "All dependencies satisfied"
 }
 
-detect_platform() {
+legacy_detect_platform() {
   if grep -qi microsoft /proc/version 2>/dev/null; then
     PLATFORM="wsl2"
     log_info "Detected WSL2 environment"
@@ -459,7 +519,7 @@ main() {
   echo ""
 
   check_dependencies
-  detect_platform
+  legacy_detect_platform
   check_existing
   setup_directories
   setup_auth
@@ -476,6 +536,6 @@ main() {
   log_info "Run 'claude-secure --profile default' to start."
 }
 
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]] && [ "${__INSTALL_SOURCE_ONLY:-0}" != "1" ]; then
   main "$@"
 fi
