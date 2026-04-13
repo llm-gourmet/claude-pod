@@ -125,7 +125,10 @@
   2. `DOCS_REPO_TOKEN` is present in the host profile `.env` but provably absent from the Claude container environment — a container-side `env` dump contains neither the value nor the variable name
   3. Profiles that still carry legacy `report_repo` / `REPORT_REPO_TOKEN` from Phase 16 continue to resolve correctly: the new fields act as aliases, the old fields are honored if present, and a one-line deprecation warning is logged on first use
   4. Running `claude-secure profile init-docs --profile <name>` in an empty doc repo creates `projects/<slug>/` containing `todo.md`, `architecture.md`, `vision.md`, `ideas.md`, `specs/`, and `reports/INDEX.md` as a single atomic commit, and is idempotent when the layout already exists
-**Plans**: TBD
+**Plans**: 3 plans
+  - [ ] 23-01-PLAN.md — Wave 0: tests/test-phase23.sh scaffolding + fixture profiles (BIND-01/02/03, DOCS-01 RED stubs)
+  - [ ] 23-02-PLAN.md — Wave 1: validate_docs_binding + host-only .env projection + legacy alias resolver (BIND-01, BIND-02, BIND-03)
+  - [ ] 23-03-PLAN.md — Wave 2: do_profile_init_docs subcommand + dispatch + README update (DOCS-01)
 
 ### Phase 24: Multi-File Publish Bundle (Outbound Path)
 **Goal**: A single host-side call can commit a full agent report plus an INDEX.md update to the doc repo atomically, after running every staged file through secret redaction and markdown sanitization
