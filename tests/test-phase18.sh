@@ -226,7 +226,40 @@ STUB
 }
 
 test_caller_prologue_reexecs_into_brew_bash() {
-  echo "STUB: implemented in plan 03"
+  local errors=0
+
+  # bin/claude-secure assertions
+  local cs="$REPO_ROOT/bin/claude-secure"
+  [ -f "$cs" ] || { echo "missing $cs" >&2; return 1; }
+  head -50 "$cs" | grep -q 'BASH_VERSINFO\[0\]:-0' || { echo "bin/claude-secure missing BASH_VERSINFO re-exec test" >&2; errors=$((errors+1)); }
+  head -50 "$cs" | grep -q 'exec "\$__brew_bash"' || { echo "bin/claude-secure missing exec __brew_bash" >&2; errors=$((errors+1)); }
+  head -50 "$cs" | grep -q 'source.*lib/platform.sh' || { echo "bin/claude-secure missing source lib/platform.sh" >&2; errors=$((errors+1)); }
+  head -50 "$cs" | grep -q 'claude_secure_bootstrap_path' || { echo "bin/claude-secure missing claude_secure_bootstrap_path call" >&2; errors=$((errors+1)); }
+
+  # Ordering: re-exec guard MUST come before `set -euo pipefail`
+  local reexec_line set_line
+  reexec_line="$(grep -n 'BASH_VERSINFO\[0\]:-0' "$cs" | head -1 | cut -d: -f1)"
+  set_line="$(grep -n '^set -euo pipefail' "$cs" | head -1 | cut -d: -f1)"
+  if [ -z "$reexec_line" ] || [ -z "$set_line" ]; then
+    echo "could not locate re-exec or set line in bin/claude-secure" >&2
+    errors=$((errors+1))
+  elif [ "$reexec_line" -ge "$set_line" ]; then
+    echo "re-exec guard (line $reexec_line) must precede set -euo pipefail (line $set_line)" >&2
+    errors=$((errors+1))
+  fi
+
+  # Syntax check
+  bash -n "$cs" || { echo "bin/claude-secure failed syntax check" >&2; errors=$((errors+1)); }
+
+  # run-tests.sh assertions
+  local rt="$REPO_ROOT/run-tests.sh"
+  [ -f "$rt" ] || { echo "missing $rt" >&2; return 1; }
+  head -30 "$rt" | grep -q 'BASH_VERSINFO\[0\]:-0' || { echo "run-tests.sh missing BASH_VERSINFO re-exec test" >&2; errors=$((errors+1)); }
+  head -30 "$rt" | grep -q 'exec "\$__brew_bash"' || { echo "run-tests.sh missing exec __brew_bash" >&2; errors=$((errors+1)); }
+  head -30 "$rt" | grep -q 'source.*lib/platform.sh' || { echo "run-tests.sh missing source lib/platform.sh" >&2; errors=$((errors+1)); }
+  bash -n "$rt" || { echo "run-tests.sh failed syntax check" >&2; errors=$((errors+1)); }
+
+  [ "$errors" -eq 0 ] || return 1
   return 0
 }
 
