@@ -264,12 +264,46 @@ test_caller_prologue_reexecs_into_brew_bash() {
 }
 
 test_no_flock_in_host_scripts() {
-  echo "STUB: implemented in plan 04"
+  local files=(
+    "$REPO_ROOT/install.sh"
+    "$REPO_ROOT/bin/claude-secure"
+    "$REPO_ROOT/run-tests.sh"
+    "$REPO_ROOT/lib/platform.sh"
+    "$REPO_ROOT/claude/hooks/pre-tool-use.sh"
+  )
+  local f matches
+  for f in "${files[@]}"; do
+    if [ ! -f "$f" ]; then
+      echo "missing expected file: $f" >&2
+      return 1
+    fi
+    # Match `flock` only on non-comment lines. A line is a comment if its first
+    # non-whitespace character is #.
+    matches="$(grep -nE '^[[:space:]]*[^#[:space:]].*\bflock\b|^[[:space:]]*\bflock\b' "$f" || true)"
+    if [ -n "$matches" ]; then
+      echo "found flock references in $f:" >&2
+      echo "$matches" >&2
+      return 1
+    fi
+  done
   return 0
 }
 
 test_hook_uuidgen_is_lowercased() {
-  echo "STUB: implemented in plan 04"
+  local hook="$REPO_ROOT/claude/hooks/pre-tool-use.sh"
+  [ -f "$hook" ] || { echo "missing $hook" >&2; return 1; }
+
+  # Must contain the lowercased pipeline
+  grep -q "uuidgen | tr '\[:upper:\]' '\[:lower:\]'" "$hook" || {
+    echo "claude/hooks/pre-tool-use.sh missing uuidgen | tr lowercase pipeline" >&2
+    return 1
+  }
+
+  # Must NOT contain a bare call_id=$(uuidgen) (without the tr pipe)
+  if grep -nE 'call_id=\$\(uuidgen\)' "$hook"; then
+    echo "found bare uuidgen without lowercase normalization" >&2
+    return 1
+  fi
   return 0
 }
 
