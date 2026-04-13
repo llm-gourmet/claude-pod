@@ -201,6 +201,73 @@ Deferred to future release. Tracked but not in current roadmap.
 - **MAC-03**: Apple Silicon + Intel multi-arch container images (`linux/arm64` + `linux/amd64`)
 - **MAC-04**: Logs to `~/Library/Logs/claude-secure/` for Console.app integration
 
+## v4.0 Requirements
+
+Requirements for the agent documentation layer. Each maps to roadmap phases.
+
+### Profile ↔ Doc Repo Binding (BIND)
+
+- [ ] **BIND-01**: User can configure a doc repo URL, branch, project directory slug, and access token per profile (`docs_repo`, `docs_branch`, `docs_project_dir`, `DOCS_REPO_TOKEN` in profile.json / .env)
+- [ ] **BIND-02**: `DOCS_REPO_TOKEN` is stored in the host-only profile `.env` and is never mounted into the Claude container
+- [ ] **BIND-03**: Profiles with legacy `report_repo` / `REPORT_REPO_TOKEN` (Phase 16) continue to work without migration — new fields are aliases
+
+### Doc Repo Structure (DOCS)
+
+- [ ] **DOCS-01**: User can initialize a per-project directory in the doc repo via `claude-secure profile init-docs --profile <name>`, creating `projects/<slug>/todo.md`, `architecture.md`, `vision.md`, `ideas.md`, and `specs/`
+- [ ] **DOCS-02**: Agent reports are written to `projects/<slug>/reports/YYYY/MM/<date>-<session-id>.md` — one file per execution, never overwriting
+- [ ] **DOCS-03**: `projects/<slug>/reports/INDEX.md` receives a one-line summary entry per report for human scanning
+
+### Outbound Reporting (RPT)
+
+- [ ] **RPT-01**: Every agent execution produces a report using the standardized template: Goal, Where Worked, What Changed (thematic), What Failed, How to Test, Future Findings
+- [ ] **RPT-02**: Report and INDEX.md update are committed as a single atomic git commit — never a partial push
+- [ ] **RPT-03**: Every file staged for commit passes through the existing secret redaction pipeline before push
+- [ ] **RPT-04**: Every file staged for commit is sanitized to strip external image references, HTML comments, and raw HTML before commit (prevents markdown exfil beacons)
+- [ ] **RPT-05**: Push uses `git push` over HTTPS, never force-push, with 3-attempt jittered retry on non-fast-forward
+
+### Mandatory Enforcement (SPOOL)
+
+- [ ] **SPOOL-01**: A Stop hook verifies a local report spool file was written before Claude exits — if missing, re-prompts Claude once to produce it
+- [ ] **SPOOL-02**: The Stop hook makes no network calls — it only checks for the local spool file (doc repo outage cannot block Claude exit)
+- [ ] **SPOOL-03**: A host-side async shipper reads the spool after Claude exits and pushes to the doc repo with jittered backoff — failure is logged to audit JSONL and never blocks the next spawn
+
+### Context Read (CTX)
+
+- [ ] **CTX-01**: At spawn time, `bin/claude-secure` performs a sparse shallow clone of the doc repo and bind-mounts it read-only into the Claude container at `/agent-docs/`
+- [ ] **CTX-02**: Agent can read any project-level doc (`/agent-docs/projects/<slug>/todo.md`, `architecture.md`, `vision.md`, `ideas.md`, `specs/`) when it needs context — no auto-injection into prompt
+- [ ] **CTX-03**: If the profile has no doc repo configured, context read is skipped silently — spawn is never blocked
+- [ ] **CTX-04**: The bind-mounted clone never includes `.git/` — agents cannot push from inside the container
+
+## v4.0 Traceability
+
+Which phases cover which v4.0 requirements. Updated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| BIND-01 | TBD | Pending |
+| BIND-02 | TBD | Pending |
+| BIND-03 | TBD | Pending |
+| DOCS-01 | TBD | Pending |
+| DOCS-02 | TBD | Pending |
+| DOCS-03 | TBD | Pending |
+| RPT-01 | TBD | Pending |
+| RPT-02 | TBD | Pending |
+| RPT-03 | TBD | Pending |
+| RPT-04 | TBD | Pending |
+| RPT-05 | TBD | Pending |
+| SPOOL-01 | TBD | Pending |
+| SPOOL-02 | TBD | Pending |
+| SPOOL-03 | TBD | Pending |
+| CTX-01 | TBD | Pending |
+| CTX-02 | TBD | Pending |
+| CTX-03 | TBD | Pending |
+| CTX-04 | TBD | Pending |
+
+**Coverage:**
+- v4.0 requirements: 18 total
+- Mapped to phases: 0 (pending roadmap)
+- Unmapped: 18
+
 ---
 *Requirements defined: 2026-04-11*
-*Last updated: 2026-04-13 after v3.0 milestone start*
+*Last updated: 2026-04-13 — v4.0 Agent Documentation Layer requirements added*
