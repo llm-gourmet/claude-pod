@@ -1,44 +1,44 @@
 ---
 gsd_state_version: 1.0
-milestone: v3.0
-milestone_name: macOS Support
-status: executing
-stopped_at: "Completed 23-02-PLAN.md"
-last_updated: "2026-04-13T18:44:37Z"
-last_activity: 2026-04-13 -- Phase 23 Plan 02 complete (BIND-01/02/03)
+milestone: v2.0
+milestone_name: Headless Agent Mode
+status: verifying
+stopped_at: Completed 23-02-PLAN.md
+last_updated: "2026-04-13T18:45:59.569Z"
+last_activity: 2026-04-12
 progress:
-  total_phases: 9
-  completed_phases: 2
-  total_plans: 11
-  completed_plans: 8
-  percent: 0
+  total_phases: 6
+  completed_phases: 6
+  total_plans: 21
+  completed_plans: 21
+  percent: 88
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-13)
+See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** Phase 23 — profile-doc-repo-binding
+**Current focus:** Phase 17 — operational-hardening
 
 ## Current Position
 
-Phase: 23 (profile-doc-repo-binding) — EXECUTING
-Plan: 2 of 3 (COMPLETE)
-Status: Executing Phase 23 — Plan 02 done, Plan 03 pending
-Last activity: 2026-04-13 -- Phase 23 execution started
+Phase: 17
+Plan: Not started
+Status: Phase complete — ready for verification
+Last activity: 2026-04-12
 
-Progress: [░░░░░░░░░░] 0% (0/4 v4.0 phases)
+Progress: [█████████░] 88% (15/17 plans)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 19 (v2.0) + v3.0 plans (18-01..19-03)
-- Average duration: ~10min
-- Total execution time: ~190 minutes
+- Total plans completed: 2 (v2.0)
+- Average duration: ~3.5min
+- Total execution time: ~7 minutes
 
 **By Phase:**
 
@@ -46,6 +46,13 @@ Progress: [░░░░░░░░░░] 0% (0/4 v4.0 phases)
 |-------|-------|-------|----------|
 | Phase 12 P01 | 5min | 2 tasks | 2 files |
 | Phase 12 P02 | 2min | 2 tasks | 2 files |
+
+**Recent Trend:**
+
+- Last 5 plans: -
+- Trend: -
+
+*Updated after each plan completion*
 | Phase 13 P01 | 5min | 2 tasks | 3 files |
 | Phase 13 P02 | 4min | 1 tasks | 1 files |
 | Phase 13 P03 | 1min | 1 tasks | 1 files |
@@ -64,22 +71,7 @@ Progress: [░░░░░░░░░░] 0% (0/4 v4.0 phases)
 | Phase 17 P02 | 18min | 3 tasks | 6 files |
 | Phase 17 P04 | 4min | 2 tasks | 3 files |
 | Phase 17-operational-hardening P03 | 35min | 2 tasks | 2 files |
-| Phase 18-platform-abstraction-bash-portability P01 | 12min | 3 tasks | 5 files |
-| Phase 18-platform-abstraction-bash-portability P02 | 10min | 2 tasks | 2 files |
-| Phase 18-platform-abstraction-bash-portability P03 | 3min | 3 tasks | 3 files |
-| Phase 18-platform-abstraction-bash-portability P04 | 3min | 3 tasks | 3 files |
-| Phase 18-platform-abstraction-bash-portability P05 | 6min | 2 tasks | 3 files |
-| Phase 19-docker-desktop-compatibility P01 | 99s | 3 tasks | 5 files |
-| Phase 19-docker-desktop-compatibility P02 | 2 | 3 tasks | 3 files |
-| Phase 23-profile-doc-repo-binding P02 | 17min | 3 tasks | 9 files |
-| Phase 19-docker-desktop-compatibility P03 | 8min | 2 tasks | 2 files |
-
-**Recent Trend:**
-
-- Last 5 plans: -
-- Trend: -
-
-*Updated after each plan completion*
+| Phase 23 P02 | 17 | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -88,52 +80,58 @@ Progress: [░░░░░░░░░░] 0% (0/4 v4.0 phases)
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- [Phase 23-02]: BIND-02 security invariant implemented: DOCS_REPO_TOKEN and REPORT_REPO_TOKEN filtered from docker-compose env_file via project_env_for_containers(); host bash still receives tokens via set -a; source .env
-- [Phase 23-02]: BIND-03 alias layer: resolve_docs_alias() prefers docs_* names, falls back to report_*, and back-fills REPORT_REPO/BRANCH/TOKEN for Phase 16 compatibility
-- [Roadmap v4.0]: Four phases mapped 1:1 to research Phases A-D (E webhook inbound and F integration tests deferred to v4.1 per milestone scope)
-- [Roadmap v4.0]: Phase 23 (BIND + DOCS-01 init-docs) groups all profile-schema work together — DOCS-01 is a profile subcommand, so it belongs alongside schema fields, not in Phase 24
-- [Roadmap v4.0]: Phase 24 (multi-file publish bundle) takes 8 requirements: DOCS-02, DOCS-03, and the full RPT-* family — RPT-03/RPT-04 (redaction + sanitization) are success criteria of the same atomic commit path, not separate phases
-- [Roadmap v4.0]: Phase 25 (context read) depends on Phase 23 for `docs_project_dir`; Phase 26 (Stop hook) depends on Phases 24 and 25 — so strict order is 23 -> 24|25 -> 26, with 23 and 24 runnable in parallel
-- [Roadmap v4.0]: Phase 26 carries a research flag — Stop hook `stop_hook_active` field semantics must be re-verified with Context7 at plan time (version-sensitive API)
-- [Roadmap v4.0]: Single most dangerous architectural invariant — `DOCS_REPO_TOKEN` never enters the Claude container; every git operation runs on the host. Embedded as Phase 23 success criterion 2 and reinforced by Phase 25 success criterion 4 (no `.git/` in mount)
-- [Roadmap v3.0]: Five phases following dependency chain: Platform Abstraction -> Docker Desktop Compat -> Enforcement Spike+Impl -> launchd Services -> Integration Tests
-- [Roadmap v3.0]: ENFORCE-01 (empirical spike) and ENFORCE-02 (implementation) packed into Phase 20 — spike resolves the design question and implementation follows in the same phase
-- [Roadmap v3.0]: SVC-04 (pf-loader LaunchDaemon) is conditional on Phase 20 spike choosing host-side pf — explicitly marked conditional in Phase 21 success criteria
-- [Roadmap v3.0]: PORT-* bash portability fixes grouped with PLAT-* platform detection in Phase 18 (same lib/platform.sh surface area, same audit pass)
-- [Roadmap v3.0]: COMPAT-01 base image swap goes in Phase 19 with Docker Desktop compat (low risk, single image change)
-- [Roadmap v3.0]: TEST-01 platform mock lives in Phase 18 since it ships as part of lib/platform.sh
-- [Roadmap v3.0]: PLAT-01 (single installer command works on macOS) anchored to Phase 21 since end-to-end install only completes once launchd daemons load
-- [Phase 18-platform-abstraction-bash-portability]: Phase 18 Plan 01: lib/platform.sh public API shipped (detect_platform, claude_secure_brew_prefix, claude_secure_uuid_lower, claude_secure_bootstrap_path) — bash 3.2 safe, idempotent re-source guard, env-var overrides for CI mocking
-- [Phase 18-platform-abstraction-bash-portability]: Phase 18 Plan 01: tests/test-phase17.sh now expects mkdir-lock semantics in do_reap; suite intentionally red until Plan 04 closes the cross-plan handshake
-- [Phase 18-platform-abstraction-bash-portability]: Plan 02: macos_bootstrap_deps wired into install.sh check_dependencies before apt-style audit; legacy_detect_platform rename preserves Phase 19 callers; mock-brew-on-PATH + CLAUDE_SECURE_PLATFORM_OVERRIDE=macos pattern enables Linux-CI macOS branch coverage
-- [Phase 18-platform-abstraction-bash-portability]: Plan 03: bin/claude-secure and run-tests.sh now have bash 4+ re-exec guard + lib/platform.sh source + claude_secure_bootstrap_path prologue; install.sh prologue deferred to Plan 05 to avoid files_modified conflict with Plan 02
-- [Phase 18-platform-abstraction-bash-portability]: Plan 03: test_caller_prologue_reexecs_into_brew_bash is a static-assertion test (grep + line-ordering + bash -n), not a runtime re-exec test — Linux CI cannot exercise the re-exec branch since it already runs bash 5; macOS hardware coverage will land in Phase 22 integration tests
-- [Phase 18-platform-abstraction-bash-portability]: Plan 04: do_reap swapped from flock (util-linux) to mkdir-based atomic lock with PID file + EXIT trap; lockdir path renamed reaper.lock → reaper.lockdir to guarantee zero collision with old versions; claude/hooks/pre-tool-use.sh pipes uuidgen through tr lowercase defensively (PORT-03, PORT-04)
-- [Phase 18-platform-abstraction-bash-portability]: Plan 05: install.sh now has shared Phase 18 prologue (bash 4+ re-exec + lib/platform.sh source + claude_secure_bootstrap_path); legacy_detect_platform removed; main() routes through lib/platform.sh detect_platform; TEST-01 proven end-to-end via test_phase18_full_suite_under_macos_override sub-suite
-- [Phase 19-docker-desktop-compatibility]: Phase 19 Plan 01: Stub tests return 0 in Wave 0 so suite is always green; Plans 02/03 replace stub bodies in-place
-- [Phase 19-docker-desktop-compatibility]: Phase 19 Plan 01: Smoke test uses platform gate (detect_platform) to self-skip on non-macOS, matching Phase 18 convention
-- [Phase 19-docker-desktop-compatibility]: python:3.11-slim-bookworm over python:3.11-slim — Bookworm ships iptables-nft via update-alternatives matching Docker Desktop Mac; multi-arch amd64+arm64 natively on Docker Hub
-- [Phase 19-docker-desktop-compatibility]: iptables_probe() logs but never raises — preserves try/except around setup_default_iptables for outside-Docker dev environments; probe placed BEFORE setup to give operators definitive OK/FAIL signal
-- [Phase 19-docker-desktop-compatibility]: Phase 19-03: Nested subshell pattern ( check_docker_desktop_version ) 2>&1 used in tests to correctly capture exit 1 — plain command substitution loses exit code when function calls exit
+- [Roadmap v2.0]: Six phases following dependency chain: Profile System -> Headless CLI + Webhook Listener (parallel) -> Event Handlers -> Result Channel -> Hardening
+- [Roadmap v2.0]: Phase 13 and 14 can proceed in parallel since both depend only on Phase 12
+- [Research]: Claude Code `-p` flag via `docker compose exec -T` is the only correct headless integration point (SDK bypasses security layers)
+- [Research]: Profile resolution must fail closed -- no fallback to default profile
+- [Research]: Known bug #7263 (empty output with large stdin) needs verification at Phase 13
+- [Phase 12]: Used jq to generate profile.json instead of bash config.sh for per-profile workspace config
+- [Phase 13]: Type guards in tests must come AFTER sourcing bin/claude-secure
+- [Phase 13]: do_spawn() wraps spawn logic as function for local variables and testability
+- [Phase 13]: bare flag omitted from spawn to preserve PreToolUse security hooks
+- [Phase 13]: resolve_template uses PROFILE+CONFIG_DIR globals matching test contract
+- [Phase 14]: Wave 0 test scaffold created: 16 named test functions, stub claude-secure binary on PATH, gen_sig uses printf '%s' to avoid trailing-newline HMAC mismatch
+- [Phase 14]: Hardening directives (NoNewPrivileges, ProtectSystem, PrivateTmp, CapabilityBoundingSet) deliberately omitted from webhook unit file — each breaks docker compose subprocess; Phase 17 may revisit
+- [Phase 14-webhook-listener]: Plan 14-02: HMAC-SHA256 verified on raw body bytes (never re-serialized); ThreadingHTTPServer + Semaphore(3) for bounded async dispatch; SIGTERM dispatches shutdown() on worker thread to avoid 90s hang
+- [Phase 14]: install.sh --with-webhook added: parse_args() + install_webhook_service() with WSL2 warn-don't-block gate, idempotent listener.py refresh, never-overwrite webhook.json
+- [Phase 15-event-handlers]: [Phase 15-01]: Wave 0 test scaffold — 28 named test functions + 9 fixtures encoding Pitfalls 1/4/7, LISTENER_PORT=19015, inline harness helpers
+- [Phase 15-event-handlers]: [Phase 15-02]: Expanded resolve_profile_by_repo to return webhook_event_filter + webhook_bot_users so apply_event_filter runs with zero I/O (Pitfall 3)
+- [Phase 15-event-handlers]: [Phase 15-02]: Listener emits BOTH event=routed (D-23) and event=received (Phase 14 compat) for accepted events
+- [Phase 15]: render_template rewritten with 18 D-16 variables using awk file-based substitution (Pitfall 1 fix)
+- [Phase 15]: UTF-8 safe truncation via python3 env-var transport (Pitfall 4 fix)
+- [Phase 15]: BRANCH/COMMIT_SHA use gated [ -s ] fallback pattern (not post-hoc grep)
+- [Phase 15]: replay subcommand uses exec recursion with CLAUDE_SECURE_EXEC escape hatch for test harness
+- [Phase 15]: Dev-checkout fallback: APP_DIR derived from script location when config.sh absent
+- [Phase 15]: [Phase 15-04]: install.sh install_webhook_service now copies webhook/templates/*.md to /opt/claude-secure/webhook/templates/ with D-12 always-refresh (cp overwrite, never rm -rf)
+- [Phase 16-result-channel]: Parameterized _resolve_default_templates_dir(subdir) instead of duplicating — single resolver serves both prompt and report templates, preserving Phase 15 backward compat
+- [Phase 16-result-channel]: [Phase 16-03]: Pattern E wrapper writes audit AFTER publish so report_url is in the same JSONL line (avoids O_APPEND-breaking reconciliation)
+- [Phase 16-result-channel]: [Phase 16-03]: D-18 exit semantics — publish failures audit-log only; only claude_exit \!= 0 flips spawn exit
+- [Phase 16-result-channel]: [Phase 16-03]: delivery_id_short = last 8 chars of STRIPPED id (after replay-/manual- prefix removal) so all three id types produce the same slug format
+- [Phase 16-result-channel]: [Phase 16-03]: CLAUDE_SECURE_FAKE_CLAUDE_STDOUT test escape hatch added (Rule 3 deviation) — production docker compose path unchanged
+- [Phase 16-result-channel]: Plan 16-04: install.sh step 5c clones step 5b structurally with templates→report-templates substitution and explicit chmod 755 on the directory; D-12 always-refresh preserves operator-added custom templates
+- [Phase 16-result-channel]: Plan 16-04: README Phase 16 section placed between Logging and Testing as the operator observability anchor; uses natural prose with no leaked decision IDs and copy-pasteable jq/profile.json examples
+- [Phase 17]: [Phase 17-01]: Wave 0 failing-test scaffold with mock docker (Pattern B) + mock flock PATH shims; 31 unit tests (26 fail as NOT IMPLEMENTED sentinels, 5 scaffold passes); E2E harness with check_budget gate between scenarios + REAPER_ORPHAN_AGE_SECS=0 cleanup trap
+- [Phase 17]: [Phase 17-01]: profile-e2e .env force-added (gitignored by default) -- test-only placeholder, no real secret. Fixture rewrites loader-facing .env path that Phase 15/16 contracts require verbatim
+- [Phase 17]: Phase 17-02: dual ISO8601 timestamp handling (case-statement fractional-second strip) to tolerate both .nnnZ and plain Z inputs from docker inspect
+- [Phase 17]: Phase 17-02: atomic D-11 hardening commit (Pattern G) applies 10 safe-subset directives to BOTH webhook.service and reaper.service in a single commit to prevent half-hardened listener state
+- [Phase 17]: Phase 17-02: mem_limit: 1g short-form on claude service (Pitfall 5) -- deploy.resources is Swarm-only and silently ignored by docker compose up
+- [Phase 17]: 17-04: Step 5d placed after 5c (files) and before 6 (config); single daemon-reload in step 7 covers both new reaper units AND webhook D-11 refresh.
+- [Phase 17]: 17-04: README Phase 17 section uses operator-facing prose with no D-IDs; placed between Phase 16 and Testing; tuning table for REAPER_ORPHAN_AGE_SECS + REAPER_EVENT_AGE_SECS.
+- [Phase 17]: 17-03: push_with_retry expanded from 1 single-retry to a bounded 3-attempt rebase loop + grep widened to catch file:// remote rejection strings (remote rejected / failed to update ref / cannot lock ref) — fixes concurrent-publish race against Phase 14 Semaphore(3)
+- [Phase 17]: 17-03: reap added to superuser-skip list so timer-driven invocations never hit load_superuser_config's interactive DEFAULT_WORKSPACE prompt — reaper walks docker ps directly and needs no profile/whitelist
+- [Phase 17]: 17-03: scenario 3 sentinel created via minimal compose.yml (not plain docker run --label) so reaper's docker compose -p X down path can tear it down; scenario 4 uses two-layer check (compose config + docker inspect on explicit --no-deps --no-start claude container)
+- [Phase 23]: BIND-02 security invariant: DOCS_REPO_TOKEN and REPORT_REPO_TOKEN filtered from docker-compose env_file via project_env_for_containers(); host bash still receives tokens via set -a; source .env
+- [Phase 23]: BIND-03 alias: resolve_docs_alias() prefers docs_* names, falls back to report_*, and back-fills REPORT_REPO/BRANCH/TOKEN for Phase 16 compatibility
 
 ### Pending Todos
 
-- **v4.0 Phase 26 research flag**: Before writing Phase 26 plans, run `/gsd:research-phase` to re-verify Claude Code Stop hook API field semantics (`stop_hook_active`, re-prompt trigger conditions) against the shipped version.
-- **v4.0 todo.md line-anchor format**: GFM task list with `<!-- id:abc123 -->` vs YAML frontmatter needs a decision before Phase 26 implements any todo mutation support. Research recommendation: GFM with comment anchor.
-- **v4.0 report path migration**: Old Phase 16 flat `reports/YYYY/MM/` vs new `projects/<name>/reports/YYYY/MM/` — documentation cutover note goes in Phase 24 plan.
 - **iptables packet-level logging**: Add iptables `-j LOG` rules for DROP/ACCEPT and poll `dmesg`/`/proc/kmsg` from validator background thread to capture actual packet allow/block events into `iptables.jsonl`.
-- **Phase 20 spike scheduling**: Phase 20 must begin with a 90-minute empirical test on real macOS hardware (Docker Desktop + NET_ADMIN + bridge networking + iptables rule insert/verify). Cannot plan Phase 20 implementation tasks until spike result is recorded.
 
 ### Blockers/Concerns
 
-- [Research v4.0]: Doc-repo write PAT is the single most dangerous architectural surface — must stay on host in profile `.env`, never mounted into container. Locked as Phase 23 success criterion 2.
-- [Research v4.0]: Stop hook API field names are version-sensitive — Phase 26 cannot ship without re-verification at plan time.
-- [Research v4.0]: Parallel agent pushes to the shared doc repo need serialization — Phase 24 success criterion 5 requires a race test that exercises concurrent publishes.
-- [Research v3.0]: Enforcement architecture (iptables-vs-pf) cannot be resolved from research alone — requires empirical test on real macOS hardware (gates Phase 20 implementation)
-- [Research v3.0]: Docker Desktop `internal: true` DNS has known bug docker/for-mac #7262 — needs smoke test in Phase 19, may force `dns:` workaround in compose
-- [Research v3.0]: `user <uid>` egress filtering on Darwin pf needs `pfctl -nf` test — affects pf anchor template if Option B is chosen
-- [Research v3.0]: GitHub Actions macOS runner cost (`macos-14`/`macos-15`) — evaluate before committing to automated E2E CI in Phase 22; may defer to v3.1
-- [Research]: systemd in WSL2 requires `[boot] systemd=true` in `/etc/wsl.conf` -- installer should detect this (carryover from v2.0)
+- [Research]: systemd in WSL2 requires `[boot] systemd=true` in `/etc/wsl.conf` -- installer should detect this (affects Phase 14)
+- [Research]: `--allowedTools` prefix match syntax needs empirical verification (affects Phase 13)
+- [Research]: Docker Compose `deploy.resources.limits` vs `mem_limit` -- verify with `docker inspect` (affects Phase 13)
 
 ### Quick Tasks Completed
 
@@ -149,6 +147,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last activity: 2026-04-13 — v4.0 roadmap drafted (Phases 23-26), STATE.md updated for milestone planning
-Stopped at: Roadmap complete, ready for `/gsd:plan-phase 23`
+Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
+Stopped at: Completed 23-02-PLAN.md
 Resume file: None
