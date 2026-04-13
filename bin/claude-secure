@@ -76,6 +76,59 @@ validate_profile() {
     echo "ERROR: Profile '$name' has invalid whitelist.json (not valid JSON)" >&2
     return 1
   fi
+  if ! validate_docs_binding "$name"; then
+    return 1
+  fi
+}
+
+# Phase 23 BIND-01: validate the four doc-repo fields + DOCS_REPO_TOKEN presence.
+# Opt-out semantics: if no doc fields are set, return 0 silently (back-compat).
+# Fail-closed semantics: if ANY field is set, ALL must be valid.
+# Alias: accepts legacy report_repo / report_branch as fallback sources.
+validate_docs_binding() {
+  local name="$1"
+  local pdir="$CONFIG_DIR/profiles/$name"
+  local pj="$pdir/profile.json"
+
+  local repo branch project_dir
+  repo=$(jq -r '.docs_repo // .report_repo // empty' "$pj")
+  branch=$(jq -r '.docs_branch // .report_branch // "main"' "$pj")
+  project_dir=$(jq -r '.docs_project_dir // empty' "$pj")
+
+  # Opt-out: no repo configured means no doc binding at all.
+  if [ -z "$repo" ]; then
+    return 0
+  fi
+
+  # docs_repo must be an HTTPS URL ending in .git with no whitespace
+  if [[ ! "$repo" =~ ^https://[^[:space:]]+\.git$ ]]; then
+    echo "ERROR: profile '$name' docs_repo must be HTTPS URL ending in .git (got: $repo)" >&2
+    return 1
+  fi
+  # docs_branch: DNS-safe chars only (alphanumeric + . _ / -)
+  if [[ ! "$branch" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+    echo "ERROR: profile '$name' docs_branch is malformed: $branch" >&2
+    return 1
+  fi
+  # docs_project_dir: required when docs_repo is set, must be relative, no '..'
+  if [ -z "$project_dir" ]; then
+    echo "ERROR: profile '$name' docs_repo set but docs_project_dir is missing" >&2
+    echo "       Add: jq '.docs_project_dir = \"projects/<slug>\"' > profile.json" >&2
+    return 1
+  fi
+  if [[ "$project_dir" =~ \.\. ]] || [[ "$project_dir" = /* ]]; then
+    echo "ERROR: profile '$name' docs_project_dir must be relative and contain no '..': $project_dir" >&2
+    return 1
+  fi
+
+  # DOCS_REPO_TOKEN (or legacy REPORT_REPO_TOKEN) must be present in .env.
+  # Read via grep, not by sourcing, to avoid polluting caller state.
+  if ! grep -qE '^(DOCS_REPO_TOKEN|REPORT_REPO_TOKEN)=' "$pdir/.env" 2>/dev/null; then
+    echo "ERROR: profile '$name' docs_repo set but DOCS_REPO_TOKEN missing from $pdir/.env" >&2
+    return 1
+  fi
+
+  return 0
 }
 
 create_profile() {
