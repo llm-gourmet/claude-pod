@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 # Install iptables for Phase 2 (not used in Phase 1 stub)
 RUN apt-get update && \
