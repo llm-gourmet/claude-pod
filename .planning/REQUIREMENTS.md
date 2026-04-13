@@ -201,6 +201,11 @@ Deferred to future release. Tracked but not in current roadmap.
 - **MAC-03**: Apple Silicon + Intel multi-arch container images (`linux/arm64` + `linux/amd64`)
 - **MAC-04**: Logs to `~/Library/Logs/claude-secure/` for Console.app integration
 
+### Agent Documentation Layer (Post-v4.0)
+
+- **HOOK-INBOX-01**: Webhook listener routes doc-repo push/issues events to profiles via `resolve_profile_by_docs_repo` (deferred to v4.1)
+- **TEST-V4-01**: Roundtrip integration tests for v4.0 — parallel-push race, Stop-hook DNS-failure, back-compat with Phase 16 profiles (deferred to v4.1)
+
 ## v4.0 Requirements
 
 Requirements for the agent documentation layer. Each maps to roadmap phases.
@@ -244,30 +249,30 @@ Which phases cover which v4.0 requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BIND-01 | TBD | Pending |
-| BIND-02 | TBD | Pending |
-| BIND-03 | TBD | Pending |
-| DOCS-01 | TBD | Pending |
-| DOCS-02 | TBD | Pending |
-| DOCS-03 | TBD | Pending |
-| RPT-01 | TBD | Pending |
-| RPT-02 | TBD | Pending |
-| RPT-03 | TBD | Pending |
-| RPT-04 | TBD | Pending |
-| RPT-05 | TBD | Pending |
-| SPOOL-01 | TBD | Pending |
-| SPOOL-02 | TBD | Pending |
-| SPOOL-03 | TBD | Pending |
-| CTX-01 | TBD | Pending |
-| CTX-02 | TBD | Pending |
-| CTX-03 | TBD | Pending |
-| CTX-04 | TBD | Pending |
+| BIND-01 | Phase 23 | Pending |
+| BIND-02 | Phase 23 | Pending |
+| BIND-03 | Phase 23 | Pending |
+| DOCS-01 | Phase 23 | Pending |
+| DOCS-02 | Phase 24 | Pending |
+| DOCS-03 | Phase 24 | Pending |
+| RPT-01 | Phase 24 | Pending |
+| RPT-02 | Phase 24 | Pending |
+| RPT-03 | Phase 24 | Pending |
+| RPT-04 | Phase 24 | Pending |
+| RPT-05 | Phase 24 | Pending |
+| SPOOL-01 | Phase 26 | Pending |
+| SPOOL-02 | Phase 26 | Pending |
+| SPOOL-03 | Phase 26 | Pending |
+| CTX-01 | Phase 25 | Pending |
+| CTX-02 | Phase 25 | Pending |
+| CTX-03 | Phase 25 | Pending |
+| CTX-04 | Phase 25 | Pending |
 
 **Coverage:**
 - v4.0 requirements: 18 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 18
+- Mapped to phases: 18
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-11*
-*Last updated: 2026-04-13 — v4.0 Agent Documentation Layer requirements added*
+*Last updated: 2026-04-13 — v4.0 traceability populated (Phases 23-26)*

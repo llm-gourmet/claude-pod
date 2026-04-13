@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v4.0
 milestone_name: Agent Documentation Layer
-status: defining requirements
-stopped_at: Milestone initialized
+status: roadmap complete
+stopped_at: v4.0 roadmap drafted (Phases 23-26)
 last_updated: "2026-04-13T00:00:00.000Z"
 last_activity: 2026-04-13
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -21,22 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-13)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** Phase 19 — docker-desktop-compatibility
+**Current focus:** v4.0 Agent Documentation Layer — ready to plan Phase 23 (profile ↔ doc repo binding)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 23 — Profile ↔ Doc Repo Binding (not started)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-04-13 — Milestone v4.0 Agent Documentation Layer started
+Status: Roadmap drafted; awaiting phase planning
+Last activity: 2026-04-13 — v4.0 roadmap drafted (Phases 23-26), 18 requirements mapped
 
-Progress: [░░░░░░░░░░] 0% (0/5 phases — v3.0 only)
+Progress: [░░░░░░░░░░] 0% (0/4 v4.0 phases)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 19 (v2.0)
+- Total plans completed: 19 (v2.0) + v3.0 plans (18-01..19-03)
 - Average duration: ~10min
 - Total execution time: ~190 minutes
 
@@ -64,13 +64,6 @@ Progress: [░░░░░░░░░░] 0% (0/5 phases — v3.0 only)
 | Phase 17 P02 | 18min | 3 tasks | 6 files |
 | Phase 17 P04 | 4min | 2 tasks | 3 files |
 | Phase 17-operational-hardening P03 | 35min | 2 tasks | 2 files |
-
-**Recent Trend:**
-
-- Last 5 plans: -
-- Trend: -
-
-*Updated after each plan completion*
 | Phase 18-platform-abstraction-bash-portability P01 | 12min | 3 tasks | 5 files |
 | Phase 18-platform-abstraction-bash-portability P02 | 10min | 2 tasks | 2 files |
 | Phase 18-platform-abstraction-bash-portability P03 | 3min | 3 tasks | 3 files |
@@ -80,6 +73,13 @@ Progress: [░░░░░░░░░░] 0% (0/5 phases — v3.0 only)
 | Phase 19-docker-desktop-compatibility P02 | 2 | 3 tasks | 3 files |
 | Phase 19-docker-desktop-compatibility P03 | 8min | 2 tasks | 2 files |
 
+**Recent Trend:**
+
+- Last 5 plans: -
+- Trend: -
+
+*Updated after each plan completion*
+
 ## Accumulated Context
 
 ### Decisions
@@ -87,6 +87,12 @@ Progress: [░░░░░░░░░░] 0% (0/5 phases — v3.0 only)
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
+- [Roadmap v4.0]: Four phases mapped 1:1 to research Phases A-D (E webhook inbound and F integration tests deferred to v4.1 per milestone scope)
+- [Roadmap v4.0]: Phase 23 (BIND + DOCS-01 init-docs) groups all profile-schema work together — DOCS-01 is a profile subcommand, so it belongs alongside schema fields, not in Phase 24
+- [Roadmap v4.0]: Phase 24 (multi-file publish bundle) takes 8 requirements: DOCS-02, DOCS-03, and the full RPT-* family — RPT-03/RPT-04 (redaction + sanitization) are success criteria of the same atomic commit path, not separate phases
+- [Roadmap v4.0]: Phase 25 (context read) depends on Phase 23 for `docs_project_dir`; Phase 26 (Stop hook) depends on Phases 24 and 25 — so strict order is 23 -> 24|25 -> 26, with 23 and 24 runnable in parallel
+- [Roadmap v4.0]: Phase 26 carries a research flag — Stop hook `stop_hook_active` field semantics must be re-verified with Context7 at plan time (version-sensitive API)
+- [Roadmap v4.0]: Single most dangerous architectural invariant — `DOCS_REPO_TOKEN` never enters the Claude container; every git operation runs on the host. Embedded as Phase 23 success criterion 2 and reinforced by Phase 25 success criterion 4 (no `.git/` in mount)
 - [Roadmap v3.0]: Five phases following dependency chain: Platform Abstraction -> Docker Desktop Compat -> Enforcement Spike+Impl -> launchd Services -> Integration Tests
 - [Roadmap v3.0]: ENFORCE-01 (empirical spike) and ENFORCE-02 (implementation) packed into Phase 20 — spike resolves the design question and implementation follows in the same phase
 - [Roadmap v3.0]: SVC-04 (pf-loader LaunchDaemon) is conditional on Phase 20 spike choosing host-side pf — explicitly marked conditional in Phase 21 success criteria
@@ -109,11 +115,17 @@ Recent decisions affecting current work:
 
 ### Pending Todos
 
+- **v4.0 Phase 26 research flag**: Before writing Phase 26 plans, run `/gsd:research-phase` to re-verify Claude Code Stop hook API field semantics (`stop_hook_active`, re-prompt trigger conditions) against the shipped version.
+- **v4.0 todo.md line-anchor format**: GFM task list with `<!-- id:abc123 -->` vs YAML frontmatter needs a decision before Phase 26 implements any todo mutation support. Research recommendation: GFM with comment anchor.
+- **v4.0 report path migration**: Old Phase 16 flat `reports/YYYY/MM/` vs new `projects/<name>/reports/YYYY/MM/` — documentation cutover note goes in Phase 24 plan.
 - **iptables packet-level logging**: Add iptables `-j LOG` rules for DROP/ACCEPT and poll `dmesg`/`/proc/kmsg` from validator background thread to capture actual packet allow/block events into `iptables.jsonl`.
 - **Phase 20 spike scheduling**: Phase 20 must begin with a 90-minute empirical test on real macOS hardware (Docker Desktop + NET_ADMIN + bridge networking + iptables rule insert/verify). Cannot plan Phase 20 implementation tasks until spike result is recorded.
 
 ### Blockers/Concerns
 
+- [Research v4.0]: Doc-repo write PAT is the single most dangerous architectural surface — must stay on host in profile `.env`, never mounted into container. Locked as Phase 23 success criterion 2.
+- [Research v4.0]: Stop hook API field names are version-sensitive — Phase 26 cannot ship without re-verification at plan time.
+- [Research v4.0]: Parallel agent pushes to the shared doc repo need serialization — Phase 24 success criterion 5 requires a race test that exercises concurrent publishes.
 - [Research v3.0]: Enforcement architecture (iptables-vs-pf) cannot be resolved from research alone — requires empirical test on real macOS hardware (gates Phase 20 implementation)
 - [Research v3.0]: Docker Desktop `internal: true` DNS has known bug docker/for-mac #7262 — needs smoke test in Phase 19, may force `dns:` workaround in compose
 - [Research v3.0]: `user <uid>` egress filtering on Darwin pf needs `pfctl -nf` test — affects pf anchor template if Option B is chosen
@@ -134,6 +146,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last activity: 2026-04-13 — v3.0 roadmap drafted (Phases 18-22), STATE.md initialized for milestone planning
-Stopped at: Completed 19-03-PLAN.md
+Last activity: 2026-04-13 — v4.0 roadmap drafted (Phases 23-26), STATE.md updated for milestone planning
+Stopped at: Roadmap complete, ready for `/gsd:plan-phase 23`
 Resume file: None

