@@ -36,6 +36,7 @@ No secret ever leaves the isolated environment uncontrolled — every outbound c
 - Event handlers for Issues, Push, CI Failure with profile-scoped filtering and template rendering — v2.0 Phase 15
 - Result channel: report written to separate documentation repo with audit log — v2.0 Phase 16
 - Operational hardening: container reaper systemd timer, D-11 listener hardening, E2E integration tests — v2.0 Phase 17
+- Platform abstraction: `lib/platform.sh` with `detect_platform()` (linux/wsl2/macos), bash 4+ re-exec guard, GNU coreutils PATH shim, flock→mkdir-lock, uuidgen lowercase normalization — v3.0 Phase 18
 
 ### Active
 
@@ -113,4 +114,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-13 after v3.0 milestone start*
+*Last updated: 2026-04-13
