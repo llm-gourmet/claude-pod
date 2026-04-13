@@ -105,6 +105,52 @@ parse_args() {
   done
 }
 
+# PLAT-05: verify Docker Desktop >= 4.44.3 is installed and running on macOS.
+# Called from check_dependencies() only when detect_platform returns "macos".
+# Requires GNU sort on PATH (for `sort -V`) — claude_secure_bootstrap_path
+# must have run earlier in the Phase 18 prologue (line 23) before this.
+check_docker_desktop_version() {
+  local min_version="4.44.3"
+
+  # 1. Docker daemon running?
+  if ! docker info >/dev/null 2>&1; then
+    log_error "Docker Desktop is not running."
+    log_error "Start Docker Desktop from /Applications/Docker.app and re-run the installer."
+    exit 1
+  fi
+
+  # 2. Is this Docker Desktop (vs plain Docker Engine)?
+  local server_line
+  server_line="$(docker version 2>/dev/null | grep 'Server: Docker Desktop' || true)"
+  if [ -z "$server_line" ]; then
+    log_warn "Docker Desktop not detected in 'docker version' output."
+    log_warn "If you are running plain Docker Engine, ensure it satisfies the equivalent of Docker Desktop >= ${min_version}."
+    return 0
+  fi
+
+  # 3. Parse the version string "4.44.3" from "Server: Docker Desktop 4.44.3 (172823)".
+  local dd_version
+  dd_version="$(echo "$server_line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  if [ -z "$dd_version" ]; then
+    log_warn "Could not parse Docker Desktop version string: ${server_line}"
+    log_warn "Continuing — ensure Docker Desktop >= ${min_version} is installed."
+    return 0
+  fi
+
+  # 4. Compare with GNU sort -V (Phase 18 prologue guarantees gnubin on PATH).
+  # Semantics: printf both versions, sort -V, take the first line. If that
+  # line equals dd_version AND dd_version != min_version, dd_version is older.
+  local lowest
+  lowest="$(printf '%s\n%s\n' "$min_version" "$dd_version" | sort -V | head -1)"
+  if [ "$lowest" = "$dd_version" ] && [ "$dd_version" != "$min_version" ]; then
+    log_error "Docker Desktop ${dd_version} is installed but >= ${min_version} is required."
+    log_error "Upgrade Docker Desktop: https://docs.docker.com/desktop/release-notes/"
+    exit 1
+  fi
+
+  log_info "Docker Desktop ${dd_version} satisfies >= ${min_version}"
+}
+
 check_dependencies() {
   local missing=()
 
@@ -129,6 +175,11 @@ check_dependencies() {
         missing+=("docker compose (install Docker Compose plugin)")
       fi
     fi
+  fi
+
+  # PLAT-05: macOS-only Docker Desktop version gate.
+  if [ "$_plat" = "macos" ]; then
+    check_docker_desktop_version
   fi
 
   if [ ${#missing[@]} -gt 0 ]; then
