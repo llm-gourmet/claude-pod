@@ -231,6 +231,57 @@ the global `.env`:
 REPORT_REPO_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 ```
 
+### Doc Repo Binding (v4.0)
+
+Profiles can bind to a doc repo where agent reports and project context live. The doc repo is host-only -- the write PAT never enters the Claude container.
+
+```json
+{
+  "workspace": "/home/user/claude-workspace-myapp",
+  "repo": "owner/myapp",
+
+  "docs_repo":        "https://github.com/user/claude-docs.git",
+  "docs_branch":      "main",
+  "docs_project_dir": "projects/myapp",
+  "docs_mode":        "report_only"
+}
+```
+
+- `docs_repo` -- HTTPS URL of the doc repo (must end in `.git`)
+- `docs_branch` -- target branch, defaults to `main`
+- `docs_project_dir` -- relative path within the doc repo where this profile's project lives (e.g. `projects/myapp`)
+- `docs_mode` -- reserved for future modes; currently `"report_only"`
+
+The companion `DOCS_REPO_TOKEN` lives in the profile `.env` file and is **filtered out of the docker-compose `env_file` projection** -- it is available to host-side bash only (used by `publish_report` and `profile init-docs`) and is provably absent from the claude and proxy containers.
+
+```bash
+# ~/.claude-secure/profiles/<name>/.env
+
+# Host-only doc repo PAT (v4.0)
+# Filtered out of the docker-compose env_file projection -- never mounted into any container.
+# Create a fine-grained PAT at github.com/settings/personal-access-tokens/new
+# with Contents:Write for exactly the docs repo.
+DOCS_REPO_TOKEN=github_pat_xxx
+```
+
+### Legacy Field Names (deprecated)
+
+Profiles that carry `report_repo`, `report_branch`, `report_path_prefix`, and `REPORT_REPO_TOKEN` from v2.0 Phase 16 continue to work without migration. On first use, claude-secure logs a one-line deprecation warning to stderr. To silence the warning, rename the fields in place -- the `docs_*` names replace the `report_*` names 1:1.
+
+### `claude-secure --profile <name> profile init-docs`
+
+Bootstrap the per-project directory layout in the doc repo. Creates:
+- `projects/<slug>/todo.md`
+- `projects/<slug>/architecture.md`
+- `projects/<slug>/vision.md`
+- `projects/<slug>/ideas.md`
+- `projects/<slug>/specs/.gitkeep`
+- `projects/<slug>/reports/INDEX.md`
+
+Requirements: the profile must have `docs_repo`, `docs_branch`, `docs_project_dir` set in `profile.json`, and `DOCS_REPO_TOKEN` in `.env`. Idempotent -- running a second time creates zero new commits.
+
+**Prerequisite:** the doc repo must have at least one commit on `docs_branch` (e.g. created via GitHub UI with "Initialize with README"). Cloning a fully-empty repo fails with "Remote branch main not found".
+
 ## Logging
 
 All three services (hook, proxy, validator) support structured JSONL logging. Logging is disabled by default and enabled via environment variable toggles, so there is zero overhead unless you opt in.
@@ -409,6 +460,8 @@ CLAUDE_SECURE_SKIP_REPORT=1 claude-secure spawn --profile <name> --event ...
 - **No force-push, ever.** Force-push is never used by the report publisher. If a concurrent writer pushes to the same branch first, the spawn rebases with `git pull --rebase` and retries exactly once. A second failure is recorded in the audit log with `status=report_push_failed`; the doc repo history is never rewritten.
 - **Result text is bounded at 16KB.** Larger Claude outputs are truncated UTF-8-safely with a `... [truncated N more bytes]` suffix so that long sessions cannot produce multi-megabyte commits.
 - **Audit lines are append-only.** Per-instance JSONL files respect the `LOG_PREFIX` multi-instance convention, so two instances on the same host write to distinct files and cannot race each other. Within one instance, POSIX `O_APPEND` guarantees atomic writes because each line stays under 4KB (`PIPE_BUF`).
+
+See also: [Doc Repo Binding](#doc-repo-binding-v40)
 
 ## Webhook Listener
 
