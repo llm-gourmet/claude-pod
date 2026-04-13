@@ -109,6 +109,188 @@ validate_profile() {
     echo "ERROR: Profile '$name' has invalid whitelist.json (not valid JSON)" >&2
     return 1
   fi
+  if ! validate_docs_binding "$name"; then
+    return 1
+  fi
+}
+
+# Phase 23 BIND-01: validate the four doc-repo fields + DOCS_REPO_TOKEN presence.
+# Opt-out semantics: if no doc fields are set, return 0 silently (back-compat).
+# Fail-closed semantics: if ANY field is set, ALL must be valid.
+# Alias: accepts legacy report_repo / report_branch as fallback sources.
+validate_docs_binding() {
+  local name="$1"
+  local pdir="$CONFIG_DIR/profiles/$name"
+  local pj="$pdir/profile.json"
+
+  local repo branch project_dir
+  repo=$(jq -r '.docs_repo // .report_repo // empty' "$pj")
+  branch=$(jq -r '.docs_branch // .report_branch // "main"' "$pj")
+  project_dir=$(jq -r '.docs_project_dir // empty' "$pj")
+
+  # Opt-out: no repo configured means no doc binding at all.
+  if [ -z "$repo" ]; then
+    return 0
+  fi
+
+  # docs_repo must be an HTTPS URL ending in .git with no whitespace
+  if [[ ! "$repo" =~ ^https://[^[:space:]]+\.git$ ]]; then
+    echo "ERROR: profile '$name' docs_repo must be HTTPS URL ending in .git (got: $repo)" >&2
+    return 1
+  fi
+  # docs_branch: DNS-safe chars only (alphanumeric + . _ / -)
+  if [[ ! "$branch" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+    echo "ERROR: profile '$name' docs_branch is malformed: $branch" >&2
+    return 1
+  fi
+  # docs_project_dir: required when docs_repo is set, must be relative, no '..'
+  if [ -z "$project_dir" ]; then
+    echo "ERROR: profile '$name' docs_repo set but docs_project_dir is missing" >&2
+    echo "       Add: jq '.docs_project_dir = \"projects/<slug>\"' > profile.json" >&2
+    return 1
+  fi
+  if [[ "$project_dir" =~ \.\. ]] || [[ "$project_dir" = /* ]]; then
+    echo "ERROR: profile '$name' docs_project_dir must be relative and contain no '..': $project_dir" >&2
+    return 1
+  fi
+
+  # DOCS_REPO_TOKEN (or legacy REPORT_REPO_TOKEN) must be present in .env.
+  # Read via grep, not by sourcing, to avoid polluting caller state.
+  if ! grep -qE '^(DOCS_REPO_TOKEN|REPORT_REPO_TOKEN)=' "$pdir/.env" 2>/dev/null; then
+    echo "ERROR: profile '$name' docs_repo set but DOCS_REPO_TOKEN missing from $pdir/.env" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+# Phase 23 BIND-02: Host-only secret projection.
+# Filters known host-only variables out of the profile .env before handing
+# the file to docker-compose as env_file:. The raw .env is still sourced
+# into host bash by load_profile_config (below), so publish_report,
+# push_with_retry, and do_profile_init_docs can still read the token.
+# Only the CONTAINER view is filtered -- the host process env is untouched.
+_HOST_ONLY_VARS=("DOCS_REPO_TOKEN" "REPORT_REPO_TOKEN")
+
+project_env_for_containers() {
+  local src="$1"
+  local dst
+  dst=$(mktemp "${TMPDIR:-/tmp}/cs-projected-env-XXXXXXXX")
+  _CLEANUP_FILES+=("$dst")
+  chmod 600 "$dst"
+
+  # Build anchored regex matching any host-only var assignment at line start.
+  # Anchoring prevents substring matches like MY_DOCS_REPO_TOKEN_OVERRIDE.
+  local pattern="^("
+  local first=1
+  local v
+  for v in "${_HOST_ONLY_VARS[@]}"; do
+    if [ $first -eq 1 ]; then
+      pattern+="$v"
+      first=0
+    else
+      pattern+="|$v"
+    fi
+  done
+  pattern+=")="
+
+  # grep -v removes matching lines. LC_ALL=C for deterministic ERE matching
+  # across glibc/BSD. `|| true` because grep returns 1 if zero lines survive.
+  LC_ALL=C grep -Ev "$pattern" "$src" > "$dst" || true
+
+  echo "$dst"
+}
+
+# Phase 23 BIND-03: emit a one-line deprecation warning exactly once per
+# profile per shell session. Uses a per-profile sentinel file under $TMPDIR.
+# Gate on `[ -t 2 ]` so JSON-parsing wrappers and CI logs stay silent.
+emit_deprecation_warning() {
+  local profile="$1"
+  local sentinel="${TMPDIR:-/tmp}/cs-deprecation-warned-${profile}"
+  if [ -e "$sentinel" ]; then
+    return 0
+  fi
+  # Always mark as warned first, so a concurrent call cannot double-fire.
+  : > "$sentinel" 2>/dev/null || true
+  _CLEANUP_FILES+=("$sentinel")
+  if [ -t 2 ]; then
+    echo "WARNING: profile '$profile' uses deprecated 'report_repo'/'REPORT_REPO_TOKEN' fields." >&2
+    echo "         Rename to 'docs_repo'/'DOCS_REPO_TOKEN' in profile.json and .env -- see README.md." >&2
+  else
+    # Non-terminal (CI/tests/wrappers): single short line on stderr for grep coverage.
+    echo "WARNING: profile '$profile' uses deprecated report_repo/REPORT_REPO_TOKEN -- rename to docs_repo/DOCS_REPO_TOKEN." >&2
+  fi
+  return 0
+}
+
+# Phase 23 BIND-03: resolve the doc-repo fields, preferring new names over
+# legacy. Exports DOCS_REPO, DOCS_BRANCH, DOCS_PROJECT_DIR, DOCS_MODE,
+# DOCS_REPO_TOKEN in the caller's shell. Back-fills REPORT_REPO_TOKEN from
+# DOCS_REPO_TOKEN if only the new name is set (so Phase 16 push_with_retry
+# and publish_report -- which read REPORT_REPO_TOKEN directly -- keep working).
+# Fires emit_deprecation_warning if any legacy field was the source of truth.
+resolve_docs_alias() {
+  local name="$1"
+  local pdir="$CONFIG_DIR/profiles/$name"
+  local pj="$pdir/profile.json"
+  local deprecated=0
+
+  # Field reads
+  local new_repo legacy_repo
+  new_repo=$(jq -r '.docs_repo // empty' "$pj" 2>/dev/null)
+  legacy_repo=$(jq -r '.report_repo // empty' "$pj" 2>/dev/null)
+  if [ -n "$new_repo" ]; then
+    DOCS_REPO="$new_repo"
+  elif [ -n "$legacy_repo" ]; then
+    DOCS_REPO="$legacy_repo"
+    deprecated=1
+  else
+    DOCS_REPO=""
+  fi
+
+  local new_branch legacy_branch
+  new_branch=$(jq -r '.docs_branch // empty' "$pj" 2>/dev/null)
+  legacy_branch=$(jq -r '.report_branch // empty' "$pj" 2>/dev/null)
+  if [ -n "$new_branch" ]; then
+    DOCS_BRANCH="$new_branch"
+  elif [ -n "$legacy_branch" ]; then
+    DOCS_BRANCH="$legacy_branch"
+    deprecated=1
+  else
+    DOCS_BRANCH="main"
+  fi
+
+  DOCS_PROJECT_DIR=$(jq -r '.docs_project_dir // empty' "$pj" 2>/dev/null)
+  DOCS_MODE=$(jq -r '.docs_mode // "report_only"' "$pj" 2>/dev/null)
+
+  # Token alias: prefer DOCS_REPO_TOKEN, fall back to REPORT_REPO_TOKEN.
+  # Both names have already been sourced into the caller's shell (load_profile_config
+  # ran `set -a; source .env; set +a` before calling us).
+  if [ -z "${DOCS_REPO_TOKEN:-}" ] && [ -n "${REPORT_REPO_TOKEN:-}" ]; then
+    DOCS_REPO_TOKEN="$REPORT_REPO_TOKEN"
+    deprecated=1
+  fi
+  # Back-fill legacy name from new name so Phase 16 publish_report /
+  # push_with_retry (which read REPORT_REPO_TOKEN) keeps working under the
+  # new schema even when the user has renamed everything.
+  if [ -z "${REPORT_REPO_TOKEN:-}" ] && [ -n "${DOCS_REPO_TOKEN:-}" ]; then
+    REPORT_REPO_TOKEN="$DOCS_REPO_TOKEN"
+  fi
+  # Same back-fill for REPORT_REPO so publish_report's `repo_url="${REPORT_REPO:-}"` still resolves.
+  if [ -z "${REPORT_REPO:-}" ] && [ -n "${DOCS_REPO:-}" ]; then
+    REPORT_REPO="$DOCS_REPO"
+  fi
+  if [ -z "${REPORT_BRANCH:-}" ] && [ -n "${DOCS_BRANCH:-}" ]; then
+    REPORT_BRANCH="$DOCS_BRANCH"
+  fi
+
+  export DOCS_REPO DOCS_BRANCH DOCS_PROJECT_DIR DOCS_MODE DOCS_REPO_TOKEN
+  export REPORT_REPO REPORT_BRANCH REPORT_REPO_TOKEN
+
+  if [ "$deprecated" = "1" ]; then
+    emit_deprecation_warning "$name"
+  fi
+  return 0
 }
 
 create_profile() {
@@ -240,7 +422,16 @@ load_profile_config() {
   export COMPOSE_PROJECT_NAME="claude-${name}"
   export COMPOSE_FILE="$APP_DIR/docker-compose.yml"
   export WORKSPACE_PATH
-  export SECRETS_FILE="$pdir/.env"
+  # Phase 23 BIND-02: project raw .env to a filtered copy that omits
+  # host-only variables (DOCS_REPO_TOKEN, REPORT_REPO_TOKEN). docker-compose
+  # reads env_file: from this path; the raw .env is still sourced into host
+  # bash below for publish_report / init-docs consumption.
+  if [ -f "$pdir/.env" ]; then
+    SECRETS_FILE=$(project_env_for_containers "$pdir/.env")
+    export SECRETS_FILE
+  else
+    export SECRETS_FILE="$pdir/.env"
+  fi
   export WHITELIST_PATH="$pdir/whitelist.json"
   export LOG_DIR="$CONFIG_DIR/logs"
   export LOG_PREFIX="${name}-"
@@ -254,6 +445,8 @@ load_profile_config() {
     source "$pdir/.env"
     set +a
   fi
+  # Phase 23 BIND-03: resolve new/legacy field aliases and export DOCS_* vars.
+  resolve_docs_alias "$name"
 }
 
 load_superuser_config() {

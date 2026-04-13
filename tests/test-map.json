@@ -35,7 +35,8 @@
         "test-phase1.sh",
         "test-phase6.sh",
         "test-phase7.sh",
-        "test-phase12.sh"
+        "test-phase12.sh",
+        "test-phase23.sh"
       ]
     },
     {
@@ -206,8 +207,8 @@
     },
     {
       "paths": [
-        "tests/fixtures/profile-23-docs/",
-        "tests/fixtures/profile-23-legacy/"
+        "tests/fixtures/profile-23-docs/**",
+        "tests/fixtures/profile-23-legacy/**"
       ],
       "tests": [
         "test-phase23.sh"
@@ -220,6 +221,45 @@
     ".git/",
     "*.md"
   ],
+  "BIND-01": {
+    "phase": 23,
+    "test_file": "tests/test-phase23.sh",
+    "tests": [
+      "test_docs_repo_url_validation",
+      "test_valid_docs_binding",
+      "test_no_docs_fields_ok",
+      "test_docs_vars_exported"
+    ]
+  },
+  "BIND-02": {
+    "phase": 23,
+    "test_file": "tests/test-phase23.sh",
+    "tests": [
+      "test_projected_env_omits_docs_token",
+      "test_projected_env_omits_legacy_token",
+      "test_docs_token_absent_from_container"
+    ]
+  },
+  "BIND-03": {
+    "phase": 23,
+    "test_file": "tests/test-phase23.sh",
+    "tests": [
+      "test_legacy_report_repo_alias",
+      "test_legacy_report_token_alias",
+      "test_deprecation_warning_rate_limit"
+    ]
+  },
+  "DOCS-01": {
+    "phase": 23,
+    "test_file": "tests/test-phase23.sh",
+    "tests": [
+      "test_init_docs_creates_layout",
+      "test_init_docs_single_commit",
+      "test_init_docs_idempotent",
+      "test_init_docs_requires_docs_repo",
+      "test_init_docs_pat_scrub_on_error"
+    ]
+  },
   "OPS-01": {
     "phase": 16,
     "test_file": "tests/test-phase16.sh",
@@ -301,45 +341,6 @@
       "scenario_orphan_cleanup",
       "scenario_resource_limits",
       "test_e2e_budget_under_90s"
-    ]
-  },
-  "BIND-01": {
-    "phase": 23,
-    "test_file": "tests/test-phase23.sh",
-    "tests": [
-      "test_docs_repo_url_validation",
-      "test_valid_docs_binding",
-      "test_no_docs_fields_ok",
-      "test_docs_vars_exported"
-    ]
-  },
-  "BIND-02": {
-    "phase": 23,
-    "test_file": "tests/test-phase23.sh",
-    "tests": [
-      "test_projected_env_omits_docs_token",
-      "test_projected_env_omits_legacy_token",
-      "test_docs_token_absent_from_container"
-    ]
-  },
-  "BIND-03": {
-    "phase": 23,
-    "test_file": "tests/test-phase23.sh",
-    "tests": [
-      "test_legacy_report_repo_alias",
-      "test_legacy_report_token_alias",
-      "test_deprecation_warning_rate_limit"
-    ]
-  },
-  "DOCS-01": {
-    "phase": 23,
-    "test_file": "tests/test-phase23.sh",
-    "tests": [
-      "test_init_docs_creates_layout",
-      "test_init_docs_single_commit",
-      "test_init_docs_idempotent",
-      "test_init_docs_requires_docs_repo",
-      "test_init_docs_pat_scrub_on_error"
     ]
   }
 }
