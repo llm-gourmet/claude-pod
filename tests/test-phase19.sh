@@ -44,14 +44,21 @@ source "$REPO_ROOT/lib/platform.sh"
 # =========================================================================
 
 test_compat01_base_image_pinned() {
-  # Plan 02 replaces this stub with:
-  #   grep -q "^FROM python:3.11-slim-bookworm$" "$REPO_ROOT/validator/Dockerfile"
+  # COMPAT-01: validator Dockerfile must pin the bookworm slim tag.
+  grep -q "^FROM python:3.11-slim-bookworm$" "$REPO_ROOT/validator/Dockerfile" || return 1
+  # And the old unpinned tag must not linger.
+  if grep -q "^FROM python:3.11-slim$" "$REPO_ROOT/validator/Dockerfile"; then
+    return 1
+  fi
   return 0
 }
 
 test_compat01_iptables_probe_present() {
-  # Plan 02 replaces this stub with a grep for the iptables probe helper
-  # in validator/validator.py (e.g. "iptables_probe" or "iptables -L").
+  # COMPAT-01: validator.py must define an iptables_probe helper and
+  # invoke it somewhere in the file (startup path).
+  grep -q "^def iptables_probe" "$REPO_ROOT/validator/validator.py" || return 1
+  grep -q "iptables_probe()" "$REPO_ROOT/validator/validator.py" || return 1
+  grep -q "iptables probe: OK" "$REPO_ROOT/validator/validator.py" || return 1
   return 0
 }
 
