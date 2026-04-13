@@ -1,0 +1,18 @@
+Client: Docker Engine - Community
+ Version:           25.0.3
+ API version:       1.44
+ Go version:        go1.21.6
+ Git commit:        4debf41
+ Built:             Tue Feb  6 21:14:25 2024
+ OS/Arch:           darwin/arm64
+ Context:           desktop-linux
+
+Server: Docker Desktop 4.28.0 (139021)
+ Engine:
+  Version:          25.0.3
+  API version:      1.44 (minimum version 1.24)
+  Go version:       go1.21.6
+  Git commit:       f417435
+  Built:            Tue Feb  6 21:14:25 2024
+  OS/Arch:          linux/arm64
+  Experimental:     false
