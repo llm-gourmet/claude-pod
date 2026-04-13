@@ -218,7 +218,7 @@ Requirements for the agent documentation layer. Each maps to roadmap phases.
 
 ### Doc Repo Structure (DOCS)
 
-- [ ] **DOCS-01**: User can initialize a per-project directory in the doc repo via `claude-secure profile init-docs --profile <name>`, creating `projects/<slug>/todo.md`, `architecture.md`, `vision.md`, `ideas.md`, and `specs/`
+- [x] **DOCS-01**: User can initialize a per-project directory in the doc repo via `claude-secure profile init-docs --profile <name>`, creating `projects/<slug>/todo.md`, `architecture.md`, `vision.md`, `ideas.md`, and `specs/`
 - [ ] **DOCS-02**: Agent reports are written to `projects/<slug>/reports/YYYY/MM/<date>-<session-id>.md` — one file per execution, never overwriting
 - [ ] **DOCS-03**: `projects/<slug>/reports/INDEX.md` receives a one-line summary entry per report for human scanning
 
@@ -252,7 +252,7 @@ Which phases cover which v4.0 requirements. Updated during roadmap creation.
 | BIND-01 | Phase 23 | Pending |
 | BIND-02 | Phase 23 | Pending |
 | BIND-03 | Phase 23 | Pending |
-| DOCS-01 | Phase 23 | Pending |
+| DOCS-01 | Phase 23 | Complete |
 | DOCS-02 | Phase 24 | Pending |
 | DOCS-03 | Phase 24 | Pending |
 | RPT-01 | Phase 24 | Pending |

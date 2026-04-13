@@ -48,7 +48,7 @@
 
 ### v4.0 Agent Documentation Layer (Planning)
 
-- [ ] **Phase 23: Profile ↔ Doc Repo Binding** - Profile schema holds doc repo coordinates and host-only PAT; `init-docs` bootstraps per-project directory layout
+- [x] **Phase 23: Profile ↔ Doc Repo Binding** - Profile schema holds doc repo coordinates and host-only PAT; `init-docs` bootstraps per-project directory layout (completed 2026-04-13)
 - [ ] **Phase 24: Multi-File Publish Bundle** - Host-side `publish_docs_bundle` writes standardized reports + INDEX.md as single atomic commit through existing redaction pipeline
 - [ ] **Phase 25: Context Read & Read-Only Bind Mount** - Sparse shallow clone of doc repo bind-mounted read-only at `/agent-docs/` so agents can read project context without push access
 - [ ] **Phase 26: Stop Hook & Mandatory Reporting** - Stop hook verifies local spool (no network); host-side async shipper pushes reports with jittered backoff, never blocking Claude exit
@@ -126,9 +126,9 @@
   3. Profiles that still carry legacy `report_repo` / `REPORT_REPO_TOKEN` from Phase 16 continue to resolve correctly: the new fields act as aliases, the old fields are honored if present, and a one-line deprecation warning is logged on first use
   4. Running `claude-secure profile init-docs --profile <name>` in an empty doc repo creates `projects/<slug>/` containing `todo.md`, `architecture.md`, `vision.md`, `ideas.md`, `specs/`, and `reports/INDEX.md` as a single atomic commit, and is idempotent when the layout already exists
 **Plans**: 3 plans
-  - [ ] 23-01-PLAN.md — Wave 0: tests/test-phase23.sh scaffolding + fixture profiles (BIND-01/02/03, DOCS-01 RED stubs)
-  - [ ] 23-02-PLAN.md — Wave 1: validate_docs_binding + host-only .env projection + legacy alias resolver (BIND-01, BIND-02, BIND-03)
-  - [ ] 23-03-PLAN.md — Wave 2: do_profile_init_docs subcommand + dispatch + README update (DOCS-01)
+  - [x] 23-01-PLAN.md — Wave 0: tests/test-phase23.sh scaffolding + fixture profiles (BIND-01/02/03, DOCS-01 RED stubs)
+  - [x] 23-02-PLAN.md — Wave 1: validate_docs_binding + host-only .env projection + legacy alias resolver (BIND-01, BIND-02, BIND-03)
+  - [x] 23-03-PLAN.md — Wave 2: do_profile_init_docs subcommand + dispatch + README update (DOCS-01)
 
 ### Phase 24: Multi-File Publish Bundle (Outbound Path)
 **Goal**: A single host-side call can commit a full agent report plus an INDEX.md update to the doc repo atomically, after running every staged file through secret redaction and markdown sanitization
@@ -196,7 +196,7 @@
 | 20. Network Enforcement on macOS | v3.0 | 0/0 | Not started | - |
 | 21. launchd Service Management | v3.0 | 0/0 | Not started | - |
 | 22. macOS Integration Tests | v3.0 | 0/0 | Not started | - |
-| 23. Profile ↔ Doc Repo Binding | v4.0 | 0/0 | Not started | - |
+| 23. Profile ↔ Doc Repo Binding | v4.0 | 3/3 | Complete   | 2026-04-13 |
 | 24. Multi-File Publish Bundle | v4.0 | 0/0 | Not started | - |
 | 25. Context Read & Bind Mount | v4.0 | 0/0 | Not started | - |
 | 26. Stop Hook & Mandatory Reporting | v4.0 | 0/0 | Not started | - |
