@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Headless Agent Mode
 status: verifying
-stopped_at: "Completed quick-260412-w1y: Update README.md to document v2.0 features"
-last_updated: "2026-04-12T21:12:33.466Z"
+stopped_at: Completed 23-01-PLAN.md (Phase 23 Wave 0 scaffold)
+last_updated: "2026-04-13T18:34:13.198Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 6
   completed_phases: 6
   total_plans: 21
   completed_plans: 21
-  percent: 100
+  percent: 88
 ---
 
 # Project State
@@ -71,6 +71,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 17 P02 | 18min | 3 tasks | 6 files |
 | Phase 17 P04 | 4min | 2 tasks | 3 files |
 | Phase 17-operational-hardening P03 | 35min | 2 tasks | 2 files |
+| Phase 23 P01 | 25min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -119,6 +120,8 @@ Recent decisions affecting current work:
 - [Phase 17]: 17-03: push_with_retry expanded from 1 single-retry to a bounded 3-attempt rebase loop + grep widened to catch file:// remote rejection strings (remote rejected / failed to update ref / cannot lock ref) — fixes concurrent-publish race against Phase 14 Semaphore(3)
 - [Phase 17]: 17-03: reap added to superuser-skip list so timer-driven invocations never hit load_superuser_config's interactive DEFAULT_WORKSPACE prompt — reaper walks docker ps directly and needs no profile/whitelist
 - [Phase 17]: 17-03: scenario 3 sentinel created via minimal compose.yml (not plain docker run --label) so reaper's docker compose -p X down path can tear it down; scenario 4 uses two-layer check (compose config + docker inspect on explicit --no-deps --no-start claude container)
+- [Phase 23]: Wave 0 RED contract enforced via declare -f sentinel pattern -- validate_docs_binding and do_profile_init_docs checked before test body runs
+- [Phase 23]: APP_DIR must be exported in source_cs helper (load_profile_config requires it; causes unbound variable without it)
 
 ### Pending Todos
 
@@ -145,5 +148,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
-Stopped at: Completed quick-260412-w1y
+Stopped at: Completed 23-01-PLAN.md (Phase 23 Wave 0 scaffold)
 Resume file: None
