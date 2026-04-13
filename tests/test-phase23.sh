@@ -239,29 +239,138 @@ test_deprecation_warning_rate_limit() {
 # DOCS-01 tests: init-docs subcommand (Plan 03 flips green)
 # =========================================================================
 
+# Helper: create a bare git repo with one seed commit, returns path.
+# Sets up an askpass helper so push_with_retry's file:// remote works.
+_setup_bare_repo() {
+  local bare_repo
+  bare_repo=$(mktemp -d "$TEST_TMPDIR/docs-bare-XXXXXXXX")
+  rm -rf "$bare_repo"  # mktemp creates a dir; git init --bare needs a clean path
+  bare_repo="${bare_repo}.git"
+  local scratch
+  scratch=$(mktemp -d "$TEST_TMPDIR/docs-seed-XXXXXXXX")
+  git init --bare -b main "$bare_repo" -q 2>/dev/null
+  git -C "$scratch" init -b main -q 2>/dev/null
+  git -C "$scratch" -c user.email="test@test" -c user.name="test" \
+      commit -q --allow-empty -m "init" 2>/dev/null
+  git -C "$scratch" remote add origin "file://$bare_repo"
+  # push to bare; use --no-verify to bypass missing hooks on empty repo
+  GIT_TERMINAL_PROMPT=0 git -C "$scratch" push -q origin main 2>/dev/null
+  rm -rf "$scratch"
+  echo "$bare_repo"
+}
+
+# Helper: patch fixture profile docs_repo to point at a local bare repo.
+_patch_docs_repo() {
+  local profile_name="$1" bare_repo="$2"
+  local cfg="$CONFIG_DIR/profiles/$profile_name/profile.json"
+  local tmp
+  tmp=$(mktemp)
+  jq --arg r "file://$bare_repo" '.docs_repo = $r' "$cfg" > "$tmp" && mv "$tmp" "$cfg"
+}
+
+# Helper: after do_profile_init_docs, create an askpass helper in the clone
+# dir that push_with_retry expects. Because init-docs creates its own askpass,
+# we just need REPORT_REPO_TOKEN exported so push_with_retry can use it.
+# (resolve_docs_alias already back-fills REPORT_REPO_TOKEN from DOCS_REPO_TOKEN.)
+_count_commits() {
+  local bare_repo="$1"
+  git -C "$bare_repo" rev-list --count HEAD 2>/dev/null
+}
+
 test_init_docs_creates_layout() {
-  echo "NOT-IMPLEMENTED: do_profile_init_docs (Plan 03)" >&2
-  return 1
+  local bare_repo
+  bare_repo=$(_setup_bare_repo)
+  install_fixture "profile-23-docs" "docs-init"
+  _patch_docs_repo "docs-init" "$bare_repo"
+  source_cs
+  load_profile_config "docs-init"
+  do_profile_init_docs "docs-init" 2>/dev/null || return 1
+
+  # Clone bare to verify files exist
+  local verify_dir="$TEST_TMPDIR/verify-layout-$$"
+  GIT_TERMINAL_PROMPT=0 git clone -q "file://$bare_repo" "$verify_dir" 2>/dev/null || return 1
+  local proj="$verify_dir/projects/docs-test"
+  [ -f "$proj/todo.md" ]          || return 1
+  [ -f "$proj/architecture.md" ]  || return 1
+  [ -f "$proj/vision.md" ]        || return 1
+  [ -f "$proj/ideas.md" ]         || return 1
+  [ -f "$proj/reports/INDEX.md" ] || return 1
+  [ -f "$proj/specs/.gitkeep" ]   || return 1
+  return 0
 }
 
 test_init_docs_single_commit() {
-  echo "NOT-IMPLEMENTED: do_profile_init_docs (Plan 03)" >&2
-  return 1
+  local bare_repo
+  bare_repo=$(_setup_bare_repo)
+  local seed_count
+  seed_count=$(_count_commits "$bare_repo")
+  install_fixture "profile-23-docs" "docs-single"
+  _patch_docs_repo "docs-single" "$bare_repo"
+  source_cs
+  load_profile_config "docs-single"
+  do_profile_init_docs "docs-single" 2>/dev/null || return 1
+
+  local after_count
+  after_count=$(_count_commits "$bare_repo")
+  # Exactly one new commit on top of the seed
+  [ "$after_count" -eq "$((seed_count + 1))" ] || return 1
+  return 0
 }
 
 test_init_docs_idempotent() {
-  echo "NOT-IMPLEMENTED: do_profile_init_docs (Plan 03)" >&2
-  return 1
+  local bare_repo
+  bare_repo=$(_setup_bare_repo)
+  install_fixture "profile-23-docs" "docs-idempotent"
+  _patch_docs_repo "docs-idempotent" "$bare_repo"
+  source_cs
+  load_profile_config "docs-idempotent"
+  do_profile_init_docs "docs-idempotent" 2>/dev/null || return 1
+  local count_after_first
+  count_after_first=$(_count_commits "$bare_repo")
+
+  # Second call must exit 0 and add zero commits
+  do_profile_init_docs "docs-idempotent" 2>/dev/null || return 1
+  local count_after_second
+  count_after_second=$(_count_commits "$bare_repo")
+  [ "$count_after_second" -eq "$count_after_first" ] || return 1
+  return 0
 }
 
 test_init_docs_requires_docs_repo() {
-  echo "NOT-IMPLEMENTED: do_profile_init_docs (Plan 03)" >&2
-  return 1
+  # A profile with no docs_repo must exit non-zero with stderr mentioning docs_repo
+  local dst="$CONFIG_DIR/profiles/docs-no-repo"
+  local ws="$TEST_TMPDIR/ws-docs-no-repo"
+  mkdir -p "$dst" "$ws"
+  jq -n --arg ws "$ws" '{"workspace": $ws, "repo": "owner/no-docs"}' > "$dst/profile.json"
+  echo "CLAUDE_CODE_OAUTH_TOKEN=fake-no-docs-oauth" > "$dst/.env"
+  echo '{"secrets":[],"readonly_domains":[]}' > "$dst/whitelist.json"
+  source_cs
+  local stderr_out
+  stderr_out=$(do_profile_init_docs "docs-no-repo" 2>&1) && return 1  # must fail
+  echo "$stderr_out" | grep -q 'docs_repo' || return 1
+  return 0
 }
 
 test_init_docs_pat_scrub_on_error() {
-  echo "NOT-IMPLEMENTED: do_profile_init_docs (Plan 03)" >&2
-  return 1
+  # With a bad docs_repo URL and a fake PAT, stderr must NOT echo the PAT literal.
+  local dst="$CONFIG_DIR/profiles/docs-bad-url"
+  local ws="$TEST_TMPDIR/ws-docs-bad-url"
+  mkdir -p "$dst" "$ws"
+  jq -n --arg ws "$ws" '{"workspace": $ws, "repo": "owner/bad-url",
+    "docs_repo": "https://127.0.0.1:1/repo-doesnt-exist.git",
+    "docs_branch": "main", "docs_project_dir": "projects/bad-url"}' > "$dst/profile.json"
+  # Inject a distinctive fake PAT
+  printf 'CLAUDE_CODE_OAUTH_TOKEN=fake-scrub-oauth\nDOCS_REPO_TOKEN=SECRETFAKEPAT-12345\n' > "$dst/.env"
+  echo '{"secrets":[],"readonly_domains":[]}' > "$dst/whitelist.json"
+  source_cs
+  local stderr_out
+  stderr_out=$(do_profile_init_docs "docs-bad-url" 2>&1) || true
+  if echo "$stderr_out" | grep -q 'SECRETFAKEPAT-12345'; then
+    echo "FAIL: PAT leaked in stderr" >&2
+    echo "  stderr: $stderr_out" >&2
+    return 1
+  fi
+  return 0
 }
 
 # =========================================================================

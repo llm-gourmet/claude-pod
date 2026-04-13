@@ -1336,6 +1336,148 @@ ASKPASS
   return 0
 }
 
+# Phase 23 DOCS-01: bootstrap projects/<slug>/ layout in the doc repo.
+# Reuses the Phase 16 publish_report clone pattern and push_with_retry
+# non-ff handler. Idempotent: second run adds zero commits.
+#
+# Args:
+#   $1 = profile name
+# Returns:
+#   0 on success (including no-op when layout already exists)
+#   1 on any failure (validation, clone, commit, push)
+do_profile_init_docs() {
+  local profile="$1"
+
+  if ! validate_profile_name "$profile"; then
+    return 1
+  fi
+  # load_profile_config was already called by the top-level profile
+  # resolution block at line ~1793; DOCS_* vars are in the environment.
+  # Call again defensively for tests that invoke do_profile_init_docs directly.
+  # Note: validate_profile is intentionally NOT called here -- the CLI dispatch
+  # block already calls it before reaching this function, and calling it again
+  # would block tests that patch docs_repo to file:// URLs for local git testing.
+  load_profile_config "$profile"
+
+  if [ -z "${DOCS_REPO:-}" ]; then
+    echo "ERROR: profile '$profile' has no docs_repo configured (set .docs_repo in profile.json)" >&2
+    return 1
+  fi
+  if [ -z "${DOCS_REPO_TOKEN:-}" ]; then
+    echo "ERROR: profile '$profile' has no DOCS_REPO_TOKEN in .env" >&2
+    return 1
+  fi
+  if [ -z "${DOCS_PROJECT_DIR:-}" ]; then
+    echo "ERROR: profile '$profile' has no docs_project_dir (set .docs_project_dir in profile.json, e.g. \"projects/$profile\")" >&2
+    return 1
+  fi
+
+  local clone_dir
+  clone_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-init-docs-XXXXXXXX")
+  _CLEANUP_FILES+=("$clone_dir")
+
+  # Askpass helper -- same pattern as publish_report (line 1072-1082).
+  local askpass="$clone_dir/.askpass.sh"
+  cat > "$askpass" <<'ASKPASS'
+#!/bin/sh
+case "$1" in
+  Username*) printf 'x-access-token\n' ;;
+  Password*) printf '%s\n' "$GIT_ASKPASS_PAT" ;;
+esac
+ASKPASS
+  chmod 700 "$askpass"
+
+  # Clone with Phase 16 bounded-clone flags + PAT scrub on stderr.
+  local pat="$DOCS_REPO_TOKEN"
+  local clone_err="$clone_dir/clone.err"
+  if ! LC_ALL=C \
+       GIT_ASKPASS="$askpass" \
+       GIT_ASKPASS_PAT="$pat" \
+       GIT_TERMINAL_PROMPT=0 \
+       GIT_HTTP_LOW_SPEED_LIMIT=1 \
+       GIT_HTTP_LOW_SPEED_TIME=30 \
+       timeout 60 \
+       git -c credential.helper= -c credential.helper='' \
+           -c core.autocrlf=false \
+           clone --depth 1 --branch "$DOCS_BRANCH" --quiet \
+                 "$DOCS_REPO" "$clone_dir/repo" 2>"$clone_err"; then
+    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$clone_err" >&2
+    return 1
+  fi
+
+  # Create project layout. mkdir -p is idempotent; stub writer never overwrites.
+  local proj="$clone_dir/repo/$DOCS_PROJECT_DIR"
+  mkdir -p "$proj/specs" "$proj/reports"
+
+  # Stub writer: only creates the file if absent. Keeps init-docs idempotent.
+  _write_stub() {
+    local path="$1" content="$2"
+    if [ -f "$path" ]; then
+      return 0
+    fi
+    printf '%s' "$content" > "$path"
+  }
+
+  _write_stub "$proj/todo.md" "# Todo -- $profile
+
+- [ ] (add items)
+"
+  _write_stub "$proj/architecture.md" "# Architecture -- $profile
+
+Describe the system's structure here.
+"
+  _write_stub "$proj/vision.md" "# Vision -- $profile
+
+Describe the project goal here.
+"
+  _write_stub "$proj/ideas.md" "# Ideas -- $profile
+
+Append-only findings.
+"
+  _write_stub "$proj/reports/INDEX.md" "# Report Index -- $profile
+
+| Date | Session | Summary |
+|------|---------|---------|
+"
+  _write_stub "$proj/specs/.gitkeep" ""
+
+  # Stage the project subdir. git add is idempotent on unchanged files.
+  if ! git -C "$clone_dir/repo" -c core.autocrlf=false add "$DOCS_PROJECT_DIR/"; then
+    echo "ERROR: git add failed for $DOCS_PROJECT_DIR" >&2
+    return 1
+  fi
+
+  # Idempotency gate: if the working tree matches HEAD after staging,
+  # nothing to do. Exit 0 without creating a commit.
+  if git -C "$clone_dir/repo" diff --cached --quiet; then
+    echo "Doc layout already initialized at $DOCS_PROJECT_DIR -- nothing to do."
+    return 0
+  fi
+
+  # Atomic commit (single commit per Phase 23 success criterion 4).
+  local commit_msg="docs($profile): initialize $DOCS_PROJECT_DIR layout"
+  local commit_err="$clone_dir/commit.err"
+  if ! LC_ALL=C \
+       GIT_AUTHOR_NAME="claude-secure" \
+       GIT_AUTHOR_EMAIL="claude-secure@localhost" \
+       GIT_COMMITTER_NAME="claude-secure" \
+       GIT_COMMITTER_EMAIL="claude-secure@localhost" \
+       git -C "$clone_dir/repo" -c core.autocrlf=false \
+           commit -q -m "$commit_msg" 2>"$commit_err"; then
+    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$commit_err" >&2
+    return 1
+  fi
+
+  # Push via the Phase 16 non-ff retry engine. push_with_retry reads
+  # REPORT_REPO_TOKEN (back-filled from DOCS_REPO_TOKEN by resolve_docs_alias).
+  if ! push_with_retry "$clone_dir" "$DOCS_BRANCH"; then
+    return 1
+  fi
+
+  echo "Initialized $DOCS_PROJECT_DIR in $DOCS_REPO ($DOCS_BRANCH)"
+  return 0
+}
+
 # Phase 16: best-effort audit writer for early-return spawn_error paths.
 # Called from do_spawn precondition checks before delivery_id/event_type
 # are known. Uses synthetic manual-<uuid> and "unknown" event_type.
