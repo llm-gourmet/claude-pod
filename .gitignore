@@ -1,8 +1,20 @@
 .env
+.idea
 .idea/
+.vscode
 .vscode/
+.claude/
 .mcp.json
 *.swp
 *.swo
 __pycache__/
 *.pyc
+# shell/editor dotfiles (leaked when $HOME = project dir in sandbox)
+.bash_profile
+.bashrc
+.zshrc
+.zprofile
+.profile
+.gitconfig
+.gitmodules
+.ripgreprc
