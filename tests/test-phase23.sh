@@ -287,7 +287,8 @@ test_init_docs_creates_layout() {
   do_profile_init_docs "docs-init" 2>/dev/null || return 1
 
   # Clone bare to verify files exist
-  local verify_dir="$TEST_TMPDIR/verify-layout-$$"
+  local verify_dir
+  verify_dir=$(mktemp -d "$TEST_TMPDIR/verify-layout-XXXXXXXX")
   GIT_TERMINAL_PROMPT=0 git clone -q "file://$bare_repo" "$verify_dir" 2>/dev/null || return 1
   local proj="$verify_dir/projects/docs-test"
   [ -f "$proj/todo.md" ]          || return 1
@@ -374,6 +375,26 @@ test_init_docs_pat_scrub_on_error() {
 }
 
 # =========================================================================
+# DOCS-01 CLI dispatch test (Plan 03 Task 2)
+# =========================================================================
+
+test_profile_subcommand_dispatch() {
+  # CLI-mode smoke test -- verifies the top-level `profile` case routes correctly.
+  install_fixture profile-23-docs docs-bind-dispatch
+  local out
+  out=$(CONFIG_DIR="$CONFIG_DIR" HOME="$HOME" "$PROJECT_DIR/bin/claude-secure" --profile docs-bind-dispatch profile --help 2>&1) || return 1
+  echo "$out" | grep -q 'init-docs' || return 1
+
+  # Missing-subcommand case: wildcard path (expect non-zero exit + error message)
+  local bogus_rc=0
+  out=$(CONFIG_DIR="$CONFIG_DIR" HOME="$HOME" "$PROJECT_DIR/bin/claude-secure" --profile docs-bind-dispatch profile bogus-subcmd 2>&1) && bogus_rc=$? || bogus_rc=$?
+  [ "$bogus_rc" -ne 0 ] || return 1
+  echo "$out" | grep -q 'Unknown profile subcommand' || return 1
+
+  return 0
+}
+
+# =========================================================================
 # Main dispatch
 # =========================================================================
 
@@ -407,6 +428,8 @@ else
   run_test "init_docs_idempotent"             test_init_docs_idempotent
   run_test "init_docs_requires_docs_repo"     test_init_docs_requires_docs_repo
   run_test "init_docs_pat_scrub_on_error"     test_init_docs_pat_scrub_on_error
+  # DOCS-01 CLI dispatch
+  run_test "profile_subcommand_dispatch"      test_profile_subcommand_dispatch
 fi
 
 echo ""

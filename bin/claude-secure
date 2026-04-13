@@ -2301,6 +2301,37 @@ case "$CMD" in
     # Drop the "reap" literal so only the remaining flags (if any) go to do_reap.
     do_reap "${REMAINING_ARGS[@]:1}"
     ;;
+  profile)
+    # Phase 23 DOCS-01: profile subcommand dispatch.
+    # Uses the existing REMAINING_ARGS array set by parse_log_flags.
+    PROFILE_SUB="${REMAINING_ARGS[1]:-}"
+    case "$PROFILE_SUB" in
+      init-docs)
+        if [ -z "${PROFILE:-}" ]; then
+          echo "ERROR: --profile is required for 'profile init-docs'" >&2
+          exit 1
+        fi
+        do_profile_init_docs "$PROFILE"
+        exit $?
+        ;;
+      ""|--help|-h|help)
+        echo "Usage: claude-secure --profile NAME profile <subcommand>"
+        echo ""
+        echo "Profile subcommands:"
+        echo "  init-docs    Bootstrap the per-project doc repo layout (DOCS-01)"
+        echo ""
+        echo "Required profile fields for init-docs:"
+        echo "  profile.json: docs_repo, docs_branch, docs_project_dir"
+        echo "  .env:         DOCS_REPO_TOKEN (host-only, never mounted into container)"
+        exit 0
+        ;;
+      *)
+        echo "ERROR: Unknown profile subcommand: $PROFILE_SUB" >&2
+        echo "Run: claude-secure --profile NAME profile --help" >&2
+        exit 1
+        ;;
+    esac
+    ;;
   *)
     mkdir -p "$LOG_DIR"
     # 777 required: three containers write as different UIDs (claude:1001, node:1000, root:0)
