@@ -168,6 +168,98 @@ project_env_for_containers() {
   echo "$dst"
 }
 
+# Phase 23 BIND-03: emit a one-line deprecation warning exactly once per
+# profile per shell session. Uses a per-profile sentinel file under $TMPDIR.
+# Gate on `[ -t 2 ]` so JSON-parsing wrappers and CI logs stay silent.
+emit_deprecation_warning() {
+  local profile="$1"
+  local sentinel="${TMPDIR:-/tmp}/cs-deprecation-warned-${profile}"
+  if [ -e "$sentinel" ]; then
+    return 0
+  fi
+  # Always mark as warned first, so a concurrent call cannot double-fire.
+  : > "$sentinel" 2>/dev/null || true
+  _CLEANUP_FILES+=("$sentinel")
+  if [ -t 2 ]; then
+    echo "WARNING: profile '$profile' uses deprecated 'report_repo'/'REPORT_REPO_TOKEN' fields." >&2
+    echo "         Rename to 'docs_repo'/'DOCS_REPO_TOKEN' in profile.json and .env -- see README.md." >&2
+  else
+    # Non-terminal (CI/tests/wrappers): single short line on stderr for grep coverage.
+    echo "WARNING: profile '$profile' uses deprecated report_repo/REPORT_REPO_TOKEN -- rename to docs_repo/DOCS_REPO_TOKEN." >&2
+  fi
+  return 0
+}
+
+# Phase 23 BIND-03: resolve the doc-repo fields, preferring new names over
+# legacy. Exports DOCS_REPO, DOCS_BRANCH, DOCS_PROJECT_DIR, DOCS_MODE,
+# DOCS_REPO_TOKEN in the caller's shell. Back-fills REPORT_REPO_TOKEN from
+# DOCS_REPO_TOKEN if only the new name is set (so Phase 16 push_with_retry
+# and publish_report -- which read REPORT_REPO_TOKEN directly -- keep working).
+# Fires emit_deprecation_warning if any legacy field was the source of truth.
+resolve_docs_alias() {
+  local name="$1"
+  local pdir="$CONFIG_DIR/profiles/$name"
+  local pj="$pdir/profile.json"
+  local deprecated=0
+
+  # Field reads
+  local new_repo legacy_repo
+  new_repo=$(jq -r '.docs_repo // empty' "$pj" 2>/dev/null)
+  legacy_repo=$(jq -r '.report_repo // empty' "$pj" 2>/dev/null)
+  if [ -n "$new_repo" ]; then
+    DOCS_REPO="$new_repo"
+  elif [ -n "$legacy_repo" ]; then
+    DOCS_REPO="$legacy_repo"
+    deprecated=1
+  else
+    DOCS_REPO=""
+  fi
+
+  local new_branch legacy_branch
+  new_branch=$(jq -r '.docs_branch // empty' "$pj" 2>/dev/null)
+  legacy_branch=$(jq -r '.report_branch // empty' "$pj" 2>/dev/null)
+  if [ -n "$new_branch" ]; then
+    DOCS_BRANCH="$new_branch"
+  elif [ -n "$legacy_branch" ]; then
+    DOCS_BRANCH="$legacy_branch"
+    deprecated=1
+  else
+    DOCS_BRANCH="main"
+  fi
+
+  DOCS_PROJECT_DIR=$(jq -r '.docs_project_dir // empty' "$pj" 2>/dev/null)
+  DOCS_MODE=$(jq -r '.docs_mode // "report_only"' "$pj" 2>/dev/null)
+
+  # Token alias: prefer DOCS_REPO_TOKEN, fall back to REPORT_REPO_TOKEN.
+  # Both names have already been sourced into the caller's shell (load_profile_config
+  # ran `set -a; source .env; set +a` before calling us).
+  if [ -z "${DOCS_REPO_TOKEN:-}" ] && [ -n "${REPORT_REPO_TOKEN:-}" ]; then
+    DOCS_REPO_TOKEN="$REPORT_REPO_TOKEN"
+    deprecated=1
+  fi
+  # Back-fill legacy name from new name so Phase 16 publish_report /
+  # push_with_retry (which read REPORT_REPO_TOKEN) keeps working under the
+  # new schema even when the user has renamed everything.
+  if [ -z "${REPORT_REPO_TOKEN:-}" ] && [ -n "${DOCS_REPO_TOKEN:-}" ]; then
+    REPORT_REPO_TOKEN="$DOCS_REPO_TOKEN"
+  fi
+  # Same back-fill for REPORT_REPO so publish_report's `repo_url="${REPORT_REPO:-}"` still resolves.
+  if [ -z "${REPORT_REPO:-}" ] && [ -n "${DOCS_REPO:-}" ]; then
+    REPORT_REPO="$DOCS_REPO"
+  fi
+  if [ -z "${REPORT_BRANCH:-}" ] && [ -n "${DOCS_BRANCH:-}" ]; then
+    REPORT_BRANCH="$DOCS_BRANCH"
+  fi
+
+  export DOCS_REPO DOCS_BRANCH DOCS_PROJECT_DIR DOCS_MODE DOCS_REPO_TOKEN
+  export REPORT_REPO REPORT_BRANCH REPORT_REPO_TOKEN
+
+  if [ "$deprecated" = "1" ]; then
+    emit_deprecation_warning "$name"
+  fi
+  return 0
+}
+
 create_profile() {
   local name="$1"
   local pdir="$CONFIG_DIR/profiles/$name"
@@ -320,6 +412,8 @@ load_profile_config() {
     source "$pdir/.env"
     set +a
   fi
+  # Phase 23 BIND-03: resolve new/legacy field aliases and export DOCS_* vars.
+  resolve_docs_alias "$name"
 }
 
 load_superuser_config() {

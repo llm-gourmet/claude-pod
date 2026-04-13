@@ -189,6 +189,8 @@ test_legacy_report_repo_alias() {
   # must equal the legacy report_repo value
   install_fixture "profile-23-legacy" "legacy-alias"
   source_cs
+  # Unset vars potentially polluted by prior tests in the same session.
+  unset DOCS_REPO DOCS_REPO_TOKEN REPORT_REPO_TOKEN 2>/dev/null || true
   load_profile_config "legacy-alias"
   [ "${DOCS_REPO:-}" = "https://github.com/owner/legacy-test.git" ]
 }
@@ -198,6 +200,8 @@ test_legacy_report_token_alias() {
   # DOCS_REPO_TOKEN must be populated from REPORT_REPO_TOKEN
   install_fixture "profile-23-legacy" "legacy-token"
   source_cs
+  # Unset token vars potentially polluted by prior tests in the same session.
+  unset DOCS_REPO_TOKEN REPORT_REPO_TOKEN 2>/dev/null || true
   load_profile_config "legacy-token"
   [ "${DOCS_REPO_TOKEN:-}" = "fake-phase23-legacy-token" ]
 }
@@ -208,6 +212,11 @@ test_deprecation_warning_rate_limit() {
   # - Second call: stderr does NOT contain 'deprecated'
   install_fixture "profile-23-legacy" "legacy-ratelimit"
   source_cs
+
+  # Clear any stale sentinel from previous test runs so the first call always fires.
+  rm -f "${TMPDIR:-/tmp}/cs-deprecation-warned-legacy-ratelimit"
+  # Unset token vars potentially polluted by prior tests in the same session.
+  unset DOCS_REPO_TOKEN REPORT_REPO_TOKEN DOCS_REPO DOCS_BRANCH 2>/dev/null || true
 
   local stderr1 stderr2
   stderr1=$(load_profile_config "legacy-ratelimit" 2>&1 >/dev/null)
