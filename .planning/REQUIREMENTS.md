@@ -102,6 +102,74 @@ Which phases cover which requirements. Updated during roadmap creation.
 - Mapped to phases: 18
 - Unmapped: 0
 
+## v3.0 Requirements
+
+Requirements for macOS platform support. Each maps to roadmap phases.
+
+### Platform Detection & Installer (PLAT)
+
+- [ ] **PLAT-01**: User can install claude-secure on macOS via a single installer command
+- [ ] **PLAT-02**: Installer detects platform (linux/wsl2/macos) via shared `lib/platform.sh` with `detect_platform()` — all scripts use it, `CLAUDE_SECURE_PLATFORM_OVERRIDE` available for CI mocking
+- [ ] **PLAT-03**: Installer verifies Homebrew is present on macOS and prints actionable install instructions if missing (does not auto-install)
+- [ ] **PLAT-04**: Installer bootstraps GNU tools on macOS (`brew install bash coreutils jq`) before any other steps
+- [ ] **PLAT-05**: Installer verifies Docker Desktop ≥ 4.44.3 is installed and running on macOS, and warns/blocks if older
+
+### Container Compatibility (COMPAT)
+
+- [ ] **COMPAT-01**: Validator container uses `python:3.11-slim-bookworm` base image on all platforms (replaces Alpine — fixes iptables-nft mismatch with Docker Desktop Mac's kernel)
+
+### Bash/BSD Portability (PORT)
+
+- [ ] **PORT-01**: All host-side scripts prepend GNU coreutils to PATH via `$(brew --prefix)/libexec/gnubin` on macOS (fixes `date`, `sed`, `readlink`, `stat`, `base64`, `xargs`, `grep -P` silently)
+- [ ] **PORT-02**: Host scripts using bash 4+ features (`declare -A`, `mapfile`, `${var,,}`) re-exec into brew bash 5 on macOS
+- [ ] **PORT-03**: All host-side scripts audited for `flock` usage; replaced with `mkdir`-based atomic locking where found
+- [ ] **PORT-04**: Hook call-ID generation normalizes `uuidgen` output to lowercase on macOS (BSD uuidgen outputs uppercase)
+
+### Network Enforcement (ENFORCE)
+
+- [ ] **ENFORCE-01**: Empirical spike on macOS hardware verifies whether iptables works inside Docker Desktop containers with `NET_ADMIN` + shared network namespace
+- [ ] **ENFORCE-02**: Network-level call enforcement is functional on macOS (implementation determined by spike: iptables-in-container / host-side pf anchor / proxy chokepoint)
+
+### Service Management — launchd (SVC)
+
+- [ ] **SVC-01**: Webhook listener runs as a LaunchDaemon on macOS (`com.claude-secure.webhook.plist`), replacing the systemd unit
+- [ ] **SVC-02**: Installer installs/uninstalls webhook LaunchDaemon using `launchctl bootstrap`/`bootout` (not deprecated `load`/`unload`)
+- [ ] **SVC-03**: Container reaper runs as a LaunchDaemon on macOS (`com.claude-secure.reaper.plist`), replacing the systemd timer
+- [ ] **SVC-04**: pf anchor rules are restored on macOS boot via a one-shot LaunchDaemon *(conditional: only required if ENFORCE-01 spike chooses host-side pf enforcement)*
+
+### Testing (TEST)
+
+- [ ] **TEST-01**: `CLAUDE_SECURE_PLATFORM_OVERRIDE` env var allows Linux CI to mock and exercise macOS code paths without a Mac runner
+- [ ] **TEST-02**: Integration tests verify non-whitelisted calls are blocked on macOS (TCP reject or HTTP 403 depending on enforcement choice)
+- [ ] **TEST-03**: Integration tests verify launchd lifecycle: install, start, survive reboot, uninstall cleanly including pf zombie anchor cleanup
+
+## Future Requirements
+
+Deferred to future release. Tracked but not in current roadmap.
+
+### Cost & Monitoring
+
+- **COST-01**: Cost tracking per event aggregated by profile and time period
+- **HEALTH-01**: Health monitoring with systemd watchdog integration
+- **HEALTH-02**: Failure alerting via webhook to notification service (Slack/Discord)
+
+### Security Hardening
+
+- **SEC-01**: Per-profile --allowedTools scoping instead of blanket --dangerously-skip-permissions
+- **SEC-02**: Prompt injection sanitization for GitHub event payloads injected into prompts
+
+### CLI
+
+- **CLI-01**: `claude-secure headless status` command showing listener state and recent events
+- **CLI-02**: `claude-secure headless logs` command for querying execution history
+
+### macOS Enhancements (Post-v3.0)
+
+- **MAC-01**: Homebrew tap for installer distribution (`brew install claude-secure`)
+- **MAC-02**: Keychain-backed OAuth token storage on macOS (native `security` CLI)
+- **MAC-03**: Apple Silicon + Intel multi-arch container images (`linux/arm64` + `linux/amd64`)
+- **MAC-04**: Logs to `~/Library/Logs/claude-secure/` for Console.app integration
+
 ---
 *Requirements defined: 2026-04-11*
-*Last updated: 2026-04-11 after roadmap creation*
+*Last updated: 2026-04-13 after v3.0 milestone start*
