@@ -375,7 +375,55 @@ test_install_sh_has_phase18_prologue() {
 }
 
 test_phase18_full_suite_under_macos_override() {
-  echo "STUB: implemented in plan 05"
+  # Recursion guard: when we are already inside the macOS-override sub-suite,
+  # skip this test instead of recursing infinitely.
+  if [ "${__PHASE18_SUBSUITE:-0}" = "1" ]; then
+    echo "  (skipped inside __PHASE18_SUBSUITE=1)"
+    return 0
+  fi
+
+  local subshell_log; subshell_log="$(mktemp)"
+  local rc=0
+  (
+    export CLAUDE_SECURE_PLATFORM_OVERRIDE=macos
+    export __PHASE18_SUBSUITE=1
+    # Point the bootstrap at the fixture brew prefix so claude_secure_bootstrap_path
+    # has a valid macOS environment to validate against.
+    export CLAUDE_SECURE_BREW_PREFIX_OVERRIDE="$REPO_ROOT/tests/fixtures/brew"
+    bash "$REPO_ROOT/tests/test-phase18.sh"
+  ) > "$subshell_log" 2>&1 || rc=$?
+
+  local log_contents
+  log_contents="$(cat "$subshell_log")"
+  rm -f "$subshell_log"
+
+  if [ "$rc" -ne 0 ]; then
+    echo "sub-suite under CLAUDE_SECURE_PLATFORM_OVERRIDE=macos exited $rc" >&2
+    echo "$log_contents" >&2
+    return 1
+  fi
+
+  # Spot-check that the macOS-relevant tests actually ran and passed in the sub-suite
+  echo "$log_contents" | grep -q "PASS detect_platform override macos" || {
+    echo "sub-suite missing PASS detect_platform override macos" >&2
+    echo "$log_contents" >&2
+    return 1
+  }
+  echo "$log_contents" | grep -q "PASS bootstrap_path macos with fake brew ok" || {
+    echo "sub-suite missing PASS bootstrap_path macos with fake brew ok" >&2
+    echo "$log_contents" >&2
+    return 1
+  }
+  echo "$log_contents" | grep -q "PASS uuid_lower normalizes" || {
+    echo "sub-suite missing PASS uuid_lower normalizes" >&2
+    echo "$log_contents" >&2
+    return 1
+  }
+  echo "$log_contents" | grep -q "FAILED=0" || {
+    echo "sub-suite did not report FAILED=0" >&2
+    echo "$log_contents" >&2
+    return 1
+  }
   return 0
 }
 
@@ -405,7 +453,7 @@ run_test "caller prologue re-execs brew bash (stub)" test_caller_prologue_reexec
 run_test "no flock in host scripts (stub)"          test_no_flock_in_host_scripts
 run_test "hook uuidgen lowercased (stub)"           test_hook_uuidgen_is_lowercased
 run_test "install.sh has Phase 18 prologue"         test_install_sh_has_phase18_prologue
-run_test "phase18 full suite under macos override (stub)" test_phase18_full_suite_under_macos_override
+run_test "phase18 full suite under macos override" test_phase18_full_suite_under_macos_override
 
 echo ""
 echo "PASSED=$PASSED FAILED=$FAILED"
