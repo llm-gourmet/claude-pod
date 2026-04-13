@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v4.0
-milestone_name: Agent Documentation Layer
-status: roadmap complete
-stopped_at: v4.0 roadmap drafted (Phases 23-26)
-last_updated: "2026-04-13T00:00:00.000Z"
-last_activity: 2026-04-13
+milestone: v3.0
+milestone_name: macOS Support
+status: executing
+stopped_at: "Completed 23-02-PLAN.md"
+last_updated: "2026-04-13T18:44:37Z"
+last_activity: 2026-04-13 -- Phase 23 Plan 02 complete (BIND-01/02/03)
 progress:
-  total_phases: 4
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_phases: 9
+  completed_phases: 2
+  total_plans: 11
+  completed_plans: 8
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-13)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** v4.0 Agent Documentation Layer — ready to plan Phase 23 (profile ↔ doc repo binding)
+**Current focus:** Phase 23 — profile-doc-repo-binding
 
 ## Current Position
 
-Phase: 23 — Profile ↔ Doc Repo Binding (not started)
-Plan: —
-Status: Roadmap drafted; awaiting phase planning
-Last activity: 2026-04-13 — v4.0 roadmap drafted (Phases 23-26), 18 requirements mapped
+Phase: 23 (profile-doc-repo-binding) — EXECUTING
+Plan: 2 of 3 (COMPLETE)
+Status: Executing Phase 23 — Plan 02 done, Plan 03 pending
+Last activity: 2026-04-13 -- Phase 23 execution started
 
 Progress: [░░░░░░░░░░] 0% (0/4 v4.0 phases)
 
@@ -71,6 +71,7 @@ Progress: [░░░░░░░░░░] 0% (0/4 v4.0 phases)
 | Phase 18-platform-abstraction-bash-portability P05 | 6min | 2 tasks | 3 files |
 | Phase 19-docker-desktop-compatibility P01 | 99s | 3 tasks | 5 files |
 | Phase 19-docker-desktop-compatibility P02 | 2 | 3 tasks | 3 files |
+| Phase 23-profile-doc-repo-binding P02 | 17min | 3 tasks | 9 files |
 | Phase 19-docker-desktop-compatibility P03 | 8min | 2 tasks | 2 files |
 
 **Recent Trend:**
@@ -87,6 +88,8 @@ Progress: [░░░░░░░░░░] 0% (0/4 v4.0 phases)
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
+- [Phase 23-02]: BIND-02 security invariant implemented: DOCS_REPO_TOKEN and REPORT_REPO_TOKEN filtered from docker-compose env_file via project_env_for_containers(); host bash still receives tokens via set -a; source .env
+- [Phase 23-02]: BIND-03 alias layer: resolve_docs_alias() prefers docs_* names, falls back to report_*, and back-fills REPORT_REPO/BRANCH/TOKEN for Phase 16 compatibility
 - [Roadmap v4.0]: Four phases mapped 1:1 to research Phases A-D (E webhook inbound and F integration tests deferred to v4.1 per milestone scope)
 - [Roadmap v4.0]: Phase 23 (BIND + DOCS-01 init-docs) groups all profile-schema work together — DOCS-01 is a profile subcommand, so it belongs alongside schema fields, not in Phase 24
 - [Roadmap v4.0]: Phase 24 (multi-file publish bundle) takes 8 requirements: DOCS-02, DOCS-03, and the full RPT-* family — RPT-03/RPT-04 (redaction + sanitization) are success criteria of the same atomic commit path, not separate phases
