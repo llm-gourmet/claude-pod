@@ -110,8 +110,8 @@ Requirements for macOS platform support. Each maps to roadmap phases.
 
 - [ ] **PLAT-01**: User can install claude-secure on macOS via a single installer command
 - [x] **PLAT-02**: Installer detects platform (linux/wsl2/macos) via shared `lib/platform.sh` with `detect_platform()` — all scripts use it, `CLAUDE_SECURE_PLATFORM_OVERRIDE` available for CI mocking
-- [ ] **PLAT-03**: Installer verifies Homebrew is present on macOS and prints actionable install instructions if missing (does not auto-install)
-- [ ] **PLAT-04**: Installer bootstraps GNU tools on macOS (`brew install bash coreutils jq`) before any other steps
+- [x] **PLAT-03**: Installer verifies Homebrew is present on macOS and prints actionable install instructions if missing (does not auto-install)
+- [x] **PLAT-04**: Installer bootstraps GNU tools on macOS (`brew install bash coreutils jq`) before any other steps
 - [ ] **PLAT-05**: Installer verifies Docker Desktop ≥ 4.44.3 is installed and running on macOS, and warns/blocks if older
 
 ### Container Compatibility (COMPAT)
@@ -151,8 +151,8 @@ Which phases cover which v3.0 requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | PLAT-01 | Phase 21 | Pending |
 | PLAT-02 | Phase 18 | Complete |
-| PLAT-03 | Phase 18 | Pending |
-| PLAT-04 | Phase 18 | Pending |
+| PLAT-03 | Phase 18 | Complete |
+| PLAT-04 | Phase 18 | Complete |
 | PLAT-05 | Phase 19 | Pending |
 | COMPAT-01 | Phase 19 | Pending |
 | PORT-01 | Phase 18 | Pending |

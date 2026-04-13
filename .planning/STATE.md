@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: macOS Support
 status: executing
-stopped_at: Completed 18-01-PLAN.md
-last_updated: "2026-04-13T09:55:36.915Z"
+stopped_at: Completed 18-02-PLAN.md
+last_updated: "2026-04-13T10:02:57.667Z"
 last_activity: 2026-04-13
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 5
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-13)
 ## Current Position
 
 Phase: 18 (Platform Abstraction & Bash Portability) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-04-13
 
@@ -72,6 +72,7 @@ Progress: [░░░░░░░░░░] 0% (0/5 phases — v3.0 only)
 
 *Updated after each plan completion*
 | Phase 18-platform-abstraction-bash-portability P01 | 12min | 3 tasks | 5 files |
+| Phase 18-platform-abstraction-bash-portability P02 | 10min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,7 @@ Recent decisions affecting current work:
 - [Roadmap v3.0]: PLAT-01 (single installer command works on macOS) anchored to Phase 21 since end-to-end install only completes once launchd daemons load
 - [Phase 18-platform-abstraction-bash-portability]: Phase 18 Plan 01: lib/platform.sh public API shipped (detect_platform, claude_secure_brew_prefix, claude_secure_uuid_lower, claude_secure_bootstrap_path) — bash 3.2 safe, idempotent re-source guard, env-var overrides for CI mocking
 - [Phase 18-platform-abstraction-bash-portability]: Phase 18 Plan 01: tests/test-phase17.sh now expects mkdir-lock semantics in do_reap; suite intentionally red until Plan 04 closes the cross-plan handshake
+- [Phase 18-platform-abstraction-bash-portability]: Plan 02: macos_bootstrap_deps wired into install.sh check_dependencies before apt-style audit; legacy_detect_platform rename preserves Phase 19 callers; mock-brew-on-PATH + CLAUDE_SECURE_PLATFORM_OVERRIDE=macos pattern enables Linux-CI macOS branch coverage
 
 ### Pending Todos
 
@@ -118,5 +120,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-13 — v3.0 roadmap drafted (Phases 18-22), STATE.md initialized for milestone planning
-Stopped at: Completed 18-01-PLAN.md
+Stopped at: Completed 18-02-PLAN.md
 Resume file: None
