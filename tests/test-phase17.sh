@@ -13,11 +13,11 @@
 #
 # Later waves flip the NOT-IMPLEMENTED sentinels green:
 #   - 17-02 (Wave 1a): reaper core, unit file directives, D-11 hardening,
-#                      compose mem_limit, flock, logging, dry-run
+#                      compose mem_limit, mkdir locking, logging, dry-run
 #   - 17-04 (Wave 2):  installer step 5d + post-install hint
 #
 # Guardrails:
-#   - Stubs `docker` and `flock` on PATH (no real Docker daemon touched)
+#   - Stubs `docker` on PATH (no real Docker daemon touched)
 #   - __CLAUDE_SECURE_SOURCE_ONLY=1 to expose bin/claude-secure internals
 #   - TEST_TMPDIR cleanup via trap EXIT, nothing touches real ~/.claude-secure
 #
@@ -34,7 +34,6 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEST_TMPDIR=$(mktemp -d)
 LISTENER_PORT=19017  # Phase 17 unit -- avoids collision with 14/15/16 (19016)
 MOCK_DOCKER_LOG="$TEST_TMPDIR/mock-docker.log"
-MOCK_FLOCK_LOG="$TEST_TMPDIR/mock-flock.log"
 
 cleanup() {
   rm -rf "$TEST_TMPDIR"
@@ -102,41 +101,11 @@ STUB
 }
 
 # =========================================================================
-# Mock flock wrapper: emulates lock contention when MOCK_FLOCK_HELD=1.
-# Records argv to $MOCK_FLOCK_LOG.
+# NOTE: the lock primitive binary mock was removed in Phase 18 (PORT-03).
+# do_reap now uses mkdir-based atomic locking (portable across Linux and
+# macOS, which lacks util-linux). Tests pre-create the lockdir to simulate
+# contention. See test_reap_mkdir_lock_single_flight below.
 # =========================================================================
-install_mock_flock() {
-  mkdir -p "$TEST_TMPDIR/bin"
-  cat > "$TEST_TMPDIR/bin/flock" <<'STUB'
-#!/bin/bash
-printf '%s\n' "$*" >> "${MOCK_FLOCK_LOG:-/dev/null}"
-if [ "${MOCK_FLOCK_HELD:-0}" = "1" ]; then
-  # Emulate `flock -n` failing to acquire the lock.
-  exit 1
-fi
-# Delegate the command to bash; `flock -n <fd> command...` shape support.
-# For simplicity the mock ignores the lock FD entirely.
-shift_count=0
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -n|-x|-s|-u|-E*) shift; shift_count=$((shift_count+1));;
-    -*)              shift; shift_count=$((shift_count+1));;
-    *) break;;
-  esac
-done
-# Swallow the FD / lockfile token if any remains.
-if [ $# -gt 0 ] && { [[ "$1" =~ ^[0-9]+$ ]] || [[ "$1" != *" "* && -e "$1" ]]; }; then
-  shift
-fi
-if [ $# -gt 0 ]; then
-  exec "$@"
-fi
-exit 0
-STUB
-  chmod +x "$TEST_TMPDIR/bin/flock"
-  export PATH="$TEST_TMPDIR/bin:$PATH"
-  export MOCK_FLOCK_LOG
-}
 
 # =========================================================================
 # Source bin/claude-secure with __CLAUDE_SECURE_SOURCE_ONLY=1 so tests can
@@ -487,7 +456,7 @@ test_reap_event_age_secs_override() {
 # REAPER FLOCK + LOGGING (flipped by 17-02)
 # =========================================================================
 
-test_reap_flock_single_flight() {
+test_reap_mkdir_lock_single_flight() {
   source_claude_secure_for_unit_test
   : > "$MOCK_DOCKER_LOG"
   export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
@@ -496,17 +465,60 @@ test_reap_flock_single_flight() {
   export INSTANCE_PREFIX="cs-"
   export LOG_DIR="$TEST_TMPDIR/logs" LOG_PREFIX=""
   mkdir -p "$LOG_DIR"
-  export MOCK_FLOCK_HELD=1
+
+  # Simulate another running reaper: pre-create the lockdir with a live PID.
+  local lockdir="$LOG_DIR/reaper.lockdir"
+  mkdir -p "$lockdir"
+  # Use a long-lived background sleep PID as the "live holder"
+  sleep 30 &
+  local holder=$!
+  echo "$holder" > "$lockdir/pid"
+
   local out rc=0
   out=$(do_reap 2>&1) || rc=$?
-  unset MOCK_FLOCK_HELD MOCK_DOCKER_PS_OUTPUT MOCK_DOCKER_INSPECT_CREATED REAPER_ORPHAN_AGE_SECS INSTANCE_PREFIX
-  [ "$rc" = 0 ] || { echo "flock-contended do_reap should exit 0, got $rc" >&2; return 1; }
-  echo "$out" | grep -qi 'lock held\|another instance' || { echo "missing lock-held log line" >&2; echo "$out" >&2; return 1; }
-  # Lock held -> no compose down invocations
+
+  # Cleanup the simulated holder
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+  rm -rf "$lockdir" 2>/dev/null || true
+
+  unset MOCK_DOCKER_PS_OUTPUT MOCK_DOCKER_INSPECT_CREATED REAPER_ORPHAN_AGE_SECS INSTANCE_PREFIX
+
+  [ "$rc" = 0 ] || { echo "lock-held do_reap should exit 0, got $rc" >&2; echo "$out" >&2; return 1; }
+  echo "$out" | grep -qi 'another instance is running' || { echo "missing 'another instance is running' log line" >&2; echo "$out" >&2; return 1; }
   if grep -q 'compose -p .* down' "$MOCK_DOCKER_LOG"; then
     echo "lock-held reaper still invoked compose down" >&2
     return 1
   fi
+  return 0
+}
+
+test_reap_mkdir_lock_stale_reclaim() {
+  source_claude_secure_for_unit_test
+  : > "$MOCK_DOCKER_LOG"
+  export MOCK_DOCKER_PS_OUTPUT=""
+  export INSTANCE_PREFIX="cs-"
+  export LOG_DIR="$TEST_TMPDIR/logs" LOG_PREFIX=""
+  mkdir -p "$LOG_DIR"
+
+  # Pre-create lockdir with a dead PID.
+  local lockdir="$LOG_DIR/reaper.lockdir"
+  mkdir -p "$lockdir"
+  # Find a definitely-dead PID: spawn a no-op, capture pid, wait for exit.
+  (true) &
+  local dead=$!
+  wait "$dead" 2>/dev/null || true
+  echo "$dead" > "$lockdir/pid"
+
+  local out rc=0
+  out=$(do_reap 2>&1) || rc=$?
+
+  # After successful reclaim, do_reap should have rmdir'd the lockdir on exit
+  unset MOCK_DOCKER_PS_OUTPUT INSTANCE_PREFIX
+
+  [ "$rc" = 0 ] || { echo "stale-reclaim do_reap should exit 0, got $rc" >&2; echo "$out" >&2; return 1; }
+  echo "$out" | grep -qi 'stale lock\|reclaim' || { echo "missing stale-reclaim log line" >&2; echo "$out" >&2; return 1; }
+  echo "$out" | grep -qi 'cycle start' || { echo "did not enter cycle after reclaim" >&2; echo "$out" >&2; return 1; }
   return 0
 }
 
@@ -719,7 +731,6 @@ if [ $# -eq 1 ]; then
 fi
 
 install_mock_docker
-install_mock_flock
 
 echo "Phase 17 -- Wave 0 unit scaffold"
 echo "Most tests FAIL with NOT IMPLEMENTED until Waves 1a/2 land."
@@ -754,8 +765,9 @@ run_test "reap stale event files deleted"    test_reap_stale_event_files_deleted
 run_test "reap fresh event files preserved"  test_reap_fresh_event_files_preserved
 run_test "reap event age secs override"      test_reap_event_age_secs_override
 
-# Reaper flock + logging (17-02)
-run_test "reap flock single-flight"          test_reap_flock_single_flight
+# Reaper mkdir-lock + logging (17-02 + Phase 18 PORT-03)
+run_test "reap mkdir-lock single-flight"  test_reap_mkdir_lock_single_flight
+run_test "reap mkdir-lock stale-reclaim"  test_reap_mkdir_lock_stale_reclaim
 run_test "reap no jsonl output"              test_reap_no_jsonl_output
 run_test "reap log format"                   test_reap_log_format
 
