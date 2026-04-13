@@ -58,7 +58,7 @@
   4. Every host-side script runs cleanly on a fresh macOS shell: GNU coreutils are PATH-shimmed, bash 4+ syntax re-execs into brew bash 5, BSD `uuidgen` output is normalized to lowercase, and no `flock` calls remain
   5. Linux CI exercises the macOS code paths via `CLAUDE_SECURE_PLATFORM_OVERRIDE=macos` and the platform-detection unit tests pass on both real and mocked platforms
 **Plans**: 5 plans
-  - [ ] 18-01-PLAN.md — Wave 0: lib/platform.sh + Phase 18 test scaffolding + Phase 17 mkdir-lock test rewrite (PLAT-02, TEST-01)
+  - [x] 18-01-PLAN.md — Wave 0: lib/platform.sh + Phase 18 test scaffolding + Phase 17 mkdir-lock test rewrite (PLAT-02, TEST-01)
   - [ ] 18-02-PLAN.md — Wave 1: install.sh macOS Homebrew bootstrap (PLAT-03, PLAT-04)
   - [ ] 18-03-PLAN.md — Wave 2: bin/claude-secure + run-tests.sh bash 4+ re-exec prologue (PORT-01, PORT-02)
   - [ ] 18-04-PLAN.md — Wave 3: flock removal + uuidgen lowercase normalization (PORT-03, PORT-04)
@@ -130,7 +130,7 @@ v3.0 phases execute strictly in numeric order: 18 -> 19 -> 20 -> 21 -> 22
 | 15. Event Handlers | v2.0 | 4/4 | Complete | 2026-04-12 |
 | 16. Result Channel | v2.0 | 4/4 | Complete | 2026-04-12 |
 | 17. Operational Hardening | v2.0 | 4/4 | Complete | 2026-04-12 |
-| 18. Platform Abstraction & Bash Portability | v3.0 | 0/0 | Not started | - |
+| 18. Platform Abstraction & Bash Portability | v3.0 | 1/5 | In Progress|  |
 | 19. Docker Desktop Compatibility | v3.0 | 0/0 | Not started | - |
 | 20. Network Enforcement on macOS | v3.0 | 0/0 | Not started | - |
 | 21. launchd Service Management | v3.0 | 0/0 | Not started | - |

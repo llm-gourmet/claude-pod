@@ -109,7 +109,7 @@ Requirements for macOS platform support. Each maps to roadmap phases.
 ### Platform Detection & Installer (PLAT)
 
 - [ ] **PLAT-01**: User can install claude-secure on macOS via a single installer command
-- [ ] **PLAT-02**: Installer detects platform (linux/wsl2/macos) via shared `lib/platform.sh` with `detect_platform()` — all scripts use it, `CLAUDE_SECURE_PLATFORM_OVERRIDE` available for CI mocking
+- [x] **PLAT-02**: Installer detects platform (linux/wsl2/macos) via shared `lib/platform.sh` with `detect_platform()` — all scripts use it, `CLAUDE_SECURE_PLATFORM_OVERRIDE` available for CI mocking
 - [ ] **PLAT-03**: Installer verifies Homebrew is present on macOS and prints actionable install instructions if missing (does not auto-install)
 - [ ] **PLAT-04**: Installer bootstraps GNU tools on macOS (`brew install bash coreutils jq`) before any other steps
 - [ ] **PLAT-05**: Installer verifies Docker Desktop ≥ 4.44.3 is installed and running on macOS, and warns/blocks if older
@@ -139,7 +139,7 @@ Requirements for macOS platform support. Each maps to roadmap phases.
 
 ### Testing (TEST)
 
-- [ ] **TEST-01**: `CLAUDE_SECURE_PLATFORM_OVERRIDE` env var allows Linux CI to mock and exercise macOS code paths without a Mac runner
+- [x] **TEST-01**: `CLAUDE_SECURE_PLATFORM_OVERRIDE` env var allows Linux CI to mock and exercise macOS code paths without a Mac runner
 - [ ] **TEST-02**: Integration tests verify non-whitelisted calls are blocked on macOS (TCP reject or HTTP 403 depending on enforcement choice)
 - [ ] **TEST-03**: Integration tests verify launchd lifecycle: install, start, survive reboot, uninstall cleanly including pf zombie anchor cleanup
 
@@ -150,7 +150,7 @@ Which phases cover which v3.0 requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | PLAT-01 | Phase 21 | Pending |
-| PLAT-02 | Phase 18 | Pending |
+| PLAT-02 | Phase 18 | Complete |
 | PLAT-03 | Phase 18 | Pending |
 | PLAT-04 | Phase 18 | Pending |
 | PLAT-05 | Phase 19 | Pending |
@@ -165,7 +165,7 @@ Which phases cover which v3.0 requirements. Updated during roadmap creation.
 | SVC-02 | Phase 21 | Pending |
 | SVC-03 | Phase 21 | Pending |
 | SVC-04 | Phase 21 | Pending (conditional on Phase 20 spike) |
-| TEST-01 | Phase 18 | Pending |
+| TEST-01 | Phase 18 | Complete |
 | TEST-02 | Phase 22 | Pending |
 | TEST-03 | Phase 22 | Pending |
 

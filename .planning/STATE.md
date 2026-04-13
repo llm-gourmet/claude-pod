@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: macOS Support
-status: planning
-stopped_at: ""
-last_updated: "2026-04-13T00:00:00.000Z"
+status: executing
+stopped_at: Completed 18-01-PLAN.md
+last_updated: "2026-04-13T09:55:36.915Z"
 last_activity: 2026-04-13
 progress:
   total_phases: 5
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 5
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-13)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** v3.0 macOS Support — roadmap drafted, awaiting plan-phase for Phase 18
+**Current focus:** Phase 18 — Platform Abstraction & Bash Portability
 
 ## Current Position
 
-Phase: 18 (Platform Abstraction & Bash Portability) — not started
-Plan: —
-Status: Roadmap created, ready for `/gsd:plan-phase 18`
-Last activity: 2026-04-13 — v3.0 roadmap drafted (Phases 18-22)
+Phase: 18 (Platform Abstraction & Bash Portability) — EXECUTING
+Plan: 2 of 5
+Status: Ready to execute
+Last activity: 2026-04-13
 
 Progress: [░░░░░░░░░░] 0% (0/5 phases — v3.0 only)
 
@@ -71,6 +71,7 @@ Progress: [░░░░░░░░░░] 0% (0/5 phases — v3.0 only)
 - Trend: -
 
 *Updated after each plan completion*
+| Phase 18-platform-abstraction-bash-portability P01 | 12min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -86,6 +87,8 @@ Recent decisions affecting current work:
 - [Roadmap v3.0]: COMPAT-01 base image swap goes in Phase 19 with Docker Desktop compat (low risk, single image change)
 - [Roadmap v3.0]: TEST-01 platform mock lives in Phase 18 since it ships as part of lib/platform.sh
 - [Roadmap v3.0]: PLAT-01 (single installer command works on macOS) anchored to Phase 21 since end-to-end install only completes once launchd daemons load
+- [Phase 18-platform-abstraction-bash-portability]: Phase 18 Plan 01: lib/platform.sh public API shipped (detect_platform, claude_secure_brew_prefix, claude_secure_uuid_lower, claude_secure_bootstrap_path) — bash 3.2 safe, idempotent re-source guard, env-var overrides for CI mocking
+- [Phase 18-platform-abstraction-bash-portability]: Phase 18 Plan 01: tests/test-phase17.sh now expects mkdir-lock semantics in do_reap; suite intentionally red until Plan 04 closes the cross-plan handshake
 
 ### Pending Todos
 
@@ -115,5 +118,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-13 — v3.0 roadmap drafted (Phases 18-22), STATE.md initialized for milestone planning
-Stopped at: Roadmap created; next step is `/gsd:plan-phase 18`
+Stopped at: Completed 18-01-PLAN.md
 Resume file: None
