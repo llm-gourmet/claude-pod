@@ -307,6 +307,73 @@ test_hook_uuidgen_is_lowercased() {
   return 0
 }
 
+test_install_sh_has_phase18_prologue() {
+  local errors=0
+  local f="$REPO_ROOT/install.sh"
+  [ -f "$f" ] || { echo "missing $f" >&2; return 1; }
+
+  # Shebang is env bash
+  head -1 "$f" | grep -q '^#!/usr/bin/env bash' || { echo "install.sh shebang not #!/usr/bin/env bash" >&2; errors=$((errors+1)); }
+
+  # Re-exec guard in first 30 lines
+  head -30 "$f" | grep -q 'BASH_VERSINFO\[0\]:-0' || { echo "install.sh missing BASH_VERSINFO re-exec test" >&2; errors=$((errors+1)); }
+  head -30 "$f" | grep -q 'command -v brew' || { echo "install.sh missing command -v brew in prologue" >&2; errors=$((errors+1)); }
+  head -30 "$f" | grep -q 'exec "\$__brew_bash" "\$0" "\$@"' || { echo "install.sh missing exec __brew_bash" >&2; errors=$((errors+1)); }
+  head -30 "$f" | grep -q 'bash 4+ required. On macOS run: brew install bash' || { echo "install.sh missing bash 4+ required error text" >&2; errors=$((errors+1)); }
+
+  # Source lib/platform.sh + bootstrap call in first 40 lines
+  head -40 "$f" | grep -q 'source "\$SCRIPT_DIR/lib/platform.sh"' || { echo "install.sh missing source lib/platform.sh" >&2; errors=$((errors+1)); }
+  head -40 "$f" | grep -q 'claude_secure_bootstrap_path' || { echo "install.sh missing claude_secure_bootstrap_path call" >&2; errors=$((errors+1)); }
+
+  # Ordering: re-exec guard MUST come before `set -euo pipefail`
+  local reexec_line set_line
+  reexec_line="$(grep -n 'BASH_VERSINFO\[0\]:-0' "$f" | head -1 | cut -d: -f1)"
+  set_line="$(grep -n '^set -euo pipefail' "$f" | head -1 | cut -d: -f1)"
+  if [ -z "$reexec_line" ] || [ -z "$set_line" ]; then
+    echo "could not locate re-exec or set line in install.sh" >&2
+    errors=$((errors+1))
+  elif [ "$reexec_line" -ge "$set_line" ]; then
+    echo "install.sh re-exec guard (line $reexec_line) must precede set -euo pipefail (line $set_line)" >&2
+    errors=$((errors+1))
+  fi
+
+  # legacy_detect_platform must be GONE
+  if grep -q 'legacy_detect_platform' "$f"; then
+    echo "install.sh still contains legacy_detect_platform references" >&2
+    errors=$((errors+1))
+  fi
+
+  # main() must call detect_platform from lib/platform.sh
+  grep -q 'PLATFORM="\$(detect_platform)"' "$f" || {
+    echo "install.sh main() missing PLATFORM=\$(detect_platform)" >&2
+    errors=$((errors+1))
+  }
+
+  # Preserved WSL2 Docker Desktop warning
+  grep -q 'Docker Desktop detected. iptables may not work correctly.' "$f" || {
+    echo "install.sh missing preserved WSL2 Docker Desktop warning" >&2
+    errors=$((errors+1))
+  }
+
+  # Source-only guard at end of file
+  grep -q '__INSTALL_SOURCE_ONLY' "$f" || {
+    echo "install.sh missing __INSTALL_SOURCE_ONLY guard" >&2
+    errors=$((errors+1))
+  }
+
+  # Prologue must be bash 3.2 safe: no [[ ]], no ${VAR,,}, no declare -A in first 17 lines
+  if sed -n '1,17p' "$f" | grep -qE '\[\[|\$\{[A-Z_]+,,|declare -A'; then
+    echo "install.sh prologue contains bash 4+ syntax (not bash 3.2 safe)" >&2
+    errors=$((errors+1))
+  fi
+
+  # Syntax check
+  bash -n "$f" || { echo "install.sh failed syntax check" >&2; errors=$((errors+1)); }
+
+  [ "$errors" -eq 0 ] || return 1
+  return 0
+}
+
 test_phase18_full_suite_under_macos_override() {
   echo "STUB: implemented in plan 05"
   return 0
@@ -337,6 +404,7 @@ run_test "install verifies post bootstrap (stub)"   test_install_verifies_post_b
 run_test "caller prologue re-execs brew bash (stub)" test_caller_prologue_reexecs_into_brew_bash
 run_test "no flock in host scripts (stub)"          test_no_flock_in_host_scripts
 run_test "hook uuidgen lowercased (stub)"           test_hook_uuidgen_is_lowercased
+run_test "install.sh has Phase 18 prologue"         test_install_sh_has_phase18_prologue
 run_test "phase18 full suite under macos override (stub)" test_phase18_full_suite_under_macos_override
 
 echo ""
