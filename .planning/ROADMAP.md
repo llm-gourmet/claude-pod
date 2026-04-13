@@ -57,7 +57,12 @@
   3. Installer bootstraps GNU bash, coreutils, and jq via `brew install` before any other macOS step, and refuses to proceed if any are missing afterward
   4. Every host-side script runs cleanly on a fresh macOS shell: GNU coreutils are PATH-shimmed, bash 4+ syntax re-execs into brew bash 5, BSD `uuidgen` output is normalized to lowercase, and no `flock` calls remain
   5. Linux CI exercises the macOS code paths via `CLAUDE_SECURE_PLATFORM_OVERRIDE=macos` and the platform-detection unit tests pass on both real and mocked platforms
-**Plans**: TBD
+**Plans**: 5 plans
+  - [ ] 18-01-PLAN.md — Wave 0: lib/platform.sh + Phase 18 test scaffolding + Phase 17 mkdir-lock test rewrite (PLAT-02, TEST-01)
+  - [ ] 18-02-PLAN.md — Wave 1: install.sh macOS Homebrew bootstrap (PLAT-03, PLAT-04)
+  - [ ] 18-03-PLAN.md — Wave 2: bin/claude-secure + run-tests.sh bash 4+ re-exec prologue (PORT-01, PORT-02)
+  - [ ] 18-04-PLAN.md — Wave 3: flock removal + uuidgen lowercase normalization (PORT-03, PORT-04)
+  - [ ] 18-05-PLAN.md — Wave 4: install.sh prologue + final TEST-01 macOS-override sub-suite
 
 ### Phase 19: Docker Desktop Compatibility
 **Goal**: The existing Docker Compose stack boots and runs the four security layers correctly on Docker Desktop for Mac
