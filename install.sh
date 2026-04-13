@@ -1,9 +1,29 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Phase 18 PORT-02: bash 4+ re-exec guard. Apple ships bash 3.2.57 forever;
+# we re-exec into brew bash 5 so the rest of this script can use bash 4+ idioms.
+# This block MUST remain bash 3.2 safe: no double-bracket tests, no lowercasing, no associative arrays.
+if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+  if command -v brew >/dev/null 2>&1; then
+    __brew_bash="$(brew --prefix 2>/dev/null)/bin/bash"
+    if [ -x "$__brew_bash" ]; then
+      exec "$__brew_bash" "$0" "$@"
+    fi
+  fi
+  echo "ERROR: bash 4+ required. On macOS run: brew install bash" >&2
+  exit 1
+fi
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/platform.sh
 source "$SCRIPT_DIR/lib/platform.sh"
+# Phase 18 PORT-01: prepend gnubin to PATH so plain date/stat/readlink/realpath
+# resolve to GNU coreutils on macOS. No-op on Linux/WSL2.
+if command -v claude_secure_bootstrap_path >/dev/null 2>&1; then
+  claude_secure_bootstrap_path || true
+fi
+
 _invoking_user="${SUDO_USER:-$USER}"
 _invoking_home="$(getent passwd "$_invoking_user" | cut -d: -f6)"
 if [ -z "$_invoking_home" ]; then
@@ -120,31 +140,6 @@ check_dependencies() {
   fi
 
   log_info "All dependencies satisfied"
-}
-
-legacy_detect_platform() {
-  if grep -qi microsoft /proc/version 2>/dev/null; then
-    PLATFORM="wsl2"
-    log_info "Detected WSL2 environment"
-
-    # Check for Docker Desktop vs Docker CE
-    local os_info
-    os_info=$(docker info --format '{{.OperatingSystem}}' 2>/dev/null || echo "unknown")
-    if echo "$os_info" | grep -qi "docker desktop"; then
-      log_warn "Docker Desktop detected. iptables may not work correctly."
-      log_warn "Recommended: use Docker CE installed directly in WSL2."
-    fi
-
-    # Log iptables backend
-    local ipt_version
-    ipt_version=$(iptables -V 2>/dev/null || echo "not found")
-    log_info "iptables version: $ipt_version"
-  else
-    PLATFORM="linux"
-    log_info "Detected native Linux environment"
-  fi
-
-  log_info "Detected platform: $PLATFORM"
 }
 
 check_existing() {
@@ -519,7 +514,20 @@ main() {
   echo ""
 
   check_dependencies
-  legacy_detect_platform
+  PLATFORM="$(detect_platform)"
+  log_info "Detected platform: $PLATFORM"
+  if [ "$PLATFORM" = "wsl2" ]; then
+    # Preserved WSL2 warnings: Docker Desktop + iptables version log
+    local os_info
+    os_info=$(docker info --format '{{.OperatingSystem}}' 2>/dev/null || echo "unknown")
+    if echo "$os_info" | grep -qi "docker desktop"; then
+      log_warn "Docker Desktop detected. iptables may not work correctly."
+      log_warn "Recommended: use Docker CE installed directly in WSL2."
+    fi
+    local ipt_version
+    ipt_version=$(iptables -V 2>/dev/null || echo "not found")
+    log_info "iptables version: $ipt_version"
+  fi
   check_existing
   setup_directories
   setup_auth
