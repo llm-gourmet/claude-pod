@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Headless Agent Mode
 status: verifying
-stopped_at: "Completed quick-260412-w1y: Update README.md to document v2.0 features"
-last_updated: "2026-04-12T21:12:33.466Z"
+stopped_at: Completed 23-02-PLAN.md
+last_updated: "2026-04-13T18:45:59.569Z"
 last_activity: 2026-04-12
 progress:
   total_phases: 6
   completed_phases: 6
   total_plans: 21
   completed_plans: 21
-  percent: 100
+  percent: 88
 ---
 
 # Project State
@@ -71,6 +71,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 17 P02 | 18min | 3 tasks | 6 files |
 | Phase 17 P04 | 4min | 2 tasks | 3 files |
 | Phase 17-operational-hardening P03 | 35min | 2 tasks | 2 files |
+| Phase 23 P02 | 17 | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -119,6 +120,8 @@ Recent decisions affecting current work:
 - [Phase 17]: 17-03: push_with_retry expanded from 1 single-retry to a bounded 3-attempt rebase loop + grep widened to catch file:// remote rejection strings (remote rejected / failed to update ref / cannot lock ref) — fixes concurrent-publish race against Phase 14 Semaphore(3)
 - [Phase 17]: 17-03: reap added to superuser-skip list so timer-driven invocations never hit load_superuser_config's interactive DEFAULT_WORKSPACE prompt — reaper walks docker ps directly and needs no profile/whitelist
 - [Phase 17]: 17-03: scenario 3 sentinel created via minimal compose.yml (not plain docker run --label) so reaper's docker compose -p X down path can tear it down; scenario 4 uses two-layer check (compose config + docker inspect on explicit --no-deps --no-start claude container)
+- [Phase 23]: BIND-02 security invariant: DOCS_REPO_TOKEN and REPORT_REPO_TOKEN filtered from docker-compose env_file via project_env_for_containers(); host bash still receives tokens via set -a; source .env
+- [Phase 23]: BIND-03 alias: resolve_docs_alias() prefers docs_* names, falls back to report_*, and back-fills REPORT_REPO/BRANCH/TOKEN for Phase 16 compatibility
 
 ### Pending Todos
 
@@ -145,5 +148,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
-Stopped at: Completed quick-260412-w1y
+Stopped at: Completed 23-02-PLAN.md
 Resume file: None
