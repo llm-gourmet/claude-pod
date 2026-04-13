@@ -143,6 +143,37 @@ Requirements for macOS platform support. Each maps to roadmap phases.
 - [ ] **TEST-02**: Integration tests verify non-whitelisted calls are blocked on macOS (TCP reject or HTTP 403 depending on enforcement choice)
 - [ ] **TEST-03**: Integration tests verify launchd lifecycle: install, start, survive reboot, uninstall cleanly including pf zombie anchor cleanup
 
+## v3.0 Traceability
+
+Which phases cover which v3.0 requirements. Updated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| PLAT-01 | Phase 21 | Pending |
+| PLAT-02 | Phase 18 | Pending |
+| PLAT-03 | Phase 18 | Pending |
+| PLAT-04 | Phase 18 | Pending |
+| PLAT-05 | Phase 19 | Pending |
+| COMPAT-01 | Phase 19 | Pending |
+| PORT-01 | Phase 18 | Pending |
+| PORT-02 | Phase 18 | Pending |
+| PORT-03 | Phase 18 | Pending |
+| PORT-04 | Phase 18 | Pending |
+| ENFORCE-01 | Phase 20 | Pending |
+| ENFORCE-02 | Phase 20 | Pending |
+| SVC-01 | Phase 21 | Pending |
+| SVC-02 | Phase 21 | Pending |
+| SVC-03 | Phase 21 | Pending |
+| SVC-04 | Phase 21 | Pending (conditional on Phase 20 spike) |
+| TEST-01 | Phase 18 | Pending |
+| TEST-02 | Phase 22 | Pending |
+| TEST-03 | Phase 22 | Pending |
+
+**Coverage:**
+- v3.0 requirements: 19 total
+- Mapped to phases: 19
+- Unmapped: 0
+
 ## Future Requirements
 
 Deferred to future release. Tracked but not in current roadmap.
