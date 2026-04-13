@@ -120,8 +120,8 @@ Requirements for macOS platform support. Each maps to roadmap phases.
 
 ### Bash/BSD Portability (PORT)
 
-- [ ] **PORT-01**: All host-side scripts prepend GNU coreutils to PATH via `$(brew --prefix)/libexec/gnubin` on macOS (fixes `date`, `sed`, `readlink`, `stat`, `base64`, `xargs`, `grep -P` silently)
-- [ ] **PORT-02**: Host scripts using bash 4+ features (`declare -A`, `mapfile`, `${var,,}`) re-exec into brew bash 5 on macOS
+- [x] **PORT-01**: All host-side scripts prepend GNU coreutils to PATH via `$(brew --prefix)/libexec/gnubin` on macOS (fixes `date`, `sed`, `readlink`, `stat`, `base64`, `xargs`, `grep -P` silently)
+- [x] **PORT-02**: Host scripts using bash 4+ features (`declare -A`, `mapfile`, `${var,,}`) re-exec into brew bash 5 on macOS
 - [ ] **PORT-03**: All host-side scripts audited for `flock` usage; replaced with `mkdir`-based atomic locking where found
 - [ ] **PORT-04**: Hook call-ID generation normalizes `uuidgen` output to lowercase on macOS (BSD uuidgen outputs uppercase)
 
@@ -155,8 +155,8 @@ Which phases cover which v3.0 requirements. Updated during roadmap creation.
 | PLAT-04 | Phase 18 | Complete |
 | PLAT-05 | Phase 19 | Pending |
 | COMPAT-01 | Phase 19 | Pending |
-| PORT-01 | Phase 18 | Pending |
-| PORT-02 | Phase 18 | Pending |
+| PORT-01 | Phase 18 | Complete |
+| PORT-02 | Phase 18 | Complete |
 | PORT-03 | Phase 18 | Pending |
 | PORT-04 | Phase 18 | Pending |
 | ENFORCE-01 | Phase 20 | Pending |
