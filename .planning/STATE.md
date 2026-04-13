@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: macOS Support
-status: executing
-stopped_at: Completed 18-04-PLAN.md
-last_updated: "2026-04-13T10:14:54.077Z"
+status: verifying
+stopped_at: Completed 18-05-PLAN.md
+last_updated: "2026-04-13T10:25:06.772Z"
 last_activity: 2026-04-13
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 5
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-13)
 
 Phase: 18 (Platform Abstraction & Bash Portability) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-13
 
 Progress: [░░░░░░░░░░] 0% (0/5 phases — v3.0 only)
@@ -75,6 +75,7 @@ Progress: [░░░░░░░░░░] 0% (0/5 phases — v3.0 only)
 | Phase 18-platform-abstraction-bash-portability P02 | 10min | 2 tasks | 2 files |
 | Phase 18-platform-abstraction-bash-portability P03 | 3min | 3 tasks | 3 files |
 | Phase 18-platform-abstraction-bash-portability P04 | 3min | 3 tasks | 3 files |
+| Phase 18-platform-abstraction-bash-portability P05 | 6min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -96,6 +97,7 @@ Recent decisions affecting current work:
 - [Phase 18-platform-abstraction-bash-portability]: Plan 03: bin/claude-secure and run-tests.sh now have bash 4+ re-exec guard + lib/platform.sh source + claude_secure_bootstrap_path prologue; install.sh prologue deferred to Plan 05 to avoid files_modified conflict with Plan 02
 - [Phase 18-platform-abstraction-bash-portability]: Plan 03: test_caller_prologue_reexecs_into_brew_bash is a static-assertion test (grep + line-ordering + bash -n), not a runtime re-exec test — Linux CI cannot exercise the re-exec branch since it already runs bash 5; macOS hardware coverage will land in Phase 22 integration tests
 - [Phase 18-platform-abstraction-bash-portability]: Plan 04: do_reap swapped from flock (util-linux) to mkdir-based atomic lock with PID file + EXIT trap; lockdir path renamed reaper.lock → reaper.lockdir to guarantee zero collision with old versions; claude/hooks/pre-tool-use.sh pipes uuidgen through tr lowercase defensively (PORT-03, PORT-04)
+- [Phase 18-platform-abstraction-bash-portability]: Plan 05: install.sh now has shared Phase 18 prologue (bash 4+ re-exec + lib/platform.sh source + claude_secure_bootstrap_path); legacy_detect_platform removed; main() routes through lib/platform.sh detect_platform; TEST-01 proven end-to-end via test_phase18_full_suite_under_macos_override sub-suite
 
 ### Pending Todos
 
@@ -125,5 +127,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-13 — v3.0 roadmap drafted (Phases 18-22), STATE.md initialized for milestone planning
-Stopped at: Completed 18-04-PLAN.md
+Stopped at: Completed 18-05-PLAN.md
 Resume file: None

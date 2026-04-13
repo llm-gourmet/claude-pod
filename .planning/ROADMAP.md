@@ -39,7 +39,7 @@
 
 ### v3.0 macOS Support (In Progress)
 
-- [ ] **Phase 18: Platform Abstraction & Bash Portability** - Shared platform detection library and BSD/bash 3.2 portability fixes across all host scripts
+- [x] **Phase 18: Platform Abstraction & Bash Portability** - Shared platform detection library and BSD/bash 3.2 portability fixes across all host scripts (completed 2026-04-13)
 - [ ] **Phase 19: Docker Desktop Compatibility** - Compose topology and validator image work correctly under Docker Desktop on macOS
 - [ ] **Phase 20: Network Enforcement on macOS** - Empirical spike resolves iptables-vs-pf, then implements network-level call enforcement
 - [ ] **Phase 21: launchd Service Management** - Webhook listener and reaper run as LaunchDaemons; installer completes end-to-end on macOS
@@ -62,7 +62,7 @@
   - [x] 18-02-PLAN.md — Wave 1: install.sh macOS Homebrew bootstrap (PLAT-03, PLAT-04)
   - [x] 18-03-PLAN.md — Wave 2: bin/claude-secure + run-tests.sh bash 4+ re-exec prologue (PORT-01, PORT-02)
   - [x] 18-04-PLAN.md — Wave 3: flock removal + uuidgen lowercase normalization (PORT-03, PORT-04)
-  - [ ] 18-05-PLAN.md — Wave 4: install.sh prologue + final TEST-01 macOS-override sub-suite
+  - [x] 18-05-PLAN.md — Wave 4: install.sh prologue + final TEST-01 macOS-override sub-suite
 
 ### Phase 19: Docker Desktop Compatibility
 **Goal**: The existing Docker Compose stack boots and runs the four security layers correctly on Docker Desktop for Mac
@@ -130,7 +130,7 @@ v3.0 phases execute strictly in numeric order: 18 -> 19 -> 20 -> 21 -> 22
 | 15. Event Handlers | v2.0 | 4/4 | Complete | 2026-04-12 |
 | 16. Result Channel | v2.0 | 4/4 | Complete | 2026-04-12 |
 | 17. Operational Hardening | v2.0 | 4/4 | Complete | 2026-04-12 |
-| 18. Platform Abstraction & Bash Portability | v3.0 | 4/5 | In Progress|  |
+| 18. Platform Abstraction & Bash Portability | v3.0 | 5/5 | Complete   | 2026-04-13 |
 | 19. Docker Desktop Compatibility | v3.0 | 0/0 | Not started | - |
 | 20. Network Enforcement on macOS | v3.0 | 0/0 | Not started | - |
 | 21. launchd Service Management | v3.0 | 0/0 | Not started | - |
