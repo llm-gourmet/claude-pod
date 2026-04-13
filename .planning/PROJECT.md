@@ -41,8 +41,21 @@ No secret ever leaves the isolated environment uncontrolled — every outbound c
 ### Active
 
 - [ ] macOS platform support (v3.0)
+- [ ] Agent documentation layer — dedicated doc repo, standardized report template, profile binding, mandatory last-step reporting, webhook bidirectional coordination (v4.0)
 
-## Current Milestone: v3.0 macOS Support
+## Current Milestone: v4.0 Agent Documentation Layer
+
+**Goal:** Every headless (and interactive) Claude instance automatically reports to a dedicated documentation GitHub repo after completing its task, and can receive tasks from that repo via the existing webhook — making the doc repo the coordination hub for all agent work.
+
+**Target features:**
+- Dedicated documentation GitHub repo with per-project structure (todo.md, architecture.md, vision.md, ideas.md, specs/)
+- Standardized agent report template (where worked, what changed, what failed, how to test, future findings)
+- Profile ↔ doc repo binding: each profile config holds DOCS_REPO_KEY; every spawn mounts doc repo access
+- Agent mandatory last-step: write report to doc repo before exit (headless + interactive)
+- Webhook bidirectional integration: read tasks/issues from doc repo → dispatch to agents; agents write reports back on completion
+- Report indexing: per-project reports directory with timestamped files for human review
+
+## Previous Milestone: v3.0 macOS Support (In Progress — Phases 20-22 Pending)
 
 **Goal:** Extend claude-secure to run on macOS with full security parity — pf-based network enforcement, launchd webhook listener, and Docker Desktop compatibility.
 
@@ -114,4 +127,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-13
+*Last updated: 2026-04-13 — v4.0 Agent Documentation Layer milestone defined

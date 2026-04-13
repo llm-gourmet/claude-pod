@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v3.0
-milestone_name: macOS Support
-status: verifying
-stopped_at: Completed 19-03-PLAN.md
-last_updated: "2026-04-13T11:02:15.332Z"
+milestone: v4.0
+milestone_name: Agent Documentation Layer
+status: defining requirements
+stopped_at: Milestone initialized
+last_updated: "2026-04-13T00:00:00.000Z"
 last_activity: 2026-04-13
 progress:
-  total_phases: 5
-  completed_phases: 2
-  total_plans: 8
-  completed_plans: 8
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
   percent: 0
 ---
 
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-04-13)
 
 ## Current Position
 
-Phase: 19 (docker-desktop-compatibility) — EXECUTING
-Plan: 3 of 3
-Status: Phase complete — ready for verification
-Last activity: 2026-04-13
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-13 — Milestone v4.0 Agent Documentation Layer started
 
 Progress: [░░░░░░░░░░] 0% (0/5 phases — v3.0 only)
 
