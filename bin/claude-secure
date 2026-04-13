@@ -1,5 +1,38 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Phase 18 PORT-02: bash 4+ re-exec guard. Apple ships bash 3.2.57 forever;
+# we re-exec into brew bash 5 so the rest of this script can use bash 4+ idioms.
+# This block MUST remain bash 3.2 safe (no [[ ]], no ${var,,}, no declare -A).
+if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+  if command -v brew >/dev/null 2>&1; then
+    __brew_bash="$(brew --prefix 2>/dev/null)/bin/bash"
+    if [ -x "$__brew_bash" ]; then
+      exec "$__brew_bash" "$0" "$@"
+    fi
+  fi
+  echo "ERROR: bash 4+ required. On macOS run: brew install bash" >&2
+  exit 1
+fi
+
 set -euo pipefail
+
+# Phase 18 PORT-01: source the platform library and bootstrap PATH so GNU
+# coreutils (date, stat, readlink, realpath, sed, grep) shadow BSD versions
+# on macOS. No-op on Linux/WSL2.
+__CLAUDE_SECURE_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$__CLAUDE_SECURE_SELF_DIR/../lib/platform.sh" ]; then
+  # shellcheck source=../lib/platform.sh
+  source "$__CLAUDE_SECURE_SELF_DIR/../lib/platform.sh"
+elif [ -f "$__CLAUDE_SECURE_SELF_DIR/lib/platform.sh" ]; then
+  # Installed layout: lib/ alongside bin/
+  # shellcheck source=lib/platform.sh
+  source "$__CLAUDE_SECURE_SELF_DIR/lib/platform.sh"
+elif [ -f "/usr/local/share/claude-secure/lib/platform.sh" ]; then
+  # shellcheck source=/usr/local/share/claude-secure/lib/platform.sh
+  source "/usr/local/share/claude-secure/lib/platform.sh"
+fi
+if command -v claude_secure_bootstrap_path >/dev/null 2>&1; then
+  claude_secure_bootstrap_path || true
+fi
 
 # Source-only mode: load function definitions without executing main logic.
 # Used by tests: __CLAUDE_SECURE_SOURCE_ONLY=1 source bin/claude-secure
