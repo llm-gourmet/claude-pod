@@ -63,20 +63,74 @@ test_compat01_iptables_probe_present() {
 }
 
 test_plat05_parses_docker_desktop_4_44_3() {
-  # Plan 03 replaces this stub with a fixture-driven test:
-  #   __INSTALL_SOURCE_ONLY=1 source "$REPO_ROOT/install.sh"
-  #   docker() { cat "$REPO_ROOT/tests/fixtures/docker-version-desktop-4.44.3.txt"; }
-  #   check_docker_desktop_version  # must exit 0
+  # Source install.sh in test mode, mock `docker` to return the 4.44.3
+  # fixture for `version`, and a truthy exit for `info`. Expect rc=0.
+  local out rc
+  out="$(
+    export __INSTALL_SOURCE_ONLY=1
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/install.sh"
+    docker() {
+      case "$1" in
+        info) return 0 ;;
+        version) cat "$REPO_ROOT/tests/fixtures/docker-version-desktop-4.44.3.txt" ;;
+        *) return 0 ;;
+      esac
+    }
+    ( check_docker_desktop_version ) 2>&1
+    echo "__rc=$?"
+  )"
+  rc="$(echo "$out" | tail -1 | sed 's/^__rc=//')"
+  [ "$rc" = "0" ] || return 1
+  echo "$out" | grep -q "4.44.3 satisfies" || return 1
   return 0
 }
 
 test_plat05_rejects_docker_desktop_4_28_0() {
-  # Plan 03 replaces with fixture-driven test asserting exit 1 on old version.
+  # Old version must trigger exit 1 with an upgrade-url error log.
+  local out rc
+  out="$(
+    export __INSTALL_SOURCE_ONLY=1
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/install.sh"
+    docker() {
+      case "$1" in
+        info) return 0 ;;
+        version) cat "$REPO_ROOT/tests/fixtures/docker-version-desktop-4.28.0.txt" ;;
+        *) return 0 ;;
+      esac
+    }
+    ( check_docker_desktop_version ) 2>&1
+    echo "__rc=$?"
+  )"
+  rc="$(echo "$out" | tail -1 | sed 's/^__rc=//')"
+  # Expect non-zero rc (exit 1 in the subshell captured as __rc=1)
+  [ "$rc" = "1" ] || return 1
+  echo "$out" | grep -q "4.28.0 is installed but >= 4.44.3" || return 1
+  echo "$out" | grep -q "docs.docker.com/desktop/release-notes" || return 1
   return 0
 }
 
 test_plat05_warns_on_docker_engine() {
-  # Plan 03 replaces with fixture-driven test asserting exit 0 + warning log.
+  # Plain Docker Engine must WARN but continue (rc=0), not exit.
+  local out rc
+  out="$(
+    export __INSTALL_SOURCE_ONLY=1
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/install.sh"
+    docker() {
+      case "$1" in
+        info) return 0 ;;
+        version) cat "$REPO_ROOT/tests/fixtures/docker-version-engine.txt" ;;
+        *) return 0 ;;
+      esac
+    }
+    ( check_docker_desktop_version ) 2>&1
+    echo "__rc=$?"
+  )"
+  rc="$(echo "$out" | tail -1 | sed 's/^__rc=//')"
+  [ "$rc" = "0" ] || return 1
+  echo "$out" | grep -q "Docker Desktop not detected" || return 1
   return 0
 }
 
