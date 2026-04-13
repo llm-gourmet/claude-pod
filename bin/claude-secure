@@ -1648,13 +1648,12 @@ reap_stale_event_files() {
   EVENTS_DELETED=$deleted
 }
 
-# D-08: single-flight reaper cycle. Acquires a non-blocking flock on
-# $LOG_DIR/${LOG_PREFIX}reaper.lock. If held (e.g., timer-driven cycle
-# already running when operator invokes `claude-secure reap`), the second
-# instance exits 0 silently with a journal log line.
+# D-08 (Phase 18 PORT-03): single-flight reaper cycle. Uses mkdir-based atomic
+# locking with a PID file for stale-lock reclaim. Replaces the previous flock
+# primitive which is util-linux-only and not available on macOS without an
+# extra brew formula. mkdir is atomic on every POSIX filesystem.
 do_reap() {
   local dry_run=0
-  # Parse optional --dry-run flag.
   while [ $# -gt 0 ]; do
     case "$1" in
       --dry-run) dry_run=1; shift ;;
@@ -1672,16 +1671,34 @@ do_reap() {
   done
   export REAPER_DRY_RUN=$dry_run
 
-  local lock_file="${LOG_DIR:-$CONFIG_DIR/logs}/${LOG_PREFIX:-}reaper.lock"
-  mkdir -p "$(dirname "$lock_file")" 2>/dev/null || true
+  # Phase 18 PORT-03: mkdir-based atomic lock with PID file.
+  local lockdir="${LOG_DIR:-$CONFIG_DIR/logs}/${LOG_PREFIX:-}reaper.lockdir"
+  local pidfile="$lockdir/pid"
+  mkdir -p "$(dirname "$lockdir")" 2>/dev/null || true
 
-  # Acquire exclusive non-blocking lock on FD 9.
-  exec 9>"$lock_file"
-  chmod 666 "$lock_file" 2>/dev/null || true
-  if ! flock -n 9; then
-    echo "reaper: another instance is running (lock held), skipping cycle"
-    return 0
+  if ! mkdir "$lockdir" 2>/dev/null; then
+    # Lockdir already exists — check holder liveness
+    local holder_pid=0
+    if [ -r "$pidfile" ]; then
+      holder_pid="$(cat "$pidfile" 2>/dev/null || echo 0)"
+    fi
+    if [ "${holder_pid:-0}" -gt 0 ] && kill -0 "$holder_pid" 2>/dev/null; then
+      echo "reaper: another instance is running (pid=$holder_pid lockdir=$lockdir), skipping cycle"
+      return 0
+    fi
+    # Stale: holder is dead. Reclaim.
+    echo "reaper: stale lockdir found (dead holder pid=$holder_pid), reclaiming"
+    rm -f "$pidfile" 2>/dev/null || true
+    rmdir "$lockdir" 2>/dev/null || true
+    if ! mkdir "$lockdir" 2>/dev/null; then
+      echo "reaper: failed to acquire lockdir after reclaim attempt, skipping cycle"
+      return 0
+    fi
   fi
+  echo "$$" > "$pidfile" 2>/dev/null || true
+  # Cleanup on any exit path (normal return, error, signal)
+  # shellcheck disable=SC2064
+  trap "rm -f '$pidfile' 2>/dev/null || true; rmdir '$lockdir' 2>/dev/null || true" EXIT
 
   echo "reaper: cycle start prefix=${INSTANCE_PREFIX:-cs-}"
 
