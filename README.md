@@ -67,7 +67,8 @@ The proxy container bridges both networks. The validator shares the claude conta
 - curl
 - jq
 - uuidgen (`uuid-runtime` package on Debian/Ubuntu)
-- Linux (native) or WSL2 -- no macOS support
+- Linux (native) or WSL2
+- macOS with Docker Desktop >= 4.44.3 (partial support -- network enforcement layer not yet implemented)
 
 ## Installation
 
@@ -83,7 +84,7 @@ sudo ./install.sh --with-webhook
 The installer:
 
 1. Checks that all host dependencies are present
-2. Detects platform (native Linux or WSL2) and warns about Docker Desktop iptables issues
+2. Detects platform (native Linux, WSL2, or macOS) -- on macOS, verifies Docker Desktop >= 4.44.3 is installed and running
 3. Prompts for authentication -- OAuth token (recommended, via `claude setup-token`) or API key as fallback
 4. Prompts for a workspace path (default: `~/claude-workspace`)
 5. Copies project files to `~/.claude-secure/app/`
@@ -563,6 +564,8 @@ Requires Docker running. All tests use an isolated `claude-test` Docker Compose 
 | test-phase16.sh | Result channel (report push, JSONL audit log) |
 | test-phase17.sh | Container reaper unit tests (orphan detection, event cleanup) |
 | test-phase17-e2e.sh | End-to-end reaper scenarios (live Docker containers) |
+| test-phase19.sh | Docker Desktop compatibility (image pin, iptables probe, version gate) |
+| test-phase19-smoke.sh | macOS live smoke test -- self-skips on non-macOS; requires `--live` flag |
 
 ### Smart Pre-Push Hook
 
@@ -626,7 +629,7 @@ Example from the actual file:
 
 ### validator Container
 
-- Base image: Python 3.11 Alpine
+- Base image: Python 3.11 slim-bookworm (pinned for reproducible multi-arch builds; native arm64 support avoids QEMU iptables emulation issues on Docker Desktop Mac)
 - Zero pip dependencies -- uses only Python stdlib (`http.server`, `sqlite3`, `subprocess`, `json`, `threading`)
 - SQLite database in WAL mode for concurrent read/write access
 - `POST /register` -- accepts call-ID + domain, stores with 10-second TTL
@@ -654,15 +657,14 @@ Example from the actual file:
 
 - **Buffered proxy (no streaming)** -- All API responses are buffered for redaction before returning. This adds latency compared to streaming.
 - **No `@file` content scanning** -- When Claude Code references files via `@file`, the file contents enter LLM context but are not scanned by the proxy (they are part of the user-side message, not a secret environment variable).
-- **No macOS support** -- Docker Desktop on macOS does not support the network isolation and iptables patterns this project requires.
+- **Partial macOS support** -- Docker Desktop >= 4.44.3 is required; older versions are blocked by the installer. The network enforcement layer (iptables call validator) is not yet implemented on macOS -- network isolation depends on Docker Desktop's built-in network restrictions only.
 - **No automatic OAuth token refresh** -- If the OAuth token expires, you must re-run the auth setup manually.
 
 ## Platform Support
 
 - **Linux (native)** -- Fully supported. Any modern distribution with Docker Engine 24+ and kernel 4.x+.
-- **WSL2** -- Supported. The installer detects WSL2 automatically and validates the iptables backend.
-
-Docker Desktop on WSL2 may have iptables compatibility issues. Docker CE installed directly in the WSL2 distribution is recommended.
+- **WSL2** -- Supported. The installer detects WSL2 automatically and validates the iptables backend. Docker CE installed directly in the WSL2 distribution is recommended; Docker Desktop on WSL2 may have iptables compatibility issues.
+- **macOS (Docker Desktop)** -- Partial support. Docker Desktop >= 4.44.3 required; the installer blocks older versions. The Compose stack, proxy, and validator start correctly. Network enforcement (iptables call validator) is not yet implemented on macOS -- that work is tracked in Phase 20.
 
 ## License
 
