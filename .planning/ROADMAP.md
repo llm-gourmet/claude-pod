@@ -40,7 +40,7 @@
 ### v3.0 macOS Support (In Progress)
 
 - [x] **Phase 18: Platform Abstraction & Bash Portability** - Shared platform detection library and BSD/bash 3.2 portability fixes across all host scripts (completed 2026-04-13)
-- [ ] **Phase 19: Docker Desktop Compatibility** - Compose topology and validator image work correctly under Docker Desktop on macOS
+- [x] **Phase 19: Docker Desktop Compatibility** - Compose topology and validator image work correctly under Docker Desktop on macOS (completed 2026-04-13)
 - [ ] **Phase 20: Network Enforcement on macOS** - Empirical spike resolves iptables-vs-pf, then implements network-level call enforcement
 - [ ] **Phase 21: launchd Service Management** - Webhook listener and reaper run as LaunchDaemons; installer completes end-to-end on macOS
 - [ ] **Phase 22: macOS Integration Tests** - TCP-level block tests and launchd lifecycle tests verify v3.0 against silent-failure modes
@@ -75,7 +75,7 @@
 **Plans**: 3 plans
   - [x] 19-01-PLAN.md — Wave 0: Phase 19 test scaffolding (test-phase19.sh harness + smoke test + docker-version fixtures)
   - [x] 19-02-PLAN.md — Wave 1: COMPAT-01 validator base image pin + iptables_probe() startup helper (parallel to 19-03)
-  - [ ] 19-03-PLAN.md — Wave 1: PLAT-05 check_docker_desktop_version() in install.sh + real fixture-driven tests (parallel to 19-02)
+  - [x] 19-03-PLAN.md — Wave 1: PLAT-05 check_docker_desktop_version() in install.sh + real fixture-driven tests (parallel to 19-02)
 
 ### Phase 20: Network Enforcement on macOS
 **Goal**: Non-whitelisted outbound calls are blocked at the network layer on macOS via the enforcement strategy chosen by the empirical spike
@@ -134,7 +134,7 @@ v3.0 phases execute strictly in numeric order: 18 -> 19 -> 20 -> 21 -> 22
 | 16. Result Channel | v2.0 | 4/4 | Complete | 2026-04-12 |
 | 17. Operational Hardening | v2.0 | 4/4 | Complete | 2026-04-12 |
 | 18. Platform Abstraction & Bash Portability | v3.0 | 5/5 | Complete    | 2026-04-13 |
-| 19. Docker Desktop Compatibility | v3.0 | 2/3 | In Progress|  |
+| 19. Docker Desktop Compatibility | v3.0 | 3/3 | Complete   | 2026-04-13 |
 | 20. Network Enforcement on macOS | v3.0 | 0/0 | Not started | - |
 | 21. launchd Service Management | v3.0 | 0/0 | Not started | - |
 | 22. macOS Integration Tests | v3.0 | 0/0 | Not started | - |

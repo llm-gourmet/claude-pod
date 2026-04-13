@@ -112,11 +112,11 @@ Requirements for macOS platform support. Each maps to roadmap phases.
 - [x] **PLAT-02**: Installer detects platform (linux/wsl2/macos) via shared `lib/platform.sh` with `detect_platform()` — all scripts use it, `CLAUDE_SECURE_PLATFORM_OVERRIDE` available for CI mocking
 - [x] **PLAT-03**: Installer verifies Homebrew is present on macOS and prints actionable install instructions if missing (does not auto-install)
 - [x] **PLAT-04**: Installer bootstraps GNU tools on macOS (`brew install bash coreutils jq`) before any other steps
-- [ ] **PLAT-05**: Installer verifies Docker Desktop ≥ 4.44.3 is installed and running on macOS, and warns/blocks if older
+- [x] **PLAT-05**: Installer verifies Docker Desktop ≥ 4.44.3 is installed and running on macOS, and warns/blocks if older
 
 ### Container Compatibility (COMPAT)
 
-- [ ] **COMPAT-01**: Validator container uses `python:3.11-slim-bookworm` base image on all platforms (replaces Alpine — fixes iptables-nft mismatch with Docker Desktop Mac's kernel)
+- [x] **COMPAT-01**: Validator container uses `python:3.11-slim-bookworm` base image on all platforms (replaces Alpine — fixes iptables-nft mismatch with Docker Desktop Mac's kernel)
 
 ### Bash/BSD Portability (PORT)
 
@@ -153,8 +153,8 @@ Which phases cover which v3.0 requirements. Updated during roadmap creation.
 | PLAT-02 | Phase 18 | Complete |
 | PLAT-03 | Phase 18 | Complete |
 | PLAT-04 | Phase 18 | Complete |
-| PLAT-05 | Phase 19 | Pending |
-| COMPAT-01 | Phase 19 | Pending |
+| PLAT-05 | Phase 19 | Complete |
+| COMPAT-01 | Phase 19 | Complete |
 | PORT-01 | Phase 18 | Complete |
 | PORT-02 | Phase 18 | Complete |
 | PORT-03 | Phase 18 | Complete |

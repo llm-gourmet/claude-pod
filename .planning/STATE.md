@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: macOS Support
-status: executing
-stopped_at: Completed 19-02-PLAN.md
-last_updated: "2026-04-13T11:00:36.707Z"
+status: verifying
+stopped_at: Completed 19-03-PLAN.md
+last_updated: "2026-04-13T11:02:15.332Z"
 last_activity: 2026-04-13
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 8
-  completed_plans: 7
+  completed_plans: 8
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-13)
 
 Phase: 19 (docker-desktop-compatibility) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-13
 
 Progress: [░░░░░░░░░░] 0% (0/5 phases — v3.0 only)
@@ -78,6 +78,7 @@ Progress: [░░░░░░░░░░] 0% (0/5 phases — v3.0 only)
 | Phase 18-platform-abstraction-bash-portability P05 | 6min | 2 tasks | 3 files |
 | Phase 19-docker-desktop-compatibility P01 | 99s | 3 tasks | 5 files |
 | Phase 19-docker-desktop-compatibility P02 | 2 | 3 tasks | 3 files |
+| Phase 19-docker-desktop-compatibility P03 | 8min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -104,6 +105,7 @@ Recent decisions affecting current work:
 - [Phase 19-docker-desktop-compatibility]: Phase 19 Plan 01: Smoke test uses platform gate (detect_platform) to self-skip on non-macOS, matching Phase 18 convention
 - [Phase 19-docker-desktop-compatibility]: python:3.11-slim-bookworm over python:3.11-slim — Bookworm ships iptables-nft via update-alternatives matching Docker Desktop Mac; multi-arch amd64+arm64 natively on Docker Hub
 - [Phase 19-docker-desktop-compatibility]: iptables_probe() logs but never raises — preserves try/except around setup_default_iptables for outside-Docker dev environments; probe placed BEFORE setup to give operators definitive OK/FAIL signal
+- [Phase 19-docker-desktop-compatibility]: Phase 19-03: Nested subshell pattern ( check_docker_desktop_version ) 2>&1 used in tests to correctly capture exit 1 — plain command substitution loses exit code when function calls exit
 
 ### Pending Todos
 
@@ -133,5 +135,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-13 — v3.0 roadmap drafted (Phases 18-22), STATE.md initialized for milestone planning
-Stopped at: Completed 19-02-PLAN.md
+Stopped at: Completed 19-03-PLAN.md
 Resume file: None
