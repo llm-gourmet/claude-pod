@@ -131,6 +131,43 @@ validate_docs_binding() {
   return 0
 }
 
+# Phase 23 BIND-02: Host-only secret projection.
+# Filters known host-only variables out of the profile .env before handing
+# the file to docker-compose as env_file:. The raw .env is still sourced
+# into host bash by load_profile_config (below), so publish_report,
+# push_with_retry, and do_profile_init_docs can still read the token.
+# Only the CONTAINER view is filtered -- the host process env is untouched.
+_HOST_ONLY_VARS=("DOCS_REPO_TOKEN" "REPORT_REPO_TOKEN")
+
+project_env_for_containers() {
+  local src="$1"
+  local dst
+  dst=$(mktemp "${TMPDIR:-/tmp}/cs-projected-env-XXXXXXXX")
+  _CLEANUP_FILES+=("$dst")
+  chmod 600 "$dst"
+
+  # Build anchored regex matching any host-only var assignment at line start.
+  # Anchoring prevents substring matches like MY_DOCS_REPO_TOKEN_OVERRIDE.
+  local pattern="^("
+  local first=1
+  local v
+  for v in "${_HOST_ONLY_VARS[@]}"; do
+    if [ $first -eq 1 ]; then
+      pattern+="$v"
+      first=0
+    else
+      pattern+="|$v"
+    fi
+  done
+  pattern+=")="
+
+  # grep -v removes matching lines. LC_ALL=C for deterministic ERE matching
+  # across glibc/BSD. `|| true` because grep returns 1 if zero lines survive.
+  LC_ALL=C grep -Ev "$pattern" "$src" > "$dst" || true
+
+  echo "$dst"
+}
+
 create_profile() {
   local name="$1"
   local pdir="$CONFIG_DIR/profiles/$name"
@@ -260,7 +297,16 @@ load_profile_config() {
   export COMPOSE_PROJECT_NAME="claude-${name}"
   export COMPOSE_FILE="$APP_DIR/docker-compose.yml"
   export WORKSPACE_PATH
-  export SECRETS_FILE="$pdir/.env"
+  # Phase 23 BIND-02: project raw .env to a filtered copy that omits
+  # host-only variables (DOCS_REPO_TOKEN, REPORT_REPO_TOKEN). docker-compose
+  # reads env_file: from this path; the raw .env is still sourced into host
+  # bash below for publish_report / init-docs consumption.
+  if [ -f "$pdir/.env" ]; then
+    SECRETS_FILE=$(project_env_for_containers "$pdir/.env")
+    export SECRETS_FILE
+  else
+    export SECRETS_FILE="$pdir/.env"
+  fi
   export WHITELIST_PATH="$pdir/whitelist.json"
   export LOG_DIR="$CONFIG_DIR/logs"
   export LOG_PREFIX="${name}-"

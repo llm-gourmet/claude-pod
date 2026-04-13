@@ -20,6 +20,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEST_TMPDIR=$(mktemp -d)
 export CONFIG_DIR="$TEST_TMPDIR/cs-config"
 export HOME="$TEST_TMPDIR/home"
+export APP_DIR="$PROJECT_DIR"
 mkdir -p "$CONFIG_DIR/profiles" "$HOME"
 
 cleanup() { rm -rf "$TEST_TMPDIR"; }
