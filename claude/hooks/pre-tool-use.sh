@@ -156,7 +156,7 @@ domain_in_readonly() {
 register_call_id() {
   local domain="$1"
   local call_id
-  call_id=$(uuidgen)
+  call_id=$(uuidgen | tr '[:upper:]' '[:lower:]')
   local response
   response=$(curl -s -w "\n%{http_code}" -X POST "${VALIDATOR_URL}/register" \
     -H "Content-Type: application/json" \
