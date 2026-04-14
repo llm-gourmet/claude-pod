@@ -49,7 +49,7 @@ _CLEANUP_FILES=()
 
 cleanup() {
   for f in "${_CLEANUP_FILES[@]}"; do
-    rm -f "$f"
+    rm -rf "$f"
   done
 }
 trap cleanup EXIT
@@ -562,7 +562,7 @@ spawn_project_name() {
 spawn_cleanup() {
   docker compose down -v --remove-orphans 2>/dev/null || true
   for f in "${_CLEANUP_FILES[@]}"; do
-    rm -f "$f"
+    rm -rf "$f"
   done
 }
 
@@ -1388,21 +1388,52 @@ ASKPASS
   chmod 700 "$askpass"
 
   # Clone with Phase 16 bounded-clone flags + PAT scrub on stderr.
+  # Falls back to git-init for empty repos that have no branches yet.
   local pat="$DOCS_REPO_TOKEN"
   local clone_err="$clone_dir/clone.err"
-  if ! LC_ALL=C \
-       GIT_ASKPASS="$askpass" \
-       GIT_ASKPASS_PAT="$pat" \
-       GIT_TERMINAL_PROMPT=0 \
-       GIT_HTTP_LOW_SPEED_LIMIT=1 \
-       GIT_HTTP_LOW_SPEED_TIME=30 \
+  local _git_env
+  _git_env=(
+    LC_ALL=C
+    GIT_ASKPASS="$askpass"
+    GIT_ASKPASS_PAT="$pat"
+    GIT_TERMINAL_PROMPT=0
+    GIT_HTTP_LOW_SPEED_LIMIT=1
+    GIT_HTTP_LOW_SPEED_TIME=30
+  )
+  if ! env "${_git_env[@]}" \
        timeout 60 \
        git -c credential.helper= -c credential.helper='' \
            -c core.autocrlf=false \
            clone --depth 1 --branch "$DOCS_BRANCH" --quiet \
                  "$DOCS_REPO" "$clone_dir/repo" 2>"$clone_err"; then
-    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$clone_err" >&2
-    return 1
+    # Branch not found: the repo may exist on a different default branch,
+    # or may be completely empty. Try cloning without --branch first.
+    if grep -qiE "remote branch .* not found|not found in upstream" "$clone_err" 2>/dev/null; then
+      local clone_err2="$clone_dir/clone2.err"
+      if env "${_git_env[@]}" \
+           timeout 60 \
+           git -c credential.helper= -c credential.helper='' \
+               -c core.autocrlf=false \
+               clone --depth 1 --quiet \
+                     "$DOCS_REPO" "$clone_dir/repo" 2>"$clone_err2"; then
+        # Repo exists on a different default branch. Use it as-is; DOCS_BRANCH
+        # will be the push target so the commit lands on the existing branch.
+        local actual_branch
+        actual_branch=$(git -C "$clone_dir/repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        DOCS_BRANCH="${actual_branch:-$DOCS_BRANCH}"
+      else
+        # Truly empty repo — bootstrap with git init.
+        git init -q "$clone_dir/repo"
+        git -C "$clone_dir/repo" symbolic-ref HEAD "refs/heads/$DOCS_BRANCH"
+        env "${_git_env[@]}" \
+          git -C "$clone_dir/repo" \
+              -c credential.helper= -c credential.helper='' \
+              remote add origin "$DOCS_REPO"
+      fi
+    else
+      sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$clone_err" >&2
+      return 1
+    fi
   fi
 
   # Create project layout. mkdir -p is idempotent; stub writer never overwrites.
