@@ -2819,6 +2819,15 @@ case "$CMD" in
     # 777 required: three containers write as different UIDs (claude:1001, node:1000, root:0)
     chmod 777 "$LOG_DIR"
     cleanup_containers
+    # Phase 25 CTX-01..CTX-04: populate /agent-docs mount for interactive
+    # sessions too. Non-fatal on the interactive path: if fetch fails,
+    # print a warning and continue so interactive users are not blocked by
+    # a transient doc-repo misconfiguration while iterating on profile.json.
+    if ! fetch_docs_context; then
+      echo "warning: fetch_docs_context failed on interactive path; continuing without /agent-docs mount" >&2
+      AGENT_DOCS_HOST_PATH=""
+      export AGENT_DOCS_HOST_PATH
+    fi
     docker compose up -d
     docker compose exec -it claude claude --dangerously-skip-permissions
     ;;
