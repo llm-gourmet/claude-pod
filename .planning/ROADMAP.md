@@ -187,7 +187,10 @@
 **Goal**: Bring v2.0 audit artifacts up to standard — create 3 missing VERIFICATION.md files, update 6 stale VALIDATION.md files, and fix stale traceability checkboxes so the audit can pass cleanly
 **Gap Closure:** Closes documentation gaps from v2.0-MILESTONE-AUDIT.md
 **Requirements:** PROF-01, PROF-02, PROF-03 (checkbox fix), OPS-01, OPS-02 (traceability fix)
-**Plans**: TBD
+**Plans**: 3 plans
+  - [ ] 27-01-PLAN.md — Wave 1: VERIFICATION.md for Phase 12 (PROF-01/02/03) and Phase 13 (HEAD-01..05) (parallel)
+  - [ ] 27-02-PLAN.md — Wave 1: VERIFICATION.md for Phase 16 (OPS-01/02) (parallel)
+  - [ ] 27-03-PLAN.md — Wave 1: 6x VALIDATION.md frontmatter + REQUIREMENTS.md traceability fix (parallel)
 
 ### Phase 28: OPS-01 docs_repo Backfill Fix
 **Goal**: `do_spawn` correctly resolves `REPORT_REPO` from Phase 23's canonical `docs_repo` field so migrated profiles never silently skip report publishing
@@ -239,6 +242,6 @@
 | 24. Multi-File Publish Bundle | v4.0 | 3/3 | Complete   | 2026-04-14 |
 | 25. Context Read & Bind Mount | v4.0 | 4/4 | Complete    | 2026-04-14 |
 | 26. Stop Hook & Mandatory Reporting | v4.0 | 4/4 | Complete    | 2026-04-14 |
-| 27. v2.0 Verification Backfill | v2.0 gap | 0/0 | Not started | - |
+| 27. v2.0 Verification Backfill | v2.0 gap | 0/3 | In progress | - |
 | 28. OPS-01 docs_repo Backfill Fix | v2.0 gap | 1/1 | Complete   | 2026-04-14 |
 | 29. PROF-02 create_profile Repo Prompt | v2.0 gap | 2/2 | Complete   | 2026-04-14 |
