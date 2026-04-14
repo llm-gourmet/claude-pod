@@ -6,7 +6,24 @@
       ],
       "tests": [
         "test-phase1.sh",
-        "test-phase2.sh"
+        "test-phase2.sh",
+        "test-phase26.sh"
+      ]
+    },
+    {
+      "paths": [
+        "claude/hooks/"
+      ],
+      "tests": [
+        "test-phase26.sh"
+      ]
+    },
+    {
+      "paths": [
+        "claude/settings.json"
+      ],
+      "tests": [
+        "test-phase26.sh"
       ]
     },
     {
@@ -75,7 +92,8 @@
         "test-phase16.sh",
         "test-phase23.sh",
         "test-phase24.sh",
-        "test-phase25.sh"
+        "test-phase25.sh",
+        "test-phase26.sh"
       ]
     },
     {
@@ -241,6 +259,24 @@
       ],
       "tests": [
         "test-phase25.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/test-phase26.sh"
+      ],
+      "tests": [
+        "test-phase26.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/fixtures/profile-26-spool/**",
+        "tests/fixtures/spools/**",
+        "tests/fixtures/stop-hook-inputs/**"
+      ],
+      "tests": [
+        "test-phase26.sh"
       ]
     }
   ],
