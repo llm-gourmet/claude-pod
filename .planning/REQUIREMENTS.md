@@ -239,7 +239,7 @@ Requirements for the agent documentation layer. Each maps to roadmap phases.
 ### Context Read (CTX)
 
 - [x] **CTX-01**: At spawn time, `bin/claude-secure` performs a sparse shallow clone of the doc repo and bind-mounts it read-only into the Claude container at `/agent-docs/`
-- [ ] **CTX-02**: Agent can read any project-level doc (`/agent-docs/projects/<slug>/todo.md`, `architecture.md`, `vision.md`, `ideas.md`, `specs/`) when it needs context — no auto-injection into prompt
+- [x] **CTX-02**: Agent can read any project-level doc (`/agent-docs/projects/<slug>/todo.md`, `architecture.md`, `vision.md`, `ideas.md`, `specs/`) when it needs context — no auto-injection into prompt
 - [x] **CTX-03**: If the profile has no doc repo configured, context read is skipped silently — spawn is never blocked
 - [x] **CTX-04**: The bind-mounted clone never includes `.git/` — agents cannot push from inside the container
 
@@ -264,7 +264,7 @@ Which phases cover which v4.0 requirements. Updated during roadmap creation.
 | SPOOL-02 | Phase 26 | Pending |
 | SPOOL-03 | Phase 26 | Pending |
 | CTX-01 | Phase 25 | Complete |
-| CTX-02 | Phase 25 | Pending |
+| CTX-02 | Phase 25 | Complete |
 | CTX-03 | Phase 25 | Complete |
 | CTX-04 | Phase 25 | Complete |
 
