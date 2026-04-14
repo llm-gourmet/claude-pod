@@ -759,6 +759,145 @@ test_no_report_repo_skips_push() {
   return 0
 }
 
+test_docs_repo_field_alias_publishes() {
+  # Phase 28 OPS-01 regression: a Phase 23-migrated profile (docs_repo only,
+  # no report_repo key) MUST publish a report through do_spawn -> publish_report.
+  # Reproduces the bug where bin/claude-secure:2077-2079 clobbers REPORT_REPO
+  # with an empty string from `jq -r '.report_repo // empty'` after
+  # resolve_docs_alias already back-filled it from DOCS_REPO.
+  local tid="docs_alias"
+  local tdir="$TEST_TMPDIR/$tid"
+  local home_dir="$tdir/home"
+  local profile_dir="$home_dir/.claude-secure/profiles/test-profile"
+  rm -rf "$tdir"
+  mkdir -p "$profile_dir" "$profile_dir/prompts" "$home_dir/.claude-secure/logs"
+  mkdir -p "$tdir/workspace"
+
+  # Seed bare remote (reuses existing helper).
+  local repo_url
+  repo_url=$(setup_bare_repo)
+
+  # Seed projects/test-alias/ subdir so fetch_docs_context's sparse checkout
+  # finds a non-empty project dir. Without this, fetch_docs_context aborts
+  # do_spawn before publish_report ever runs, masking the OPS-01 bug.
+  local seed_clone="$tdir/docs-seed"
+  git clone --quiet "$repo_url" "$seed_clone" >/dev/null 2>&1 || {
+    echo "FAIL: could not clone bare repo to seed projects/test-alias" >&2
+    return 1
+  }
+  (
+    cd "$seed_clone" || exit 1
+    git config user.email "seed@test.local"
+    git config user.name "seed"
+    mkdir -p projects/test-alias
+    printf '# test-alias project docs\n' > projects/test-alias/README.md
+    git add projects/test-alias/README.md
+    git commit --quiet -m "seed projects/test-alias" >/dev/null 2>&1
+    git push --quiet origin main >/dev/null 2>&1
+  ) || {
+    echo "FAIL: could not seed projects/test-alias into bare repo" >&2
+    return 1
+  }
+  rm -rf "$seed_clone"
+
+  # Write profile.json with ONLY the Phase 23 canonical docs_* fields.
+  # No .report_repo, no .report_branch -- this is the exact post-migration shape.
+  jq -n \
+    --arg name "test-profile" \
+    --arg repo "test-org/test-repo" \
+    --arg secret "test-secret-abc123" \
+    --arg workspace "$tdir/workspace" \
+    --arg docs_repo "$repo_url" \
+    --arg docs_branch "main" \
+    --arg docs_project_dir "projects/test-alias" \
+    '{
+      name: $name,
+      repo: $repo,
+      webhook_secret: $secret,
+      workspace: $workspace,
+      docs_repo: $docs_repo,
+      docs_branch: $docs_branch,
+      docs_project_dir: $docs_project_dir,
+      report_path_prefix: "reports"
+    }' > "$profile_dir/profile.json"
+
+  # Seed DOCS_REPO_TOKEN (not REPORT_REPO_TOKEN) -- resolve_docs_alias back-fills
+  # REPORT_REPO_TOKEN from DOCS_REPO_TOKEN automatically.
+  printf 'DOCS_REPO_TOKEN=ghp_TESTFAKE123\n' > "$profile_dir/.env"
+
+  # Stub whitelist so defensive validate_profile paths are satisfied.
+  printf '{"domains":["api.anthropic.com"]}\n' > "$profile_dir/whitelist.json"
+
+  # Fake claude stdout envelope (same pattern as run_spawn_integration).
+  local fake_stdout_file="$tdir/fake-claude.json"
+  jq -c '.claude' "$PROJECT_DIR/tests/fixtures/envelope-success.json" \
+    > "$fake_stdout_file"
+
+  local event="$PROJECT_DIR/tests/fixtures/github-issues-opened.json"
+  local envelope_out="$tdir/envelope.out"
+  local spawn_err="$tdir/spawn.err"
+
+  (
+    set +e
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export APP_DIR="$PROJECT_DIR"
+    export CONFIG_DIR="$home_dir/.claude-secure"
+    export HOME="$home_dir"
+    export PROFILE="test-profile"
+    export PLATFORM="linux"
+    export CLAUDE_SECURE_FAKE_CLAUDE_STDOUT="$fake_stdout_file"
+    export CLAUDE_SECURE_FAKE_CLAUDE_EXIT=0
+    # shellcheck disable=SC1090
+    source "$PROJECT_DIR/bin/claude-secure" 2>&1
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    load_profile_config "test-profile"
+    REMAINING_ARGS=("spawn" "--event-file" "$event")
+    do_spawn
+    exit $?
+  ) > "$envelope_out" 2> "$spawn_err"
+  local rc=$?
+  [ "$rc" -eq 0 ] || {
+    echo "FAIL: do_spawn exited $rc (expected 0)" >&2
+    echo "--- spawn.err ---" >&2; cat "$spawn_err" >&2
+    return 1
+  }
+
+  # Assertion 1 (primary): audit log last line has a non-empty report_url.
+  local audit_file audit url status
+  audit_file="$home_dir/.claude-secure/logs/test-profile-executions.jsonl"
+  [ -f "$audit_file" ] || {
+    echo "FAIL: audit log $audit_file missing" >&2; return 1
+  }
+  audit=$(tail -n1 "$audit_file") || return 1
+  status=$(echo "$audit" | jq -r '.status')
+  url=$(echo "$audit" | jq -r '.report_url')
+  [ "$status" = "success" ] || {
+    echo "FAIL: status=$status (want success)" >&2
+    echo "audit: $audit" >&2
+    return 1
+  }
+  [ -n "$url" ] && [ "$url" != "null" ] && [ "$url" != "" ] || {
+    echo "FAIL: report_url empty -- docs_repo backfill broken (Phase 28 OPS-01)" >&2
+    echo "audit: $audit" >&2
+    return 1
+  }
+
+  # Assertion 2 (structural): a report file landed in the bare remote.
+  local clone="$tdir/verify-clone"
+  git clone --quiet "$repo_url" "$clone" >/dev/null 2>&1 || {
+    echo "FAIL: could not clone bare remote for verification" >&2; return 1
+  }
+  local y m f
+  y=$(date -u +%Y); m=$(date -u +%m)
+  f=$(find "$clone/reports/$y/$m/" -name 'issues-opened-*.md' 2>/dev/null | head -n1)
+  [ -n "$f" ] || {
+    echo "FAIL: no report file landed in bare clone at reports/$y/$m/" >&2
+    find "$clone" -type f 2>/dev/null >&2
+    return 1
+  }
+  return 0
+}
+
 test_result_text_truncation() {
   # D-16: result text must be truncated at 16384 bytes when rendered.
   local tid="truncation"
@@ -1190,6 +1329,7 @@ main() {
   run_test "PAT not leaked on failure"          test_pat_not_leaked_on_failure
   run_test "report template fallback chain"    test_report_template_fallback
   run_test "no report_repo skips push"          test_no_report_repo_skips_push
+  run_test "docs_repo field alias publishes"    test_docs_repo_field_alias_publishes
   run_test "result text truncation"             test_result_text_truncation
   run_test "result text no recursive subst"     test_result_text_no_recursive_substitution
   run_test "CRLF and NULL stripped"             test_crlf_and_null_stripped
