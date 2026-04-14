@@ -175,7 +175,7 @@
 ### v2.0 Gap Closure (Audit Follow-Up)
 
 - [ ] **Phase 27: v2.0 Verification Backfill** - Create missing VERIFICATION.md for phases 12, 13, 16; update 6 stale VALIDATION.md files; fix stale traceability checkboxes (PROF-01/02/03, OPS-01/02)
-- [ ] **Phase 28: OPS-01 docs_repo Backfill Fix** - Fix `do_spawn:2077` to use `.report_repo // .docs_repo // empty`; prevents silent report skip for Phase 23-migrated profiles
+- [x] **Phase 28: OPS-01 docs_repo Backfill Fix** - Fix `do_spawn:2077` to use `.report_repo // .docs_repo // empty`; prevents silent report skip for Phase 23-migrated profiles (completed 2026-04-14)
 - [ ] **Phase 29: PROF-02 create_profile Repo Prompt** - Add `.repo` field prompt to `create_profile` to eliminate manual JSON editing after profile creation
 
 ### Phase 27: v2.0 Verification Backfill
@@ -233,5 +233,5 @@
 | 25. Context Read & Bind Mount | v4.0 | 4/4 | Complete    | 2026-04-14 |
 | 26. Stop Hook & Mandatory Reporting | v4.0 | 0/0 | Not started | - |
 | 27. v2.0 Verification Backfill | v2.0 gap | 0/0 | Not started | - |
-| 28. OPS-01 docs_repo Backfill Fix | v2.0 gap | 0/0 | Not started | - |
+| 28. OPS-01 docs_repo Backfill Fix | v2.0 gap | 1/1 | Complete   | 2026-04-14 |
 | 29. PROF-02 create_profile Repo Prompt | v2.0 gap | 0/0 | Not started | - |
