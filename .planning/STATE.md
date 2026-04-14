@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: macOS Support
 status: executing
-stopped_at: Completed 27-v2-verification-backfill 27-03-PLAN.md
-last_updated: "2026-04-14T13:59:57.560Z"
+stopped_at: Completed 27-02-PLAN.md (Phase 16 VERIFICATION.md backfill)
+last_updated: "2026-04-14T14:00:19.943Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 15
   completed_phases: 14
   total_plans: 49
-  completed_plans: 47
+  completed_plans: 48
   percent: 88
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 ## Current Position
 
 Phase: 27 (v2-verification-backfill) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-04-14
 
@@ -85,6 +85,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 26 P03 | 25min | 2 tasks | 2 files |
 | Phase 26-stop-hook-mandatory-reporting P26-04 | 15min | 2 tasks | 2 files |
 | Phase 27-v2-verification-backfill P03 | 2min | 2 tasks | 7 files |
+| Phase 27-v2-verification-backfill P02 | 8 | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -158,6 +159,7 @@ Recent decisions affecting current work:
 - [Phase 26]: Fixed jq select() in object context: use if/else/end for optional fields — select returns empty which invalidates parent object
 - [Phase 26-stop-hook-mandatory-reporting]: Phase 26: run_spool_shipper_inline placed before fetch_docs_context in do_spawn and after mkdir LOG_DIR in interactive preamble — D-07 stale-drain closes SPOOL-03 crash-recovery edge case
 - [Phase 27-v2-verification-backfill]: 27-03: Frontmatter-only edits to VALIDATION.md files (phases 12-17) set nyquist_compliant: true and wave_0_complete: true; REQUIREMENTS.md traceability backfilled with PROF-01/03 and OPS-01/02 Complete
+- [Phase 27-v2-verification-backfill]: OPS-01 docs_repo integration concern (do_spawn:2077) scoped as Phase 28 forward-compat fix — not a Phase 16 code defect; v2.0 profiles using report_repo are unaffected
 
 ### Pending Todos
 
@@ -184,5 +186,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-14 - Phase 26 complete: stop-hook + spool shipper (SPOOL-01/02/03)
-Stopped at: Completed 27-v2-verification-backfill 27-03-PLAN.md
+Stopped at: Completed 27-02-PLAN.md (Phase 16 VERIFICATION.md backfill)
 Resume file: None
