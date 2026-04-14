@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: macOS Support
-status: verifying
-stopped_at: "Completed 24-02: verify_bundle_sections + sanitize_markdown_file helpers"
-last_updated: "2026-04-14T08:16:39.645Z"
-last_activity: 2026-04-12
+status: executing
+stopped_at: Completed 24-03-PLAN.md
+last_updated: "2026-04-14T08:27:16.248Z"
+last_activity: 2026-04-14
 progress:
   total_phases: 10
-  completed_phases: 9
+  completed_phases: 10
   total_plans: 35
-  completed_plans: 33
+  completed_plans: 35
   percent: 88
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** Phase 17 — operational-hardening
+**Current focus:** Phase 24 — multi-file-publish-bundle
 
 ## Current Position
 
-Phase: 17
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-04-12
+Phase: 24 (multi-file-publish-bundle) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-04-14
 
 Progress: [█████████░] 88% (15/17 plans)
 
@@ -73,7 +73,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 17-operational-hardening P03 | 35min | 2 tasks | 2 files |
 | Phase 23 P02 | 17 | 3 tasks | 9 files |
 | Phase 23 P03 | 7 | 3 tasks | 3 files |
-| Phase 24-multi-file-publish-bundle P02 | 6min | 2 tasks | 1 files |
+| Phase 24-multi-file-publish-bundle P03 | 6min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -126,9 +126,9 @@ Recent decisions affecting current work:
 - [Phase 23]: BIND-03 alias: resolve_docs_alias() prefers docs_* names, falls back to report_*, and back-fills REPORT_REPO/BRANCH/TOKEN for Phase 16 compatibility
 - [Phase 23]: do_profile_init_docs skips validate_profile call to allow file:// test URLs; CLI dispatch already calls validate_profile before subcommand routing
 - [Phase 23]: push_with_retry reused unchanged for init-docs: REPORT_REPO_TOKEN back-fill from Plan 02 resolve_docs_alias is the single integration point
-- [Phase 24-multi-file-publish-bundle]: [Plan 24-02]: Pass 3 sed delimiter changed from | to # due to alternation (https?:|//) containing literal | that terminates sed substitutions early
-- [Phase 24-multi-file-publish-bundle]: [Plan 24-02]: verify_bundle_sections uses anchored ^## Section$ regex via LC_ALL=C grep -qE to prevent false positives on partial matches like '## Goal Achievements'
-- [Phase 24-multi-file-publish-bundle]: [Plan 24-02]: sanitize_markdown_file orders passes HTML-comments→raw-HTML→external-inline-image→external-refdef; runs AFTER redact_report_file so secrets hidden inside HTML comments are still redacted first (Pitfall 1)
+- [Phase 24-multi-file-publish-bundle]: publish_docs_bundle uses clone-local gitattributes merge=union on INDEX.md so concurrent rebases auto-merge the append-only log
+- [Phase 24-multi-file-publish-bundle]: publish_docs_bundle sets clone-local user.email/user.name (env vars only cover first commit, not rebase replay in push_with_retry)
+- [Phase 24-multi-file-publish-bundle]: Phase 24 ships library-only (no CLI dispatch case for publish_docs_bundle); Phase 26 will wire the Stop hook caller
 
 ### Pending Todos
 
@@ -155,5 +155,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
-Stopped at: Completed 24-02: verify_bundle_sections + sanitize_markdown_file helpers
+Stopped at: Completed 24-03-PLAN.md
 Resume file: None

