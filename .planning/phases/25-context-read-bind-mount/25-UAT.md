@@ -100,5 +100,28 @@ skipped: 2
   reason: "User reported: 13 passed, 2 failed. FAIL: agent-docs read works (docker), FAIL: agent-docs write fails readonly (docker). Docker daemon IS running so skip-as-PASS path was not taken."
   severity: major
   test: 2
-  artifacts: []
-  missing: []
+  root_cause: |
+    Two bugs in tests/test-phase25.sh:
+
+    (1) _spawn_ctx_background races: CLAUDE_SECURE_FAKE_CLAUDE_STDOUT=/dev/null
+        does NOT trigger the fake-claude escape hatch (line 2136 of bin/claude-secure)
+        because [ -f /dev/null ] is FALSE on Linux (/dev/null is a char device, not
+        a regular file). So do_spawn runs docker compose up -d --wait for real.
+        On WSL2, container startup exceeds the 2-second sleep, so docker compose exec
+        fires before the container is ready and fails with rc!=0.
+
+    (2) test_agent_docs_no_git_dir_in_container has a false-positive: when exec fails
+        (container not up), `ls /agent-docs/.git` also fails, the && branch is skipped,
+        and return 0 fires — test passes even when nothing is mounted.
+
+    Fix (1): replace sleep 2 with a poll loop (docker compose -p $SPAWN_PROJECT ps
+             --status=running, retry up to ~15s) in _spawn_ctx_background.
+    Fix (2): add an explicit exec health check before the .git assertion.
+
+    No changes needed to bin/claude-secure — the fake-claude path was never intended
+    to work with /dev/null on Linux; fix is purely in the test harness.
+  artifacts:
+    - tests/test-phase25.sh
+  missing:
+    - _spawn_ctx_background needs container-ready polling (not fixed sleep)
+    - test_agent_docs_no_git_dir_in_container needs exec guard for false-positive
