@@ -4,7 +4,7 @@ milestone: v3.0
 milestone_name: macOS Support
 status: executing
 stopped_at: Completed 25-04-PLAN.md
-last_updated: "2026-04-14T11:06:22.659Z"
+last_updated: "2026-04-14T11:07:46.558Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 11
@@ -25,8 +25,8 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 
 ## Current Position
 
-Phase: 25 (context-read-bind-mount) — EXECUTING
-Plan: 2 of 4
+Phase: 25
+Plan: Not started
 Status: Ready to execute
 Last activity: 2026-04-14
 
