@@ -307,8 +307,20 @@ create_profile() {
   ws_path="$(realpath -m "$ws_path")"
   mkdir -p "$ws_path"
 
+  # Repo prompt (optional — enables webhook routing via resolve_profile_by_repo). Added for PROF-02.
+  read -rp "GitHub repository for webhook routing (owner/repo) [skip]: " repo
+  repo="${repo:-}"
+  if [ -n "$repo" ] && ! [[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+    echo "Warning: '$repo' does not look like owner/repo format — saved anyway." >&2
+  fi
+
   # Build profile.json
-  jq -n --arg ws "$ws_path" '{"workspace": $ws}' > "$tmpdir/profile.json"
+  if [ -n "$repo" ]; then
+    jq -n --arg ws "$ws_path" --arg repo "$repo" \
+      '{"workspace": $ws, "repo": $repo}' > "$tmpdir/profile.json"
+  else
+    jq -n --arg ws "$ws_path" '{"workspace": $ws}' > "$tmpdir/profile.json"
+  fi
 
   # Copy whitelist template
   cp "$APP_DIR/config/whitelist.json" "$tmpdir/whitelist.json"
