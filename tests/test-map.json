@@ -6,7 +6,28 @@
       ],
       "tests": [
         "test-phase1.sh",
-        "test-phase2.sh"
+        "test-phase2.sh",
+        "test-phase26.sh"
+      ]
+    },
+    {
+      "paths": [
+        "claude/hooks/",
+        "tests/test-phase26.sh",
+        "tests/fixtures/profile-26-spool/",
+        "tests/fixtures/spools/",
+        "tests/fixtures/stop-hook-inputs/"
+      ],
+      "tests": [
+        "test-phase26.sh"
+      ]
+    },
+    {
+      "paths": [
+        "claude/settings.json"
+      ],
+      "tests": [
+        "test-phase26.sh"
       ]
     },
     {
@@ -75,7 +96,8 @@
         "test-phase16.sh",
         "test-phase23.sh",
         "test-phase24.sh",
-        "test-phase25.sh"
+        "test-phase25.sh",
+        "test-phase26.sh"
       ]
     },
     {
@@ -461,6 +483,37 @@
     "test_file": "tests/test-phase24.sh",
     "tests": [
       "test_bundle_updates_index"
+    ]
+  },
+  "SPOOL-01": {
+    "phase": 26,
+    "test_file": "tests/test-phase26.sh",
+    "tests": [
+      "test_stop_hook_script_exists",
+      "test_stop_hook_yields_when_spool_present",
+      "test_stop_hook_reprompts_when_spool_missing",
+      "test_stop_hook_yields_on_stop_hook_active_true",
+      "test_stop_hook_handles_malformed_stdin",
+      "test_settings_json_has_stop_hook"
+    ]
+  },
+  "SPOOL-02": {
+    "phase": 26,
+    "test_file": "tests/test-phase26.sh",
+    "tests": [
+      "test_stop_hook_no_network_calls"
+    ]
+  },
+  "SPOOL-03": {
+    "phase": 26,
+    "test_file": "tests/test-phase26.sh",
+    "tests": [
+      "test_run_spool_shipper_function_exists",
+      "test_shipper_returns_immediately",
+      "test_shipper_deletes_spool_on_success",
+      "test_shipper_logs_push_failed_with_attempt",
+      "test_shipper_publishes_malformed_best_effort",
+      "test_stale_spool_drained_at_spawn_preamble"
     ]
   }
 }
