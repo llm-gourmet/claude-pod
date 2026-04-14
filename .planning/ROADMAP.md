@@ -50,7 +50,7 @@
 
 - [x] **Phase 23: Profile ↔ Doc Repo Binding** - Profile schema holds doc repo coordinates and host-only PAT; `init-docs` bootstraps per-project directory layout (completed 2026-04-13)
 - [x] **Phase 24: Multi-File Publish Bundle** - Host-side `publish_docs_bundle` writes standardized reports + INDEX.md as single atomic commit through existing redaction pipeline (completed 2026-04-14)
-- [x] **Phase 25: Context Read & Read-Only Bind Mount** - Sparse shallow clone of doc repo bind-mounted read-only at `/agent-docs/` so agents can read project context without push access (completed 2026-04-14)
+- [x] **Phase 25: Context Read & Read-Only Bind Mount** - Sparse shallow clone of doc repo bind-mounted read-only at `/agent-docs/` so agents can read project context without push access (completed 2026-04-14; gap-closure plan 25-04 addresses Phase 25 UAT test-harness bugs on WSL2)
 - [ ] **Phase 26: Stop Hook & Mandatory Reporting** - Stop hook verifies local spool (no network); host-side async shipper pushes reports with jittered backoff, never blocking Claude exit
 
 ## Phase Details
@@ -154,10 +154,11 @@
   2. From inside the container, the agent can successfully `cat /agent-docs/projects/<slug>/todo.md`, `architecture.md`, `vision.md`, `ideas.md`, and files under `specs/`, and a write attempt to any path under `/agent-docs/` fails with a read-only filesystem error
   3. Spawning a profile that has no `docs_repo` configured completes successfully with no clone attempt and no error; logs contain a single info-level line indicating context read was skipped
   4. `/agent-docs/.git/` does not exist inside the container — verified by a test that lists the mount and asserts absence; the host-side clone either uses sparse-checkout to exclude `.git` or copies the checkout into a `.git`-free directory before bind mount
-**Plans**: 3 plans
+**Plans**: 4 plans
   - [x] 25-01-PLAN.md — Wave 0: tests/test-phase25.sh harness + fixture profile + docker-compose.yml /agent-docs volume entry + test-map registration (CTX-01/02/03/04 RED stubs)
   - [x] 25-02-PLAN.md — Wave 1: fetch_docs_context() sparse shallow clone helper in bin/claude-secure (CTX-01, CTX-03, CTX-04 unit-level)
   - [x] 25-03-PLAN.md — Wave 2: do_spawn + interactive *) integration call sites, docker-gated read-only bind mount verification (CTX-01, CTX-02)
+  - [ ] 25-04-PLAN.md — Gap closure: tests/test-phase25.sh container-ready poll loop + exec-health guard (fixes WSL2 race + false-positive in test_agent_docs_no_git_dir_in_container)
 
 ### Phase 26: Stop Hook & Mandatory Reporting
 **Goal**: Every Claude execution guarantees a report reaches the doc repo — enforced by a local-spool Stop hook that cannot be blocked by network failures, with a host-side shipper handling the actual push
@@ -204,5 +205,5 @@
 | 22. macOS Integration Tests | v3.0 | 0/0 | Not started | - |
 | 23. Profile ↔ Doc Repo Binding | v4.0 | 3/3 | Complete   | 2026-04-13 |
 | 24. Multi-File Publish Bundle | v4.0 | 3/3 | Complete   | 2026-04-14 |
-| 25. Context Read & Bind Mount | v4.0 | 3/3 | Complete   | 2026-04-14 |
+| 25. Context Read & Bind Mount | v4.0 | 3/4 | Gap closure | 2026-04-14 |
 | 26. Stop Hook & Mandatory Reporting | v4.0 | 0/0 | Not started | - |
