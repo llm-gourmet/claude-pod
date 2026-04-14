@@ -33,6 +33,3 @@
 
 {{FUTURE_FINDINGS}}
 
-## Error
-
-{{ERROR_MESSAGE}}
