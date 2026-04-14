@@ -2,8 +2,8 @@
 phase: 25
 slug: context-read-bind-mount
 status: draft
-nyquist_compliant: false
-wave_0_complete: false
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-04-14
 ---
 
@@ -38,7 +38,7 @@ created: 2026-04-14
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 25-01-01 | 01 | 0 | CTX-01..04 | stub | `bash tests/test-phase25.sh` | ❌ W0 | ⬜ pending |
+| 25-01-01 | 01 | 0 | CTX-01..04 | stub | `bash tests/test-phase25.sh` | ✅ | ✅ green |
 | 25-02-01 | 02 | 1 | CTX-01,CTX-03,CTX-04 | unit | `bash tests/test-phase25.sh` | ❌ W0 | ⬜ pending |
 | 25-03-01 | 03 | 2 | CTX-01,CTX-02 | integration | `bash tests/test-phase25.sh` | ❌ W0 | ⬜ pending |
 
@@ -48,8 +48,8 @@ created: 2026-04-14
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test-phase25.sh` — stubs covering CTX-01..04 + defensive cases (no-docs-repo skip, .git/ absent, read-only rejection, cleanup on exit)
-- [ ] `tests/fixtures/profile-25-context/` — profile.json, .env, whitelist.json for sparse-clone tests
+- [x] `tests/test-phase25.sh` — stubs covering CTX-01..04 + defensive cases (no-docs-repo skip, .git/ absent, read-only rejection, cleanup on exit)
+- [x] `tests/fixtures/profile-25-docs/` — profile.json, .env, whitelist.json for sparse-clone tests
 
 *Wave 0 installs harness and fixtures before any implementation.*
 
@@ -66,11 +66,11 @@ created: 2026-04-14
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 20s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 20s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** Wave 0 scaffold complete 2026-04-14
