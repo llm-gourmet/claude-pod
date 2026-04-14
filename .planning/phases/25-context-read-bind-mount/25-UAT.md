@@ -1,9 +1,9 @@
 ---
-status: complete
+status: resolved
 phase: 25-context-read-bind-mount
-source: [25-01-SUMMARY.md, 25-02-SUMMARY.md, 25-03-SUMMARY.md]
+source: [25-01-SUMMARY.md, 25-02-SUMMARY.md, 25-03-SUMMARY.md, 25-04-SUMMARY.md]
 started: 2026-04-14T00:00:00Z
-updated: 2026-04-14T00:00:00Z
+updated: 2026-04-14T12:00:00Z
 ---
 
 ## Current Test
@@ -96,7 +96,7 @@ skipped: 2
 ## Gaps
 
 - truth: "bash tests/test-phase25.sh shows 15 passed, 0 failed, 15 total"
-  status: failed
+  status: resolved
   reason: "User reported: 13 passed, 2 failed. FAIL: agent-docs read works (docker), FAIL: agent-docs write fails readonly (docker). Docker daemon IS running so skip-as-PASS path was not taken."
   severity: major
   test: 2
