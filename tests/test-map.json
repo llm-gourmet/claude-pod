@@ -36,7 +36,8 @@
         "test-phase6.sh",
         "test-phase7.sh",
         "test-phase12.sh",
-        "test-phase23.sh"
+        "test-phase23.sh",
+        "test-phase25.sh"
       ]
     },
     {
@@ -73,7 +74,8 @@
         "test-phase15.sh",
         "test-phase16.sh",
         "test-phase23.sh",
-        "test-phase24.sh"
+        "test-phase24.sh",
+        "test-phase25.sh"
       ]
     },
     {
@@ -232,6 +234,14 @@
       "tests": [
         "test-phase24.sh"
       ]
+    },
+    {
+      "paths": [
+        "tests/fixtures/profile-25-docs/**"
+      ],
+      "tests": [
+        "test-phase25.sh"
+      ]
     }
   ],
   "always_skip": [
@@ -277,6 +287,43 @@
       "test_init_docs_idempotent",
       "test_init_docs_requires_docs_repo",
       "test_init_docs_pat_scrub_on_error"
+    ]
+  },
+  "CTX-01": {
+    "phase": 25,
+    "test_file": "tests/test-phase25.sh",
+    "tests": [
+      "test_fetch_docs_context_function_exists",
+      "test_fetch_docs_context_clone_flags",
+      "test_fetch_docs_context_exports_path",
+      "test_compose_volume_entry",
+      "test_do_spawn_calls_fetch_docs_context"
+    ]
+  },
+  "CTX-02": {
+    "phase": 25,
+    "test_file": "tests/test-phase25.sh",
+    "tests": [
+      "test_agent_docs_read_works",
+      "test_agent_docs_write_attempt_fails_readonly"
+    ]
+  },
+  "CTX-03": {
+    "phase": 25,
+    "test_file": "tests/test-phase25.sh",
+    "tests": [
+      "test_fetch_docs_context_skips_silently_when_no_docs_repo",
+      "test_fetch_docs_context_emits_one_info_line_on_skip",
+      "test_spawn_no_docs_does_not_invoke_git"
+    ]
+  },
+  "CTX-04": {
+    "phase": 25,
+    "test_file": "tests/test-phase25.sh",
+    "tests": [
+      "test_fetch_docs_context_mount_source_excludes_git",
+      "test_agent_docs_no_git_dir_in_container",
+      "test_fetch_docs_context_pat_scrub_on_clone_error"
     ]
   },
   "OPS-01": {
