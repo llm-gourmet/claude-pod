@@ -72,7 +72,8 @@
         "test-phase14.sh",
         "test-phase15.sh",
         "test-phase16.sh",
-        "test-phase23.sh"
+        "test-phase23.sh",
+        "test-phase24.sh"
       ]
     },
     {
@@ -194,7 +195,8 @@
         "webhook/report-templates/"
       ],
       "tests": [
-        "test-phase16.sh"
+        "test-phase16.sh",
+        "test-phase24.sh"
       ]
     },
     {
@@ -212,6 +214,23 @@
       ],
       "tests": [
         "test-phase23.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/test-phase24.sh"
+      ],
+      "tests": [
+        "test-phase24.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/fixtures/profile-24-bundle/**",
+        "tests/fixtures/bundles/**"
+      ],
+      "tests": [
+        "test-phase24.sh"
       ]
     }
   ],
@@ -341,6 +360,60 @@
       "scenario_orphan_cleanup",
       "scenario_resource_limits",
       "test_e2e_budget_under_90s"
+    ]
+  },
+  "RPT-01": {
+    "phase": 24,
+    "test_file": "tests/test-phase24.sh",
+    "tests": [
+      "test_verify_bundle_sections",
+      "test_bundle_template_installed"
+    ]
+  },
+  "RPT-02": {
+    "phase": 24,
+    "test_file": "tests/test-phase24.sh",
+    "tests": [
+      "test_bundle_single_commit",
+      "test_bundle_failure_clean_tree"
+    ]
+  },
+  "RPT-03": {
+    "phase": 24,
+    "test_file": "tests/test-phase24.sh",
+    "tests": [
+      "test_bundle_redacts_secrets"
+    ]
+  },
+  "RPT-04": {
+    "phase": 24,
+    "test_file": "tests/test-phase24.sh",
+    "tests": [
+      "test_sanitize_markdown_file",
+      "test_bundle_sanitizes_external_image"
+    ]
+  },
+  "RPT-05": {
+    "phase": 24,
+    "test_file": "tests/test-phase24.sh",
+    "tests": [
+      "test_bundle_push_rebase_retry",
+      "test_bundle_concurrent_race"
+    ]
+  },
+  "DOCS-02": {
+    "phase": 24,
+    "test_file": "tests/test-phase24.sh",
+    "tests": [
+      "test_bundle_path_layout",
+      "test_bundle_never_overwrites"
+    ]
+  },
+  "DOCS-03": {
+    "phase": 24,
+    "test_file": "tests/test-phase24.sh",
+    "tests": [
+      "test_bundle_updates_index"
     ]
   }
 }
