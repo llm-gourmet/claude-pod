@@ -155,7 +155,7 @@
   3. Spawning a profile that has no `docs_repo` configured completes successfully with no clone attempt and no error; logs contain a single info-level line indicating context read was skipped
   4. `/agent-docs/.git/` does not exist inside the container — verified by a test that lists the mount and asserts absence; the host-side clone either uses sparse-checkout to exclude `.git` or copies the checkout into a `.git`-free directory before bind mount
 **Plans**: 3 plans
-  - [ ] 25-01-PLAN.md — Wave 0: tests/test-phase25.sh harness + fixture profile + docker-compose.yml /agent-docs volume entry + test-map registration (CTX-01/02/03/04 RED stubs)
+  - [x] 25-01-PLAN.md — Wave 0: tests/test-phase25.sh harness + fixture profile + docker-compose.yml /agent-docs volume entry + test-map registration (CTX-01/02/03/04 RED stubs) (completed 2026-04-14)
   - [ ] 25-02-PLAN.md — Wave 1: fetch_docs_context() sparse shallow clone helper in bin/claude-secure (CTX-01, CTX-03, CTX-04 unit-level)
   - [ ] 25-03-PLAN.md — Wave 2: do_spawn + interactive *) integration call sites, docker-gated read-only bind mount verification (CTX-01, CTX-02)
 

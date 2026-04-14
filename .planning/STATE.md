@@ -4,14 +4,14 @@ milestone: v3.0
 milestone_name: macOS Support
 status: executing
 stopped_at: Completed 24-03-PLAN.md
-last_updated: "2026-04-14T08:27:16.248Z"
-last_activity: 2026-04-14
+last_updated: "2026-04-14T09:07:32.635Z"
+last_activity: 2026-04-14 -- Phase 25 execution started
 progress:
-  total_phases: 10
+  total_phases: 11
   completed_phases: 10
-  total_plans: 35
-  completed_plans: 35
-  percent: 88
+  total_plans: 38
+  completed_plans: 36
+  percent: 94
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** Phase 24 — multi-file-publish-bundle
+**Current focus:** Phase 25 — context-read-bind-mount
 
 ## Current Position
 
-Phase: 24 (multi-file-publish-bundle) — EXECUTING
+Phase: 25 (context-read-bind-mount) — EXECUTING
 Plan: 2 of 3
-Status: Ready to execute
-Last activity: 2026-04-14
+Status: Executing Phase 25
+Last activity: 2026-04-14 -- Completed Plan 25-01 (Wave 0 harness + fixtures + compose volume)
 
-Progress: [█████████░] 88% (15/17 plans)
+Progress: [█████████░] 94% (16/17 plans)
 
 ## Performance Metrics
 
