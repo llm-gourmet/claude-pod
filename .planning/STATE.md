@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v3.0
-milestone_name: macOS Support
-status: executing
-stopped_at: Completed 27-02-PLAN.md (Phase 16 VERIFICATION.md backfill)
-last_updated: "2026-04-14T14:00:19.943Z"
-last_activity: 2026-04-14
+milestone: v2.0
+milestone_name: Headless Agent Mode
+status: verifying
+stopped_at: Completed 27-01-PLAN.md
+last_updated: "2026-04-14T14:01:06.822Z"
+last_activity: 2026-04-12
 progress:
-  total_phases: 15
-  completed_phases: 14
-  total_plans: 49
-  completed_plans: 48
+  total_phases: 6
+  completed_phases: 6
+  total_plans: 21
+  completed_plans: 21
   percent: 88
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** Phase 27 — v2-verification-backfill
+**Current focus:** Phase 17 — operational-hardening
 
 ## Current Position
 
-Phase: 27 (v2-verification-backfill) — EXECUTING
-Plan: 3 of 3
-Status: Ready to execute
-Last activity: 2026-04-14
+Phase: 17
+Plan: Not started
+Status: Phase complete — ready for verification
+Last activity: 2026-04-12
 
 Progress: [█████████░] 88% (15/17 plans)
 
@@ -71,21 +71,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 17 P02 | 18min | 3 tasks | 6 files |
 | Phase 17 P04 | 4min | 2 tasks | 3 files |
 | Phase 17-operational-hardening P03 | 35min | 2 tasks | 2 files |
-| Phase 23 P02 | 17 | 3 tasks | 9 files |
-| Phase 23 P03 | 7 | 3 tasks | 3 files |
-| Phase 24-multi-file-publish-bundle P03 | 6min | 1 tasks | 2 files |
-| Phase 25 P02 | 4min | 1 tasks | 1 files |
-| Phase 25 P03 | 2min | 2 tasks | 1 files |
-| Phase 25 P04 | 5 | 1 tasks | 1 files |
-| Phase 28-ops01-docs-repo-fix P01 | 5min | 2 tasks | 2 files |
-| Phase 29 P01 | 1min | 1 tasks | 1 files |
-| Phase 29-prof02-repo-prompt P02 | 5min | 1 tasks | 2 files |
-| Phase 26-stop-hook-mandatory-reporting P01 | 5min | 3 tasks | 10 files |
-| Phase 26 P02 | 5min | 2 tasks | 12 files |
-| Phase 26 P03 | 25min | 2 tasks | 2 files |
-| Phase 26-stop-hook-mandatory-reporting P26-04 | 15min | 2 tasks | 2 files |
-| Phase 27-v2-verification-backfill P03 | 2min | 2 tasks | 7 files |
-| Phase 27-v2-verification-backfill P02 | 8 | 1 tasks | 1 files |
+| Phase 27 P01 | 2min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -134,32 +120,7 @@ Recent decisions affecting current work:
 - [Phase 17]: 17-03: push_with_retry expanded from 1 single-retry to a bounded 3-attempt rebase loop + grep widened to catch file:// remote rejection strings (remote rejected / failed to update ref / cannot lock ref) — fixes concurrent-publish race against Phase 14 Semaphore(3)
 - [Phase 17]: 17-03: reap added to superuser-skip list so timer-driven invocations never hit load_superuser_config's interactive DEFAULT_WORKSPACE prompt — reaper walks docker ps directly and needs no profile/whitelist
 - [Phase 17]: 17-03: scenario 3 sentinel created via minimal compose.yml (not plain docker run --label) so reaper's docker compose -p X down path can tear it down; scenario 4 uses two-layer check (compose config + docker inspect on explicit --no-deps --no-start claude container)
-- [Phase 23]: BIND-02 security invariant: DOCS_REPO_TOKEN and REPORT_REPO_TOKEN filtered from docker-compose env_file via project_env_for_containers(); host bash still receives tokens via set -a; source .env
-- [Phase 23]: BIND-03 alias: resolve_docs_alias() prefers docs_* names, falls back to report_*, and back-fills REPORT_REPO/BRANCH/TOKEN for Phase 16 compatibility
-- [Phase 23]: do_profile_init_docs skips validate_profile call to allow file:// test URLs; CLI dispatch already calls validate_profile before subcommand routing
-- [Phase 23]: push_with_retry reused unchanged for init-docs: REPORT_REPO_TOKEN back-fill from Plan 02 resolve_docs_alias is the single integration point
-- [Phase 24-multi-file-publish-bundle]: publish_docs_bundle uses clone-local gitattributes merge=union on INDEX.md so concurrent rebases auto-merge the append-only log
-- [Phase 24-multi-file-publish-bundle]: publish_docs_bundle sets clone-local user.email/user.name (env vars only cover first commit, not rebase replay in push_with_retry)
-- [Phase 24-multi-file-publish-bundle]: Phase 24 ships library-only (no CLI dispatch case for publish_docs_bundle); Phase 26 will wire the Stop hook caller
-- [Phase 25]: Plan 25-02: fetch_docs_context() inserted at bin/claude-secure lines 1843-1961 (add-only); uses clone --depth=1 --filter=blob:none --sparse + sparse-checkout set <docs_project_dir>; mount source is /repo/$DOCS_PROJECT_DIR (subdirectory, not clone root) to structurally exclude .git/ from CTX-04 bind mount; realpath normalization for macOS /tmp->/private/tmp; explicit ls -A empty-subtree guard
-- [Phase 25]: Plan 25-03: Asymmetric failure policy — do_spawn fail-closed (programmatic path), interactive *) warn-continue with AGENT_DOCS_HOST_PATH='' reset to inert /dev/null default
-- [Phase 25]: 25-04: Poll loop uses docker compose ps --status=running --services not --status=healthy; claude service has no healthcheck so healthy never fires
-- [Phase 25]: 25-04: exec guard uses 'true' as cheapest liveness probe in test_agent_docs_no_git_dir_in_container to convert silent false-positive into loud FAIL
-- [Phase 28-ops01-docs-repo-fix]: OPS-01 fix: ordering locked to new-first (.docs_repo // .report_repo // empty) to mirror validate_docs_binding:127 and be forward-compat with legacy removal
-- [Phase 28-ops01-docs-repo-fix]: REPORT_PATH_PREFIX deliberately unchanged -- no .docs_path_prefix alias exists in Phase 23 schema
-- [Phase 29]: 29-01: Wave 0 RED tests added using piped stdin into sourced create_profile to exercise real prompt flow (Nyquist guard against helper-only fix)
-- [Phase 29-prof02-repo-prompt]: 29-02: create_profile repo regex ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ with warn-don't-block save-verbatim policy; empty input omits .repo key (back-compat)
-- [Phase 29-prof02-repo-prompt]: 29-02: Rule 3 deviation — exported APP_DIR in tests/test-phase12.sh _source_functions to unblock silent unbound-var failures masking the new PROF-02d/e/f assertions
-- [Phase 26]: Force-add tests/fixtures/profile-26-spool/.env with git add -f (gitignored, consistent with profile-e2e precedent)
-- [Phase 26]: TEST_SPOOL_FILE_OVERRIDE / CLAUDE_SECURE_SKIP_SPOOL_SHIPPER / MOCK_PUBLISH_BUNDLE_EXIT as testability contracts for Plans 02/03/04
-- [Phase 26]: Plan 26-02: TEST_SPOOL_FILE_OVERRIDE overrides SPOOL_FILE in stop-hook.sh — allows tests to use temp paths without /var/log mount
-- [Phase 26]: Plan 26-02: stop_hook_active guard uses jq // false coercion + 2>/dev/null || echo false fallback (Pitfall 6 malformed-JSON defense)
-- [Phase 26]: Plan 26-02: Stop entry in settings.json has NO matcher field — Stop hooks do not support matchers per official Claude Code docs
-- [Phase 26]: Used tempfile pattern in _spool_shipper_loop to capture publish_docs_bundle exit code without pipefail dependency
-- [Phase 26]: Fixed jq select() in object context: use if/else/end for optional fields — select returns empty which invalidates parent object
-- [Phase 26-stop-hook-mandatory-reporting]: Phase 26: run_spool_shipper_inline placed before fetch_docs_context in do_spawn and after mkdir LOG_DIR in interactive preamble — D-07 stale-drain closes SPOOL-03 crash-recovery edge case
-- [Phase 27-v2-verification-backfill]: 27-03: Frontmatter-only edits to VALIDATION.md files (phases 12-17) set nyquist_compliant: true and wave_0_complete: true; REQUIREMENTS.md traceability backfilled with PROF-01/03 and OPS-01/02 Complete
-- [Phase 27-v2-verification-backfill]: OPS-01 docs_repo integration concern (do_spawn:2077) scoped as Phase 28 forward-compat fix — not a Phase 16 code defect; v2.0 profiles using report_repo are unaffected
+- [Phase 27]: Evidence sourced from SUMMARY.md frontmatter and commit hashes only — no tests re-run during backfill verification
 
 ### Pending Todos
 
@@ -185,6 +146,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last activity: 2026-04-14 - Phase 26 complete: stop-hook + spool shipper (SPOOL-01/02/03)
-Stopped at: Completed 27-02-PLAN.md (Phase 16 VERIFICATION.md backfill)
+Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
+Stopped at: Completed 27-01-PLAN.md
 Resume file: None
