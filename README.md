@@ -588,6 +588,37 @@ If you installed a prior version with `install.sh --with-webhook`, re-run the in
 sudo ./install.sh --with-webhook
 ```
 
+## Mandatory Reporting
+
+Every claude-secure session — headless (webhook-triggered) and interactive — writes a session report to the doc repo bound to its profile. Reports are enforced by a local Stop hook and shipped by a host-side async process.
+
+### How it works
+
+When Claude finishes a turn, a Stop hook runs inside the container and checks for a local spool file at `/var/log/claude-secure/spool.md` (which maps to `$LOG_DIR/spool.md` on the host via the existing log volume mount). If the file is missing, Claude is re-prompted exactly once with a template listing the six required sections: Goal, Where Worked, What Changed, What Failed, How to Test, Future Findings. If the second attempt still fails, the hook yields so Claude is never trapped in a loop.
+
+The Stop hook makes zero network calls — a doc repo outage cannot block Claude from exiting.
+
+After Claude exits, claude-secure forks a background shipper that reads `spool.md`, runs it through the existing redaction and sanitization pipeline, and pushes the resulting commit to the profile's `docs_repo`. The shipper uses 3-attempt jittered backoff (immediate, ~5s, ~10s). On success, `spool.md` is deleted. On failure, `spool.md` is left in place and the outcome is appended to the audit file.
+
+### Operator files
+
+| File | Description |
+|------|-------------|
+| `$LOG_DIR/spool.md` | The current session's pending report. Exists briefly between Claude exit and a successful shipper push. |
+| `$LOG_DIR/${LOG_PREFIX}spool-audit.jsonl` | JSONL log of shipper outcomes: `pushed`, `push_failed`, `stale_drained` — with timestamp, retry count, and report URL on success. |
+
+### Stuck spool recovery
+
+If the shipper exhausts all retries (for example, during a sustained GitHub outage), the spool file remains in `$LOG_DIR`. The next time you run claude-secure with the same profile, the spawn preamble drains the stale spool synchronously before starting the new session — so a transient outage self-heals automatically without operator intervention.
+
+To inspect shipper outcomes live:
+
+```bash
+tail -f "$LOG_DIR/${LOG_PREFIX}spool-audit.jsonl" | jq -c '{ts: .ts, status: .spool_status, attempt: .attempt, error: .error}'
+```
+
+To manually push a stuck spool without waiting for the next spawn, re-run any spawn against the same profile — the preamble drain will pick it up.
+
 ## Testing
 
 ### Quick Start
