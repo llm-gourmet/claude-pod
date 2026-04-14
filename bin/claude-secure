@@ -2377,6 +2377,11 @@ do_spawn() {
     "$report_url" \
     "$_audit_err_short" 2>/dev/null || true
 
+  # Phase 26 SPOOL-03: fork-and-disown spool shipper after audit write.
+  # Uses $_audit_session (Claude session_id from line ~2205), not $delivery_id.
+  # ${_audit_session:-unknown} guards against malformed Claude output.
+  run_spool_shipper "${_audit_session:-unknown}"
+
   # Emit envelope to stdout.
   echo "$envelope_json"
 
@@ -2974,5 +2979,7 @@ case "$CMD" in
     fi
     docker compose up -d
     docker compose exec -it claude claude --dangerously-skip-permissions
+    # Phase 26 SPOOL-03: fork-and-disown spool shipper after interactive exit.
+    run_spool_shipper "$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d - || echo "manual-$$")"
     ;;
 esac
