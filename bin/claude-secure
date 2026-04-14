@@ -2069,13 +2069,19 @@ do_spawn() {
   audit_branch=$(echo "$EVENT_JSON" | jq -r '.pull_request.head.ref // (.ref // empty | sub("^refs/heads/"; ""))')
   [ "$audit_branch" = "null" ] && audit_branch=""
 
-  # Phase 16 / D-12: read report_repo fields from profile.json and export as env vars
-  # so publish_report can consume them via REPORT_REPO / REPORT_BRANCH / REPORT_PATH_PREFIX.
-  # REPORT_REPO_TOKEN comes from profile.env (loaded earlier via load_profile_config).
+  # Phase 16 / D-12 (patched in Phase 28 for OPS-01 forward compat):
+  # Read report_repo fields from profile.json and export as env vars so publish_report
+  # can consume them via REPORT_REPO / REPORT_BRANCH / REPORT_PATH_PREFIX.
+  # REPORT_REPO_TOKEN comes from profile.env (loaded earlier via load_profile_config
+  # -> resolve_docs_alias, which also back-fills REPORT_REPO from DOCS_REPO when only
+  # the new Phase 23 field names are set). The fallback ordering below (docs_* first,
+  # report_* legacy second) matches validate_docs_binding:127 so Phase 23-migrated
+  # profiles never silently skip report publishing. DO NOT add a .docs_path_prefix
+  # alias here -- no such Phase 23 field exists and inventing one is out of scope.
   local _profile_json="$CONFIG_DIR/profiles/$PROFILE/profile.json"
   if [ -f "$_profile_json" ]; then
-    REPORT_REPO=$(jq -r '.report_repo // empty' "$_profile_json")
-    REPORT_BRANCH=$(jq -r '.report_branch // "main"' "$_profile_json")
+    REPORT_REPO=$(jq -r '.docs_repo // .report_repo // empty' "$_profile_json")
+    REPORT_BRANCH=$(jq -r '.docs_branch // .report_branch // "main"' "$_profile_json")
     REPORT_PATH_PREFIX=$(jq -r '.report_path_prefix // "reports"' "$_profile_json")
     export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX
   fi
