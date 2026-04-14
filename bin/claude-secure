@@ -1840,6 +1840,126 @@ _spawn_error_audit() {
       "" "" "" "" "" "" "spawn_error" "" "${err_msg:0:200}" 2>/dev/null || true
 }
 
+# Phase 25 CTX-01..CTX-04: sparse shallow partial clone of the doc repo's
+# projects/<slug>/ subtree, bind-mounted read-only into the claude container
+# at /agent-docs. HOST-SIDE ONLY -- the PAT is consumed only by the host git
+# invocation; the container only sees a read-only filesystem at /agent-docs/.
+#
+# Skips silently when DOCS_REPO is empty (CTX-03).
+# Fails closed on clone/sparse-checkout errors -- a misconfiguration should
+# surface loudly, not degrade silently (see 25-RESEARCH.md Open Question 1).
+# The mount source is the project SUBDIRECTORY, not the clone root -- this
+# structurally excludes .git/ from the bind mount (CTX-04).
+#
+# Exports: AGENT_DOCS_HOST_PATH (absolute, realpath-normalized) on success;
+#          empty string on the CTX-03 no-docs skip path; unset on error.
+# Returns: 0 on success or silent skip; 1 on any clone/sparse-checkout error.
+fetch_docs_context() {
+  # CTX-03: opt-out -- silent skip when no docs repo is configured.
+  if [ -z "${DOCS_REPO:-}" ]; then
+    echo "info: fetch_docs_context: skipped (no docs_repo configured)" >&2
+    AGENT_DOCS_HOST_PATH=""
+    export AGENT_DOCS_HOST_PATH
+    return 0
+  fi
+
+  # Defensive: Phase 23 validate_docs_binding already enforces these when
+  # docs_repo is set, but fetch_docs_context runs on the do_spawn path which
+  # may skip full validation. Re-check to fail fast with a clear error.
+  if [ -z "${DOCS_BRANCH:-}" ] || [ -z "${DOCS_PROJECT_DIR:-}" ] || [ -z "${DOCS_REPO_TOKEN:-}" ]; then
+    echo "ERROR: fetch_docs_context: docs_repo set but DOCS_BRANCH / DOCS_PROJECT_DIR / DOCS_REPO_TOKEN missing" >&2
+    return 1
+  fi
+
+  local clone_root
+  clone_root=$(mktemp -d "${TMPDIR:-/tmp}/cs-agent-docs-XXXXXXXX")
+  # Register cleanup IMMEDIATELY after mktemp -- before any git call -- so
+  # a mid-clone failure cannot leak the temp dir (Phase 24 discipline).
+  _CLEANUP_FILES+=("$clone_root")
+
+  # Askpass helper -- identical pattern to do_profile_init_docs (line ~1485)
+  # and publish_docs_bundle (line ~1696). The PAT never appears in argv.
+  local askpass="$clone_root/.askpass.sh"
+  cat > "$askpass" <<'ASKPASS'
+#!/bin/sh
+case "$1" in
+  Username*) printf 'x-access-token\n' ;;
+  Password*) printf '%s\n' "$GIT_ASKPASS_PAT" ;;
+esac
+ASKPASS
+  chmod 700 "$askpass"
+
+  local pat="$DOCS_REPO_TOKEN"
+  local clone_err="$clone_root/clone.err"
+  local _git_env
+  _git_env=(
+    LC_ALL=C
+    GIT_ASKPASS="$askpass"
+    GIT_ASKPASS_PAT="$pat"
+    GIT_TERMINAL_PROMPT=0
+    GIT_HTTP_LOW_SPEED_LIMIT=1
+    GIT_HTTP_LOW_SPEED_TIME=30
+  )
+
+  # CTX-01: sparse + shallow + partial clone. --filter=blob:none defers
+  # blob fetch until checkout; --sparse initializes an empty sparse-checkout
+  # so `set` can narrow to one subdirectory. Both flags require git 2.25+.
+  # NOTE: git silently ignores --depth and --filter when cloning from a
+  # local file:// URL (25-RESEARCH.md Pitfall 3) -- harmless for tests.
+  if ! env "${_git_env[@]}" \
+       timeout 60 \
+       git -c credential.helper= -c credential.helper='' \
+           -c core.autocrlf=false \
+           clone --depth=1 --filter=blob:none --sparse \
+                 --branch "$DOCS_BRANCH" --quiet \
+                 "$DOCS_REPO" "$clone_root/repo" 2>"$clone_err"; then
+    # CTX-04 / security: scrub PAT from stderr before surfacing.
+    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$clone_err" >&2
+    echo "ERROR: fetch_docs_context: clone failed (see scrubbed stderr above)" >&2
+    return 1
+  fi
+
+  # Narrow the working tree to the project subdir. Cone mode (default since
+  # git 2.27) is faster on large repos and matches the single-prefix case.
+  local sparse_err="$clone_root/sparse.err"
+  if ! git -C "$clone_root/repo" sparse-checkout set "$DOCS_PROJECT_DIR" 2>"$sparse_err"; then
+    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$sparse_err" >&2
+    echo "ERROR: fetch_docs_context: sparse-checkout set failed for $DOCS_PROJECT_DIR" >&2
+    return 1
+  fi
+
+  # CTX-04: the bind-mount source is the SUBDIRECTORY, not the clone root.
+  # .git/ lives at $clone_root/repo/.git/ -- completely outside the mount
+  # source. Verified empirically on git 2.43.0 (see 25-RESEARCH.md Example 1).
+  local mount_src="$clone_root/repo/$DOCS_PROJECT_DIR"
+  if [ ! -d "$mount_src" ]; then
+    echo "ERROR: fetch_docs_context: project subdir missing after sparse-checkout: $DOCS_PROJECT_DIR" >&2
+    echo "       Did you run 'claude-secure profile init-docs --profile $PROFILE'?" >&2
+    return 1
+  fi
+
+  # Open Question 3: fail fast on empty subtree (typo'd docs_project_dir
+  # after sparse-checkout gives an empty dir with no error).
+  if [ -z "$(ls -A "$mount_src" 2>/dev/null)" ]; then
+    echo "ERROR: fetch_docs_context: project subdir is empty after sparse-checkout: $DOCS_PROJECT_DIR" >&2
+    echo "       Run 'claude-secure profile init-docs --profile $PROFILE' to bootstrap the project layout." >&2
+    return 1
+  fi
+
+  # Open Question 5: normalize through realpath to collapse macOS /tmp ->
+  # /private/tmp symlinks that could confuse Docker Desktop bind mounts.
+  # GNU realpath is guaranteed by Phase 18 PATH bootstrap on macOS.
+  local resolved
+  if resolved=$(realpath "$mount_src" 2>/dev/null) && [ -n "$resolved" ]; then
+    mount_src="$resolved"
+  fi
+
+  AGENT_DOCS_HOST_PATH="$mount_src"
+  export AGENT_DOCS_HOST_PATH
+  echo "info: fetch_docs_context: mounted $DOCS_PROJECT_DIR (host: $mount_src) read-only at /agent-docs" >&2
+  return 0
+}
+
 do_spawn() {
   # Help check before profile guard so `spawn --help` works without --profile
   for _arg in "${REMAINING_ARGS[@]}"; do
