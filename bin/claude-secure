@@ -1032,6 +1032,47 @@ render_report_template() {
   printf '%s' "$rendered"
 }
 
+# Phase 24 RPT-01: validate that a rendered report body contains all 6
+# mandatory H2 sections from webhook/report-templates/bundle.md. Anchored
+# regex (^## Section$) prevents partial matches inside code blocks or
+# headings like "## Goal Achievements".
+#
+# Caller (Phase 26 Stop hook) is responsible for re-prompting Claude if a
+# report is malformed. Phase 24 ships the validator only.
+#
+# Args:
+#   $1 = body_path  (path to rendered report markdown)
+# Returns:
+#   0 if all 6 sections present
+#   1 if any are missing (stderr lists every missing section)
+verify_bundle_sections() {
+  local body_path="$1"
+  if [ ! -f "$body_path" ]; then
+    echo "ERROR: verify_bundle_sections: file not found: $body_path" >&2
+    return 1
+  fi
+
+  local _required=(
+    "^## Goal$"
+    "^## Where Worked$"
+    "^## What Changed$"
+    "^## What Failed$"
+    "^## How to Test$"
+    "^## Future Findings$"
+  )
+  local section missing=0
+  for section in "${_required[@]}"; do
+    if ! LC_ALL=C grep -qE "$section" "$body_path"; then
+      echo "ERROR: report missing mandatory section: ${section#^## }" | sed 's/\$$//' >&2
+      missing=1
+    fi
+  done
+  if [ "$missing" -ne 0 ]; then
+    return 1
+  fi
+  return 0
+}
+
 # Phase 16 D-15 / Pattern B / Pitfall 1: redact every non-empty profile
 # .env value from a rendered report file in place. Uses awk-from-file
 # LITERAL substring replace (index + substr) so any value metacharacter
