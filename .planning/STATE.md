@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: macOS Support
-status: verifying
-stopped_at: "Completed 25-03-PLAN.md: Phase 25 context-read bind-mount wiring complete"
-last_updated: "2026-04-14T09:23:01.727Z"
+status: executing
+stopped_at: Completed 25-04-PLAN.md
+last_updated: "2026-04-14T11:06:22.659Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 11
   completed_phases: 11
-  total_plans: 38
-  completed_plans: 38
+  total_plans: 39
+  completed_plans: 39
   percent: 88
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** Phase 24 — multi-file-publish-bundle
+**Current focus:** Phase 25 — context-read-bind-mount
 
 ## Current Position
 
-Phase: 24 (multi-file-publish-bundle) — EXECUTING
-Plan: 3 of 3
-Status: Phase complete — ready for verification
+Phase: 25 (context-read-bind-mount) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
 Last activity: 2026-04-14
 
 Progress: [█████████░] 88% (15/17 plans)
@@ -76,6 +76,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 24-multi-file-publish-bundle P03 | 6min | 1 tasks | 2 files |
 | Phase 25 P02 | 4min | 1 tasks | 1 files |
 | Phase 25 P03 | 2min | 2 tasks | 1 files |
+| Phase 25 P04 | 5 | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -133,6 +134,8 @@ Recent decisions affecting current work:
 - [Phase 24-multi-file-publish-bundle]: Phase 24 ships library-only (no CLI dispatch case for publish_docs_bundle); Phase 26 will wire the Stop hook caller
 - [Phase 25]: Plan 25-02: fetch_docs_context() inserted at bin/claude-secure lines 1843-1961 (add-only); uses clone --depth=1 --filter=blob:none --sparse + sparse-checkout set <docs_project_dir>; mount source is /repo/$DOCS_PROJECT_DIR (subdirectory, not clone root) to structurally exclude .git/ from CTX-04 bind mount; realpath normalization for macOS /tmp->/private/tmp; explicit ls -A empty-subtree guard
 - [Phase 25]: Plan 25-03: Asymmetric failure policy — do_spawn fail-closed (programmatic path), interactive *) warn-continue with AGENT_DOCS_HOST_PATH='' reset to inert /dev/null default
+- [Phase 25]: 25-04: Poll loop uses docker compose ps --status=running --services not --status=healthy; claude service has no healthcheck so healthy never fires
+- [Phase 25]: 25-04: exec guard uses 'true' as cheapest liveness probe in test_agent_docs_no_git_dir_in_container to convert silent false-positive into loud FAIL
 
 ### Pending Todos
 
@@ -159,5 +162,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
-Stopped at: Completed 25-03-PLAN.md: Phase 25 context-read bind-mount wiring complete
+Stopped at: Completed 25-04-PLAN.md
 Resume file: None
