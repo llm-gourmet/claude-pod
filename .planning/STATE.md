@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: macOS Support
 status: executing
-stopped_at: Completed 24-03-PLAN.md
-last_updated: "2026-04-14T08:27:16.248Z"
+stopped_at: Completed 25-02-PLAN.md (wave 1; wave 0 Plan 01 and wave 2 Plan 03 run separately)
+last_updated: "2026-04-14T09:15:05.889Z"
 last_activity: 2026-04-14
 progress:
-  total_phases: 10
+  total_phases: 11
   completed_phases: 10
-  total_plans: 35
-  completed_plans: 35
+  total_plans: 38
+  completed_plans: 36
   percent: 88
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 ## Current Position
 
 Phase: 24 (multi-file-publish-bundle) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-04-14
 
@@ -74,6 +74,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 23 P02 | 17 | 3 tasks | 9 files |
 | Phase 23 P03 | 7 | 3 tasks | 3 files |
 | Phase 24-multi-file-publish-bundle P03 | 6min | 1 tasks | 2 files |
+| Phase 25 P02 | 4min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -129,6 +130,7 @@ Recent decisions affecting current work:
 - [Phase 24-multi-file-publish-bundle]: publish_docs_bundle uses clone-local gitattributes merge=union on INDEX.md so concurrent rebases auto-merge the append-only log
 - [Phase 24-multi-file-publish-bundle]: publish_docs_bundle sets clone-local user.email/user.name (env vars only cover first commit, not rebase replay in push_with_retry)
 - [Phase 24-multi-file-publish-bundle]: Phase 24 ships library-only (no CLI dispatch case for publish_docs_bundle); Phase 26 will wire the Stop hook caller
+- [Phase 25]: Plan 25-02: fetch_docs_context() inserted at bin/claude-secure lines 1843-1961 (add-only); uses clone --depth=1 --filter=blob:none --sparse + sparse-checkout set <docs_project_dir>; mount source is /repo/$DOCS_PROJECT_DIR (subdirectory, not clone root) to structurally exclude .git/ from CTX-04 bind mount; realpath normalization for macOS /tmp->/private/tmp; explicit ls -A empty-subtree guard
 
 ### Pending Todos
 
@@ -155,5 +157,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
-Stopped at: Completed 24-03-PLAN.md
+Stopped at: Completed 25-02-PLAN.md (wave 1; wave 0 Plan 01 and wave 2 Plan 03 run separately)
 Resume file: None

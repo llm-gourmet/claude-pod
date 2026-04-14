@@ -156,7 +156,7 @@
   4. `/agent-docs/.git/` does not exist inside the container — verified by a test that lists the mount and asserts absence; the host-side clone either uses sparse-checkout to exclude `.git` or copies the checkout into a `.git`-free directory before bind mount
 **Plans**: 3 plans
   - [ ] 25-01-PLAN.md — Wave 0: tests/test-phase25.sh harness + fixture profile + docker-compose.yml /agent-docs volume entry + test-map registration (CTX-01/02/03/04 RED stubs)
-  - [ ] 25-02-PLAN.md — Wave 1: fetch_docs_context() sparse shallow clone helper in bin/claude-secure (CTX-01, CTX-03, CTX-04 unit-level)
+  - [x] 25-02-PLAN.md — Wave 1: fetch_docs_context() sparse shallow clone helper in bin/claude-secure (CTX-01, CTX-03, CTX-04 unit-level)
   - [ ] 25-03-PLAN.md — Wave 2: do_spawn + interactive *) integration call sites, docker-gated read-only bind mount verification (CTX-01, CTX-02)
 
 ### Phase 26: Stop Hook & Mandatory Reporting
@@ -204,5 +204,5 @@
 | 22. macOS Integration Tests | v3.0 | 0/0 | Not started | - |
 | 23. Profile ↔ Doc Repo Binding | v4.0 | 3/3 | Complete   | 2026-04-13 |
 | 24. Multi-File Publish Bundle | v4.0 | 3/3 | Complete   | 2026-04-14 |
-| 25. Context Read & Bind Mount | v4.0 | 0/3 | Planned     | - |
+| 25. Context Read & Bind Mount | v4.0 | 1/3 | In Progress|  |
 | 26. Stop Hook & Mandatory Reporting | v4.0 | 0/0 | Not started | - |
