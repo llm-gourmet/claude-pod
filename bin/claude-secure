@@ -2080,6 +2080,19 @@ do_spawn() {
     export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX
   fi
 
+  # Phase 25 CTX-01..CTX-04: sparse shallow clone of the doc repo's
+  # projects/<slug>/ subtree, bind-mounted read-only into the claude
+  # container at /agent-docs. Skips silently when DOCS_REPO is empty
+  # (CTX-03). Exports AGENT_DOCS_HOST_PATH for docker-compose.yml to
+  # consume on the `docker compose up -d --wait` call below.
+  # Fail-closed: a clone/sparse-checkout failure aborts the spawn so
+  # misconfigurations (expired PAT, renamed branch, typo'd project dir)
+  # surface loudly rather than silently running without context.
+  if ! fetch_docs_context; then
+    _spawn_error_audit "spawn: fetch_docs_context failed"
+    return 1
+  fi
+
   # Resolve and render prompt template (per D-13 through D-17)
   local profile_dir="$CONFIG_DIR/profiles/$PROFILE"
   local template_path
