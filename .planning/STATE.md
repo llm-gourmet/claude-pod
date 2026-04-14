@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 ## Current Position
 
 Phase: 26 (stop-hook-mandatory-reporting) — EXECUTING
-Plan: 2 of 4
-Status: Ready to execute
+Plan: 2 of 4 complete
+Status: Plan 02 complete — stop-hook.sh + settings.json registration done; Plans 03/04 pending
 Last activity: 2026-04-14
 
 Progress: [█████████░] 88% (15/17 plans)
@@ -81,6 +81,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 29 P01 | 1min | 1 tasks | 1 files |
 | Phase 29-prof02-repo-prompt P02 | 5min | 1 tasks | 2 files |
 | Phase 26-stop-hook-mandatory-reporting P01 | 5min | 3 tasks | 10 files |
+| Phase 26 P02 | 5min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -147,6 +148,9 @@ Recent decisions affecting current work:
 - [Phase 29-prof02-repo-prompt]: 29-02: Rule 3 deviation — exported APP_DIR in tests/test-phase12.sh _source_functions to unblock silent unbound-var failures masking the new PROF-02d/e/f assertions
 - [Phase 26]: Force-add tests/fixtures/profile-26-spool/.env with git add -f (gitignored, consistent with profile-e2e precedent)
 - [Phase 26]: TEST_SPOOL_FILE_OVERRIDE / CLAUDE_SECURE_SKIP_SPOOL_SHIPPER / MOCK_PUBLISH_BUNDLE_EXIT as testability contracts for Plans 02/03/04
+- [Phase 26]: Plan 26-02: TEST_SPOOL_FILE_OVERRIDE overrides SPOOL_FILE in stop-hook.sh — allows tests to use temp paths without /var/log mount
+- [Phase 26]: Plan 26-02: stop_hook_active guard uses jq // false coercion + 2>/dev/null || echo false fallback (Pitfall 6 malformed-JSON defense)
+- [Phase 26]: Plan 26-02: Stop entry in settings.json has NO matcher field — Stop hooks do not support matchers per official Claude Code docs
 
 ### Pending Todos
 
@@ -173,5 +177,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
-Stopped at: Completed 26-01-PLAN.md
+Stopped at: Completed 26-02-PLAN.md (stop-hook.sh + settings.json)
 Resume file: None
