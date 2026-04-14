@@ -9,9 +9,9 @@ Requirements for headless agent mode. Each maps to roadmap phases.
 
 ### Profiles
 
-- [ ] **PROF-01**: User can create a profile with its own whitelist.json, .env, and workspace directory
+- [x] **PROF-01**: User can create a profile with its own whitelist.json, .env, and workspace directory
 - [x] **PROF-02**: User can map a GitHub repository URL to a profile so events route correctly
-- [ ] **PROF-03**: Profile resolution fails closed -- missing or invalid profile blocks execution, never falls back to default
+- [x] **PROF-03**: Profile resolution fails closed -- missing or invalid profile blocks execution, never falls back to default
 
 ### Headless Execution
 
@@ -78,9 +78,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PROF-01 | Phase 12 → Phase 27 (verif backfill) | Pending |
+| PROF-01 | Phase 12 → Phase 27 (verif backfill) | Complete |
 | PROF-02 | Phase 12 → Phase 29 (UX fix) | Complete |
-| PROF-03 | Phase 12 → Phase 27 (verif backfill) | Pending |
+| PROF-03 | Phase 12 → Phase 27 (verif backfill) | Complete |
 | HEAD-01 | Phase 13 | Complete |
 | HEAD-02 | Phase 13 | Complete |
 | HEAD-03 | Phase 13 | Complete |
@@ -94,7 +94,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HOOK-06 | Phase 14 | Complete |
 | HOOK-07 | Phase 15 | Complete |
 | OPS-01 | Phase 16 → Phase 27 (verif) + Phase 28 (docs_repo fix) | Complete |
-| OPS-02 | Phase 16 → Phase 27 (verif backfill) | Pending |
+| OPS-02 | Phase 16 → Phase 27 (verif backfill) | Complete |
 | OPS-03 | Phase 17 | Complete |
 
 **Coverage:**
@@ -275,4 +275,4 @@ Which phases cover which v4.0 requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-04-11*
-*Last updated: 2026-04-14 — phases 27-29 added (v2.0 gap closure from audit)*
+*Last updated: 2026-04-14 — phases 27-29 added (v2.0 gap closure from audit); Phase 27 traceability backfill*
