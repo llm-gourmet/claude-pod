@@ -65,6 +65,10 @@ EOF
 _source_functions() {
   local tmpdir="$1"
   _setup_source_env "$tmpdir"
+  # Export APP_DIR so functions like create_profile can copy whitelist template
+  # from $APP_DIR/config/whitelist.json under set -u (main dispatch normally sets
+  # this via config.sh, but source-only mode bypasses that path).
+  export APP_DIR="$PROJECT_DIR"
   # shellcheck source=/dev/null
   __CLAUDE_SECURE_SOURCE_ONLY=1 source "$PROJECT_DIR/bin/claude-secure"
 }
