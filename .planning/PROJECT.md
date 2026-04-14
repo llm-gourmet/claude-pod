@@ -37,6 +37,7 @@ No secret ever leaves the isolated environment uncontrolled — every outbound c
 - Result channel: report written to separate documentation repo with audit log — v2.0 Phase 16
 - Operational hardening: container reaper systemd timer, D-11 listener hardening, E2E integration tests — v2.0 Phase 17
 - Platform abstraction: `lib/platform.sh` with `detect_platform()` (linux/wsl2/macos), bash 4+ re-exec guard, GNU coreutils PATH shim, flock→mkdir-lock, uuidgen lowercase normalization — v3.0 Phase 18
+- Stop hook mandatory reporting: `claude/hooks/stop-hook.sh` blocks session exit when spool.md absent; async spool shipper calls `publish_docs_bundle` with jittered retry; stale-spool drain at spawn preamble recovers from crashed sessions — v4.0 Phase 26
 
 ### Active
 
@@ -127,4 +128,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-14 — Phase 26 complete: Stop hook + mandatory spool reporting (SPOOL-01/02/03 closed)
+*Last updated: 2026-04-14 — Phase 26 complete: Stop hook + mandatory spool reporting (SPOOL-01/02/03); Phase 27 next: v2.0 verification backfill

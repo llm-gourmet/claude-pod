@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** Phase 26 — stop-hook-mandatory-reporting
+**Current focus:** Phase 27 — v2-verification-backfill
 
 ## Current Position
 
@@ -181,6 +181,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
-Stopped at: Completed 26-stop-hook-mandatory-reporting-26-04-PLAN.md
+Last activity: 2026-04-14 - Phase 26 complete: stop-hook + spool shipper (SPOOL-01/02/03)
+Stopped at: Phase 26 complete, ready to plan Phase 27
 Resume file: None
