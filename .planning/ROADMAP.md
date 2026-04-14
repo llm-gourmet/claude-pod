@@ -176,7 +176,7 @@
 
 - [ ] **Phase 27: v2.0 Verification Backfill** - Create missing VERIFICATION.md for phases 12, 13, 16; update 6 stale VALIDATION.md files; fix stale traceability checkboxes (PROF-01/02/03, OPS-01/02)
 - [x] **Phase 28: OPS-01 docs_repo Backfill Fix** - Fix `do_spawn:2077` to use `.report_repo // .docs_repo // empty`; prevents silent report skip for Phase 23-migrated profiles (completed 2026-04-14)
-- [ ] **Phase 29: PROF-02 create_profile Repo Prompt** - Add `.repo` field prompt to `create_profile` to eliminate manual JSON editing after profile creation
+- [x] **Phase 29: PROF-02 create_profile Repo Prompt** - Add `.repo` field prompt to `create_profile` to eliminate manual JSON editing after profile creation (completed 2026-04-14)
 
 ### Phase 27: v2.0 Verification Backfill
 **Goal**: Bring v2.0 audit artifacts up to standard — create 3 missing VERIFICATION.md files, update 6 stale VALIDATION.md files, and fix stale traceability checkboxes so the audit can pass cleanly
@@ -197,7 +197,7 @@
 **Requirements:** PROF-02
 **Plans**: 2 plans
   - [x] 29-01-PLAN.md — Wave 0: tests/test-phase12.sh failing tests for .repo prompt (test_prof_02d happy, test_prof_02e skip, test_prof_02f warn)
-  - [ ] 29-02-PLAN.md — Wave 1: bin/claude-secure create_profile patch — optional .repo prompt + warn-don't-block regex + two-branch jq (PROF-02)
+  - [x] 29-02-PLAN.md — Wave 1: bin/claude-secure create_profile patch — optional .repo prompt + warn-don't-block regex + two-branch jq (PROF-02)
 
 ## Progress
 
@@ -236,4 +236,4 @@
 | 26. Stop Hook & Mandatory Reporting | v4.0 | 0/0 | Not started | - |
 | 27. v2.0 Verification Backfill | v2.0 gap | 0/0 | Not started | - |
 | 28. OPS-01 docs_repo Backfill Fix | v2.0 gap | 1/1 | Complete   | 2026-04-14 |
-| 29. PROF-02 create_profile Repo Prompt | v2.0 gap | 1/2 | In Progress|  |
+| 29. PROF-02 create_profile Repo Prompt | v2.0 gap | 2/2 | Complete   | 2026-04-14 |

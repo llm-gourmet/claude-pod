@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: macOS Support
-status: executing
-stopped_at: Completed 29-01-PLAN.md
-last_updated: "2026-04-14T12:12:09.041Z"
+status: verifying
+stopped_at: Completed 29-02-PLAN.md
+last_updated: "2026-04-14T12:20:03.385Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 14
-  completed_phases: 12
+  completed_phases: 13
   total_plans: 42
-  completed_plans: 41
+  completed_plans: 42
   percent: 88
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 
 Phase: 29 (prof02-repo-prompt) — EXECUTING
 Plan: 2 of 2
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-14
 
 Progress: [█████████░] 88% (15/17 plans)
@@ -79,6 +79,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 25 P04 | 5 | 1 tasks | 1 files |
 | Phase 28-ops01-docs-repo-fix P01 | 5min | 2 tasks | 2 files |
 | Phase 29 P01 | 1min | 1 tasks | 1 files |
+| Phase 29-prof02-repo-prompt P02 | 5min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -141,6 +142,8 @@ Recent decisions affecting current work:
 - [Phase 28-ops01-docs-repo-fix]: OPS-01 fix: ordering locked to new-first (.docs_repo // .report_repo // empty) to mirror validate_docs_binding:127 and be forward-compat with legacy removal
 - [Phase 28-ops01-docs-repo-fix]: REPORT_PATH_PREFIX deliberately unchanged -- no .docs_path_prefix alias exists in Phase 23 schema
 - [Phase 29]: 29-01: Wave 0 RED tests added using piped stdin into sourced create_profile to exercise real prompt flow (Nyquist guard against helper-only fix)
+- [Phase 29-prof02-repo-prompt]: 29-02: create_profile repo regex ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ with warn-don't-block save-verbatim policy; empty input omits .repo key (back-compat)
+- [Phase 29-prof02-repo-prompt]: 29-02: Rule 3 deviation — exported APP_DIR in tests/test-phase12.sh _source_functions to unblock silent unbound-var failures masking the new PROF-02d/e/f assertions
 
 ### Pending Todos
 
@@ -167,5 +170,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
-Stopped at: Completed 29-01-PLAN.md
+Stopped at: Completed 29-02-PLAN.md
 Resume file: None
