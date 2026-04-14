@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: macOS Support
 status: executing
-stopped_at: Completed 26-01-PLAN.md
-last_updated: "2026-04-14T13:24:07.023Z"
+stopped_at: Completed 26-03-PLAN.md
+last_updated: "2026-04-14T13:37:49.582Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 15
   completed_phases: 13
   total_plans: 46
-  completed_plans: 43
+  completed_plans: 45
   percent: 88
 ---
 
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 ## Current Position
 
 Phase: 26 (stop-hook-mandatory-reporting) — EXECUTING
-Plan: 2 of 4 complete
-Status: Plan 02 complete — stop-hook.sh + settings.json registration done; Plans 03/04 pending
+Plan: 3 of 4 complete
+Status: Ready to execute
 Last activity: 2026-04-14
 
 Progress: [█████████░] 88% (15/17 plans)
@@ -82,6 +82,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 29-prof02-repo-prompt P02 | 5min | 1 tasks | 2 files |
 | Phase 26-stop-hook-mandatory-reporting P01 | 5min | 3 tasks | 10 files |
 | Phase 26 P02 | 5min | 2 tasks | 12 files |
+| Phase 26 P03 | 25min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -151,6 +152,8 @@ Recent decisions affecting current work:
 - [Phase 26]: Plan 26-02: TEST_SPOOL_FILE_OVERRIDE overrides SPOOL_FILE in stop-hook.sh — allows tests to use temp paths without /var/log mount
 - [Phase 26]: Plan 26-02: stop_hook_active guard uses jq // false coercion + 2>/dev/null || echo false fallback (Pitfall 6 malformed-JSON defense)
 - [Phase 26]: Plan 26-02: Stop entry in settings.json has NO matcher field — Stop hooks do not support matchers per official Claude Code docs
+- [Phase 26]: Used tempfile pattern in _spool_shipper_loop to capture publish_docs_bundle exit code without pipefail dependency
+- [Phase 26]: Fixed jq select() in object context: use if/else/end for optional fields — select returns empty which invalidates parent object
 
 ### Pending Todos
 
@@ -177,5 +180,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
-Stopped at: Completed 26-02-PLAN.md (stop-hook.sh + settings.json)
+Stopped at: Completed 26-03-PLAN.md
 Resume file: None
