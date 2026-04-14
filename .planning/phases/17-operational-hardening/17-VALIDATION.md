@@ -1,10 +1,11 @@
 ---
 phase: 17
 slug: operational-hardening
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: complete
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-04-12
+updated: "2026-04-14"
 ---
 
 # Phase 17 — Validation Strategy
