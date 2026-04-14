@@ -169,8 +169,12 @@
   2. The Stop hook makes zero network calls — a test that fails DNS resolution for the doc repo host asserts Claude still exits within 5 seconds of the Stop hook firing, with the spool file written and queued for shipping
   3. After Claude exits, the host-side async shipper reads the spool, calls `publish_docs_bundle`, and on success deletes the spool; on failure it logs the error with retry counter to the audit JSONL and schedules a jittered retry, and a subsequent failing shipper run never blocks a new `claude-secure spawn`
   4. The Stop hook's `stop_hook_active` guard prevents recursive re-prompting: a test that seeds a broken report template confirms the hook re-prompts once, then yields without looping, even if the second attempt still fails
-**Plans**: TBD
-**Research flag**: Stop hook API field names (`stop_hook_active`, re-prompt semantics) must be re-verified with Context7 at plan time — API is version-sensitive.
+**Plans**: 4 plans
+  - [ ] 26-01-PLAN.md — Wave 0: tests/test-phase26.sh RED harness + fixtures + test-map.json (SPOOL-01/02/03 stubs)
+  - [ ] 26-02-PLAN.md — Wave 1: claude/hooks/stop-hook.sh + claude/settings.json Stop entry (SPOOL-01, SPOOL-02)
+  - [ ] 26-03-PLAN.md — Wave 2: run_spool_shipper family + do_spawn and interactive call sites (SPOOL-03)
+  - [ ] 26-04-PLAN.md — Wave 3: stale-spool drain at spawn preamble + README Phase 26 section (SPOOL-01/03 edge case)
+**Research flag resolved**: Stop hook API field names verified via code.claude.com/docs/en/hooks — `stop_hook_active` guard, nested `{hooks:[...]}` settings.json form, block/approve JSON output schema all HIGH confidence (see 26-RESEARCH.md).
 
 ### v2.0 Gap Closure (Audit Follow-Up)
 
@@ -233,7 +237,7 @@
 | 23. Profile ↔ Doc Repo Binding | v4.0 | 3/3 | Complete   | 2026-04-13 |
 | 24. Multi-File Publish Bundle | v4.0 | 3/3 | Complete   | 2026-04-14 |
 | 25. Context Read & Bind Mount | v4.0 | 4/4 | Complete    | 2026-04-14 |
-| 26. Stop Hook & Mandatory Reporting | v4.0 | 0/0 | Not started | - |
+| 26. Stop Hook & Mandatory Reporting | v4.0 | 0/4 | Planned     | - |
 | 27. v2.0 Verification Backfill | v2.0 gap | 0/0 | Not started | - |
 | 28. OPS-01 docs_repo Backfill Fix | v2.0 gap | 1/1 | Complete   | 2026-04-14 |
 | 29. PROF-02 create_profile Repo Prompt | v2.0 gap | 2/2 | Complete   | 2026-04-14 |
