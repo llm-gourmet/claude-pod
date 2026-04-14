@@ -2224,6 +2224,10 @@ do_spawn() {
     export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX
   fi
 
+  # Phase 26 D-07: drain any leftover spool from a prior crashed session.
+  # Synchronous, non-fatal — failures are logged but do not abort the new spawn.
+  run_spool_shipper_inline "$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d - || echo "drain-$$")" || true
+
   # Phase 25 CTX-01..CTX-04: sparse shallow clone of the doc repo's
   # projects/<slug>/ subtree, bind-mounted read-only into the claude
   # container at /agent-docs. Skips silently when DOCS_REPO is empty
@@ -2967,6 +2971,8 @@ case "$CMD" in
     mkdir -p "$LOG_DIR"
     # 777 required: three containers write as different UIDs (claude:1001, node:1000, root:0)
     chmod 777 "$LOG_DIR"
+    # Phase 26 D-07: drain any leftover spool from a prior crashed session.
+    run_spool_shipper_inline "$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d - || echo "drain-$$")" || true
     cleanup_containers
     # Phase 25 CTX-01..CTX-04: populate /agent-docs mount for interactive
     # sessions too. Non-fatal on the interactive path: if fetch fails,
