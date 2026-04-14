@@ -337,9 +337,21 @@ _spawn_ctx_background() {
       --event '{"event_type":"manual","repository":{"full_name":"owner/test"}}' \
       >/dev/null 2>&1 &
   SPAWN_PID=$!
-  sleep 2
+  # Wait for the claude container to actually enter the running state.
+  # Fixed sleeps race on WSL2 where docker compose up -d --wait can exceed 2s.
   source_cs
   SPAWN_PROJECT=$(spawn_project_name "$dest" 2>/dev/null || echo "cs-${dest}")
+  local _i
+  for _i in $(seq 1 30); do
+    if docker compose -p "$SPAWN_PROJECT" ps --status=running --services 2>/dev/null \
+         | grep -Fxq claude; then
+      break
+    fi
+    if ! kill -0 "$SPAWN_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 0.5
+  done
 }
 
 _kill_spawn() {
@@ -381,6 +393,13 @@ test_agent_docs_write_attempt_fails_readonly() {
 test_agent_docs_no_git_dir_in_container() {
   _docker_gate_or_skip || return 0
   _spawn_ctx_background "ctx-nogit-test" || { _kill_spawn; return 1; }
+  # Guard: if the container is not actually reachable, fail loudly instead of
+  # silently passing because both exec calls return non-zero.
+  if ! docker compose -p "$SPAWN_PROJECT" exec -T claude true >/dev/null 2>&1; then
+    _kill_spawn
+    echo "FAIL: claude container not reachable via docker compose exec" >&2
+    return 1
+  fi
   docker compose -p "$SPAWN_PROJECT" exec -T claude ls /agent-docs/.git >/dev/null 2>&1 && {
     _kill_spawn
     echo "FAIL: /agent-docs/.git exists inside container" >&2
