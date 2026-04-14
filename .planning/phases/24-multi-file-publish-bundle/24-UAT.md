@@ -75,8 +75,8 @@ skipped: 6
 ## Gaps
 
 - truth: "bundle.md template contains exactly the 6 mandatory sections (Goal, Where Worked, What Changed, What Failed, How to Test, Future Findings)"
-  status: failed
-  reason: "User reported: Template shows 7 sections — the 6 mandatory ones plus an extra `## Error` section"
+  status: resolved
+  reason: "Extra `## Error` section removed from bundle.md (commit b5f939e)"
   severity: minor
   test: 2
   artifacts: [webhook/report-templates/bundle.md]
