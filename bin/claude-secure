@@ -1032,6 +1032,110 @@ render_report_template() {
   printf '%s' "$rendered"
 }
 
+# Phase 24 RPT-01: validate that a rendered report body contains all 6
+# mandatory H2 sections from webhook/report-templates/bundle.md. Anchored
+# regex (^## Section$) prevents partial matches inside code blocks or
+# headings like "## Goal Achievements".
+#
+# Caller (Phase 26 Stop hook) is responsible for re-prompting Claude if a
+# report is malformed. Phase 24 ships the validator only.
+#
+# Args:
+#   $1 = body_path  (path to rendered report markdown)
+# Returns:
+#   0 if all 6 sections present
+#   1 if any are missing (stderr lists every missing section)
+verify_bundle_sections() {
+  local body_path="$1"
+  if [ ! -f "$body_path" ]; then
+    echo "ERROR: verify_bundle_sections: file not found: $body_path" >&2
+    return 1
+  fi
+
+  local _required=(
+    "^## Goal$"
+    "^## Where Worked$"
+    "^## What Changed$"
+    "^## What Failed$"
+    "^## How to Test$"
+    "^## Future Findings$"
+  )
+  local section missing=0
+  for section in "${_required[@]}"; do
+    if ! LC_ALL=C grep -qE "$section" "$body_path"; then
+      echo "ERROR: report missing mandatory section: ${section#^## }" | sed 's/\$$//' >&2
+      missing=1
+    fi
+  done
+  if [ "$missing" -ne 0 ]; then
+    return 1
+  fi
+  return 0
+}
+
+# Phase 24 RPT-04: strip markdown constructs that can exfiltrate data.
+#
+# Order matters: HTML comments first (they can hide <img> beacons), then
+# raw HTML tags, then external image references (inline + reference-style).
+#
+# Local image references (relative paths, ./img.png, img/foo.svg) are
+# PRESERVED because they cannot exfiltrate (no DNS, no external fetch).
+#
+# This function runs AFTER redact_report_file in the publish_docs_bundle
+# pipeline. The reverse order would let secrets hidden inside HTML comments
+# escape the redactor (Pitfall 1 in 24-RESEARCH.md).
+#
+# Uses GNU sed semantics. On macOS, Phase 18 PORT-01 PATH-shims gnubin so
+# `sed` is GNU sed even on Darwin.
+#
+# Args:
+#   $1 = path  (file is edited in place)
+# Returns:
+#   0 always (no-op on missing constructs is fine)
+#   1 only if the file does not exist
+sanitize_markdown_file() {
+  local f="$1"
+  if [ ! -f "$f" ]; then
+    return 1
+  fi
+
+  local tmp
+  tmp=$(mktemp "${TMPDIR:-/tmp}/cs-sanitize-XXXXXXXX")
+  _CLEANUP_FILES+=("$tmp")
+
+  # Pass 1: strip HTML comments (multi-line). The :a; N; $!ba; idiom slurps
+  # the entire file into pattern space so multi-line <!-- ... --> matches.
+  # The non-greedy approximation [^-]|-[^-]|--[^>] is the canonical POSIX
+  # workaround for sed's lack of PCRE lazy quantifiers.
+  LC_ALL=C sed -E \
+    -e ':a' -e 'N' -e '$!ba' \
+    -e 's/<!--([^-]|-[^-]|--[^>])*-->//g' \
+    "$f" > "$tmp" && mv "$tmp" "$f"
+
+  # Pass 2: strip raw HTML tags (opening, closing, self-closing). Aggressive
+  # by design — the bundle template is plain markdown and any user-agent-
+  # interpreted HTML is a potential beacon.
+  LC_ALL=C sed -E -i.bak 's|</?[A-Za-z][A-Za-z0-9-]*[^>]*>||g' "$f"
+  rm -f "$f.bak"
+
+  # Pass 3: strip external inline image references.
+  # Matches: ![alt](http://...) | ![alt](https://...) | ![alt](//...)
+  # Does NOT match: ![alt](./local.png), ![alt](img/foo.svg)
+  # NOTE: Uses '#' as the s-command delimiter because the regex's alternation
+  # '(https?:|//)' contains literal '|' — using '|' as a sed delimiter here
+  # terminates the substitution early ("unknown option to `s'" error).
+  LC_ALL=C sed -E -i.bak 's#!\[[^]]*\]\((https?:|//)[^)]*\)##g' "$f"
+  rm -f "$f.bak"
+
+  # Pass 4: strip reference-style image definitions pointing at external URLs.
+  # Matches: [ref]: https://... | [ref]: http://... | [ref]: //...
+  # Deletes the entire line (GFM image references are line-anchored).
+  LC_ALL=C sed -E -i.bak '/^\[[^]]+\]:[[:space:]]+(https?:|\/\/)/d' "$f"
+  rm -f "$f.bak"
+
+  return 0
+}
+
 # Phase 16 D-15 / Pattern B / Pitfall 1: redact every non-empty profile
 # .env value from a rendered report file in place. Uses awk-from-file
 # LITERAL substring replace (index + substr) so any value metacharacter

