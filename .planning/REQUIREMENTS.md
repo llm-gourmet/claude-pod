@@ -232,9 +232,9 @@ Requirements for the agent documentation layer. Each maps to roadmap phases.
 
 ### Mandatory Enforcement (SPOOL)
 
-- [ ] **SPOOL-01**: A Stop hook verifies a local report spool file was written before Claude exits — if missing, re-prompts Claude once to produce it
-- [ ] **SPOOL-02**: The Stop hook makes no network calls — it only checks for the local spool file (doc repo outage cannot block Claude exit)
-- [ ] **SPOOL-03**: A host-side async shipper reads the spool after Claude exits and pushes to the doc repo with jittered backoff — failure is logged to audit JSONL and never blocks the next spawn
+- [x] **SPOOL-01**: A Stop hook verifies a local report spool file was written before Claude exits — if missing, re-prompts Claude once to produce it
+- [x] **SPOOL-02**: The Stop hook makes no network calls — it only checks for the local spool file (doc repo outage cannot block Claude exit)
+- [x] **SPOOL-03**: A host-side async shipper reads the spool after Claude exits and pushes to the doc repo with jittered backoff — failure is logged to audit JSONL and never blocks the next spawn
 
 ### Context Read (CTX)
 
@@ -260,9 +260,9 @@ Which phases cover which v4.0 requirements. Updated during roadmap creation.
 | RPT-03 | Phase 24 | Complete |
 | RPT-04 | Phase 24 | Complete |
 | RPT-05 | Phase 24 | Complete |
-| SPOOL-01 | Phase 26 | Pending |
-| SPOOL-02 | Phase 26 | Pending |
-| SPOOL-03 | Phase 26 | Pending |
+| SPOOL-01 | Phase 26 | Complete |
+| SPOOL-02 | Phase 26 | Complete |
+| SPOOL-03 | Phase 26 | Complete |
 | CTX-01 | Phase 25 | Complete |
 | CTX-02 | Phase 25 | Complete |
 | CTX-03 | Phase 25 | Complete |

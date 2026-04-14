@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: macOS Support
-status: discussing
-stopped_at: Phase 29 UAT passed — advancing to Phase 26
-last_updated: "2026-04-14T12:36:00.000Z"
+status: executing
+stopped_at: Completed 26-01-PLAN.md
+last_updated: "2026-04-14T13:24:07.023Z"
 last_activity: 2026-04-14
 progress:
-  total_phases: 14
-  completed_phases: 14
-  total_plans: 42
-  completed_plans: 42
-  percent: 100
+  total_phases: 15
+  completed_phases: 13
+  total_plans: 46
+  completed_plans: 43
+  percent: 88
 ---
 
 # Project State
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 
 ## Current Position
 
-Phase: 26 (stop-hook-mandatory-reporting) — DISCUSSING
-Plan: 0 of TBD
-Status: Phase 29 complete (UAT passed 2026-04-14) — ready to discuss Phase 26
+Phase: 26 (stop-hook-mandatory-reporting) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
 Last activity: 2026-04-14
 
 Progress: [█████████░] 88% (15/17 plans)
@@ -80,6 +80,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 28-ops01-docs-repo-fix P01 | 5min | 2 tasks | 2 files |
 | Phase 29 P01 | 1min | 1 tasks | 1 files |
 | Phase 29-prof02-repo-prompt P02 | 5min | 1 tasks | 2 files |
+| Phase 26-stop-hook-mandatory-reporting P01 | 5min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -144,6 +145,8 @@ Recent decisions affecting current work:
 - [Phase 29]: 29-01: Wave 0 RED tests added using piped stdin into sourced create_profile to exercise real prompt flow (Nyquist guard against helper-only fix)
 - [Phase 29-prof02-repo-prompt]: 29-02: create_profile repo regex ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ with warn-don't-block save-verbatim policy; empty input omits .repo key (back-compat)
 - [Phase 29-prof02-repo-prompt]: 29-02: Rule 3 deviation — exported APP_DIR in tests/test-phase12.sh _source_functions to unblock silent unbound-var failures masking the new PROF-02d/e/f assertions
+- [Phase 26]: Force-add tests/fixtures/profile-26-spool/.env with git add -f (gitignored, consistent with profile-e2e precedent)
+- [Phase 26]: TEST_SPOOL_FILE_OVERRIDE / CLAUDE_SECURE_SKIP_SPOOL_SHIPPER / MOCK_PUBLISH_BUNDLE_EXIT as testability contracts for Plans 02/03/04
 
 ### Pending Todos
 
@@ -170,5 +173,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
-Stopped at: Completed 29-02-PLAN.md
+Stopped at: Completed 26-01-PLAN.md
 Resume file: None
