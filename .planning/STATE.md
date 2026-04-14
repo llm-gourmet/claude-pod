@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: macOS Support
 status: verifying
-stopped_at: Completed 23-03-PLAN.md
-last_updated: "2026-04-13T18:59:22.130Z"
+stopped_at: Completed 24-01-PLAN.md
+last_updated: "2026-04-14T08:17:45.466Z"
 last_activity: 2026-04-12
 progress:
-  total_phases: 9
+  total_phases: 10
   completed_phases: 9
-  total_plans: 32
-  completed_plans: 32
+  total_plans: 35
+  completed_plans: 33
   percent: 88
 ---
 
@@ -73,6 +73,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 17-operational-hardening P03 | 35min | 2 tasks | 2 files |
 | Phase 23 P02 | 17 | 3 tasks | 9 files |
 | Phase 23 P03 | 7 | 3 tasks | 3 files |
+| Phase 24 P01 | 15min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -125,6 +126,9 @@ Recent decisions affecting current work:
 - [Phase 23]: BIND-03 alias: resolve_docs_alias() prefers docs_* names, falls back to report_*, and back-fills REPORT_REPO/BRANCH/TOKEN for Phase 16 compatibility
 - [Phase 23]: do_profile_init_docs skips validate_profile call to allow file:// test URLs; CLI dispatch already calls validate_profile before subcommand routing
 - [Phase 23]: push_with_retry reused unchanged for init-docs: REPORT_REPO_TOKEN back-fill from Plan 02 resolve_docs_alias is the single integration point
+- [Phase 24]: [24-01]: Wave 0 RED scaffold for Phase 24 — 2 GREEN sentinels (fixtures_exist, bundle_template_installed) + 11 RED sentinels for RPT-01..05 + DOCS-02/03; uses Phase 23 test harness primitives verbatim
+- [Phase 24]: [24-01]: RPT-01 deliberately NOT marked complete — Plan 01 ships only fixtures + template; verify_bundle_sections (Plan 02) + publish_docs_bundle (Plan 03) must land before RPT-01 is verifiable (mirrors Phase 23 Plan 01 pattern)
+- [Phase 24]: [24-01]: _setup_bundle_profile helper composes install_fixture + _setup_bare_repo + _patch_docs_repo + load_profile_config + do_profile_init_docs so Plan 03 integration tests start against a post-init bare repo with INDEX.md already present
 
 ### Pending Todos
 
@@ -151,5 +155,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
-Stopped at: Completed 23-03-PLAN.md
+Stopped at: Completed 24-01-PLAN.md
 Resume file: None
