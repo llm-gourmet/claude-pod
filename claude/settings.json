@@ -10,6 +10,16 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/etc/claude-secure/hooks/stop-hook.sh"
+          }
+        ]
+      }
     ]
   }
 }
