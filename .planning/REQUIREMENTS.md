@@ -93,7 +93,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HOOK-05 | Phase 15 | Complete |
 | HOOK-06 | Phase 14 | Complete |
 | HOOK-07 | Phase 15 | Complete |
-| OPS-01 | Phase 16 → Phase 27 (verif) + Phase 28 (docs_repo fix) | Pending |
+| OPS-01 | Phase 16 → Phase 27 (verif) + Phase 28 (docs_repo fix) | Complete |
 | OPS-02 | Phase 16 → Phase 27 (verif backfill) | Pending |
 | OPS-03 | Phase 17 | Complete |
 

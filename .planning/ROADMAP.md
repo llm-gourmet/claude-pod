@@ -189,7 +189,7 @@
 **Gap Closure:** Closes medium-priority integration concern from v2.0-MILESTONE-AUDIT.md (Contract 5 partial)
 **Requirements:** OPS-01 (forward compatibility)
 **Plans**: 1 plan
-  - [ ] 28-01-PLAN.md — Wave 1: Failing regression test + jq fallback patch (.docs_repo // .report_repo // empty) in do_spawn (OPS-01)
+  - [x] 28-01-PLAN.md — Wave 1: Failing regression test + jq fallback patch (.docs_repo // .report_repo // empty) in do_spawn (OPS-01)
 
 ### Phase 29: PROF-02 create_profile Repo Prompt
 **Goal**: `create_profile` prompts for the `.repo` field during interactive setup, eliminating the manual JSON edit step that creates onboarding friction

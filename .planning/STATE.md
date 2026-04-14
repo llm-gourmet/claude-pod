@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: macOS Support
-status: executing
-stopped_at: Completed 25-04-PLAN.md
-last_updated: "2026-04-14T11:07:46.558Z"
+status: verifying
+stopped_at: Completed 28-01-PLAN.md
+last_updated: "2026-04-14T11:54:18.010Z"
 last_activity: 2026-04-14
 progress:
-  total_phases: 11
-  completed_phases: 11
-  total_plans: 39
-  completed_plans: 39
+  total_phases: 14
+  completed_phases: 12
+  total_plans: 40
+  completed_plans: 40
   percent: 88
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** Phase 25 — context-read-bind-mount
+**Current focus:** Phase 28 — ops01-docs-repo-fix
 
 ## Current Position
 
-Phase: 25
-Plan: Not started
-Status: Ready to execute
+Phase: 28 (ops01-docs-repo-fix) — EXECUTING
+Plan: 1 of 1
+Status: Phase complete — ready for verification
 Last activity: 2026-04-14
 
 Progress: [█████████░] 88% (15/17 plans)
@@ -77,6 +77,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 25 P02 | 4min | 1 tasks | 1 files |
 | Phase 25 P03 | 2min | 2 tasks | 1 files |
 | Phase 25 P04 | 5 | 1 tasks | 1 files |
+| Phase 28-ops01-docs-repo-fix P01 | 5min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -136,6 +137,8 @@ Recent decisions affecting current work:
 - [Phase 25]: Plan 25-03: Asymmetric failure policy — do_spawn fail-closed (programmatic path), interactive *) warn-continue with AGENT_DOCS_HOST_PATH='' reset to inert /dev/null default
 - [Phase 25]: 25-04: Poll loop uses docker compose ps --status=running --services not --status=healthy; claude service has no healthcheck so healthy never fires
 - [Phase 25]: 25-04: exec guard uses 'true' as cheapest liveness probe in test_agent_docs_no_git_dir_in_container to convert silent false-positive into loud FAIL
+- [Phase 28-ops01-docs-repo-fix]: OPS-01 fix: ordering locked to new-first (.docs_repo // .report_repo // empty) to mirror validate_docs_binding:127 and be forward-compat with legacy removal
+- [Phase 28-ops01-docs-repo-fix]: REPORT_PATH_PREFIX deliberately unchanged -- no .docs_path_prefix alias exists in Phase 23 schema
 
 ### Pending Todos
 
@@ -162,5 +165,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
-Stopped at: Completed 25-04-PLAN.md
+Stopped at: Completed 28-01-PLAN.md
 Resume file: None
