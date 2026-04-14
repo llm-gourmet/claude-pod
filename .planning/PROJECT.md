@@ -36,21 +36,28 @@ No secret ever leaves the isolated environment uncontrolled — every outbound c
 - Event handlers for Issues, Push, CI Failure with profile-scoped filtering and template rendering — v2.0 Phase 15
 - Result channel: report written to separate documentation repo with audit log — v2.0 Phase 16
 - Operational hardening: container reaper systemd timer, D-11 listener hardening, E2E integration tests — v2.0 Phase 17
+- Platform abstraction: `lib/platform.sh` with `detect_platform()` (linux/wsl2/macos), bash 4+ re-exec guard, GNU coreutils PATH shim, flock→mkdir-lock, uuidgen lowercase normalization — v3.0 Phase 18
+- Stop hook mandatory reporting: `claude/hooks/stop-hook.sh` blocks session exit when spool.md absent; async spool shipper calls `publish_docs_bundle` with jittered retry; stale-spool drain at spawn preamble recovers from crashed sessions — v4.0 Phase 26
+- Profile ↔ doc repo binding: `docs_repo`/`docs_branch`/`docs_project_dir`/`DOCS_REPO_TOKEN` in profile; DOCS_REPO_TOKEN host-only (filtered from docker-compose env_file); legacy report_repo aliases work — v4.0 Phase 23
+- Multi-file publish bundle: `publish_docs_bundle` writes report + INDEX.md as single atomic commit with secret redaction + markdown sanitization + 3-attempt retry — v4.0 Phase 24
+- Context read bind mount: sparse shallow clone at spawn bind-mounted read-only at `/agent-docs/`; no `.git/` inside container; skip-silent when no docs_repo — v4.0 Phase 25
+- `profile init-docs` bootstraps per-project doc layout (todo.md, architecture.md, vision.md, ideas.md, specs/, reports/INDEX.md) in single atomic commit — v4.0 Phase 23
 
 ### Active
 
-- [ ] (none — v2.0 Headless Agent Mode milestone complete)
+- [ ] macOS platform support (v3.0) — phases 20-22 pending, requires real macOS hardware for empirical iptables/pf spike
 
-## Current Milestone: v2.0 Headless Agent Mode
+## Current Milestone: v3.0 macOS Support (Phases 20-22 Pending)
 
-**Goal:** Event-driven, ephemeral claude-secure instances triggered via webhooks that autonomously handle tasks and write results to a documentation repo.
+**Goal:** Extend claude-secure to run on macOS with full security parity — pf-based network enforcement, launchd webhook listener, and Docker Desktop compatibility.
 
 **Target features:**
-- Profile system with per-service security context (whitelist, secrets, workspace)
-- Webhook listener as host process receiving GitHub events
-- Event handlers: Issues, Push to Main, CI Failure
-- Headless spawn with automatic teardown
-- Result reports written to dedicated documentation repo
+- Platform detection (Linux/WSL2/macOS) throughout installer and all platform-specific scripts
+- Docker Desktop compatibility — internal network topology works with Docker Desktop's userland networking
+- pf (packet filter) replacing iptables on macOS for network-level call enforcement
+- launchd plist replacing systemd unit for webhook listener on macOS
+- Installer: macOS dependency checking (brew, pfctl, launchctl)
+- Integration tests covering macOS code paths (mockable platform detection for CI)
 
 ### Out of Scope
 
@@ -65,10 +72,12 @@ No secret ever leaves the isolated environment uncontrolled — every outbound c
 
 ## Context
 
-Shipped v1.0 with ~3,000 LOC across Bash (2,348), Python (399), and JavaScript (284).
+**v4.0 shipped 2026-04-14.** 4 phases, 14 plans, 18 requirements. Added: doc repo binding, publish bundle, read-only context mount, stop hook + mandatory spool reporting. All 18 requirements verified (programmatic); 3 phases have human_needed items requiring live Docker stack.
+
+**v3.0 partial** — Phases 18-19 complete (platform detection, Docker Desktop compat). Phases 20-22 blocked on real macOS hardware for empirical iptables/pf spike.
+
+Shipped v1.0 with ~3,000 LOC across Bash, Python, JavaScript.
 Tech stack: Docker Compose, Node.js 22 stdlib proxy, Python 3.11 stdlib validator, iptables, Bash hooks.
-11 phases, 21 plans, 48 requirements all verified complete.
-52 integration tests across 9 test scripts with smart pre-push selection.
 
 ## Constraints
 
@@ -112,4 +121,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-11 after v2.0 milestone start*
+*Last updated: 2026-04-14 — v4.0 Agent Documentation Layer shipped (Phases 23-26, 18 requirements)*

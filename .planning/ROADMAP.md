@@ -3,7 +3,9 @@
 ## Milestones
 
 - v1.0 MVP -- Phases 1-11 (shipped 2026-04-11)
-- v2.0 Headless Agent Mode -- Phases 12-17 (in progress)
+- v2.0 Headless Agent Mode -- Phases 12-17 (shipped 2026-04-12)
+- v3.0 macOS Support -- Phases 18-22 (in progress)
+- v4.0 Agent Documentation Layer -- Phases 23-26 (shipped 2026-04-14)
 
 ## Phases
 
@@ -24,131 +26,81 @@
 
 </details>
 
-### v2.0 Headless Agent Mode (In Progress)
+<details>
+<summary>v2.0 Headless Agent Mode (Phases 12-17) -- SHIPPED 2026-04-12</summary>
 
-- [x] **Phase 12: Profile System** - Per-service security context with isolated whitelist, secrets, workspace, and repo routing (completed 2026-04-11)
-- [x] **Phase 13: Headless CLI Path** - Non-interactive Claude Code execution with ephemeral container lifecycle (completed 2026-04-11)
-- [x] **Phase 14: Webhook Listener** - Systemd service receiving and validating GitHub webhooks (completed 2026-04-12)
-- [x] **Phase 15: Event Handlers** - Event-type dispatch with prompt templates and payload sanitization (completed 2026-04-12)
-- [x] **Phase 16: Result Channel** - Structured reporting and execution audit logging (completed 2026-04-12)
-- [x] **Phase 17: Operational Hardening** - Container reaper and end-to-end integration verification (completed 2026-04-12)
+- [x] Phase 12: Profile System (2/2 plans) -- completed 2026-04-11
+- [x] Phase 13: Headless CLI Path (3/3 plans) -- completed 2026-04-11
+- [x] Phase 14: Webhook Listener (4/4 plans) -- completed 2026-04-12
+- [x] Phase 15: Event Handlers (4/4 plans) -- completed 2026-04-12
+- [x] Phase 16: Result Channel (4/4 plans) -- completed 2026-04-12
+- [x] Phase 17: Operational Hardening (4/4 plans) -- completed 2026-04-12
 
-## Phase Details
+</details>
 
-### Phase 12: Profile System
-**Goal**: Users can define per-service security contexts so each project gets its own whitelist, secrets, and workspace
-**Depends on**: Nothing (first v2.0 phase, builds on v1.0 instance system)
-**Requirements**: PROF-01, PROF-02, PROF-03
-**Success Criteria** (what must be TRUE):
-  1. User can create a profile directory with its own whitelist.json, .env, and workspace path, and spawn a claude-secure instance that uses that profile's config
-  2. User can map a GitHub repository URL to a profile, and the system resolves the correct profile from a repo URL
-  3. When a profile is missing or invalid (no whitelist.json, no .env, bad workspace path), execution is blocked with a clear error -- never falls back to a default profile
-**Plans**: 2 plans
+<details>
+<summary>v4.0 Agent Documentation Layer (Phases 23-26) -- SHIPPED 2026-04-14</summary>
 
-Plans:
-- [ ] 12-01-PLAN.md — Test scaffold + CLI rewrite (profile system core)
-- [ ] 12-02-PLAN.md — Installer update + test-map cleanup
+- [x] Phase 23: Profile ↔ Doc Repo Binding (3/3 plans) -- completed 2026-04-13
+- [x] Phase 24: Multi-File Publish Bundle (3/3 plans) -- completed 2026-04-14
+- [x] Phase 25: Context Read & Read-Only Bind Mount (4/4 plans) -- completed 2026-04-14
+- [x] Phase 26: Stop Hook & Mandatory Reporting (4/4 plans) -- completed 2026-04-14
 
-### Phase 13: Headless CLI Path
-**Goal**: Users can run Claude Code non-interactively through claude-secure with full security isolation and automatic cleanup
-**Depends on**: Phase 12
-**Requirements**: HEAD-01, HEAD-02, HEAD-03, HEAD-04, HEAD-05
-**Success Criteria** (what must be TRUE):
-  1. User can run `claude-secure spawn --profile <name> --event <payload>` and get a non-interactive Claude Code session that executes inside the Docker security stack
-  2. Headless session returns structured JSON output containing result text, cost, duration, and session_id
-  3. User can set per-profile max-turns budget, and execution stops when the limit is reached
-  4. After execution completes (success or failure), all containers, volumes, and networks for that run are automatically torn down
-  5. User can define prompt templates with variable substitution (e.g. `{{ISSUE_TITLE}}`) in the profile directory, and the headless spawn fills them from event data
-**Plans**: 3 plans
+See: .planning/milestones/v4.0-ROADMAP.md for full phase details.
 
-Plans:
-- [x] 13-01-PLAN.md — Test scaffold + spawn arg parsing + ephemeral project naming
-- [x] 13-02-PLAN.md — Execution lifecycle + output envelope + max-turns
-- [x] 13-03-PLAN.md — Prompt template resolution and variable substitution
+</details>
 
-### Phase 14: Webhook Listener
-**Goal**: A persistent host-side service receives GitHub webhooks, validates their authenticity, and safely handles concurrent events
-**Depends on**: Phase 12
-**Requirements**: HOOK-01, HOOK-02, HOOK-06
-**Success Criteria** (what must be TRUE):
-  1. A systemd service runs on the host listening for GitHub webhook POST requests and survives restarts
-  2. Every incoming webhook is verified via HMAC-SHA256 signature against the raw payload body -- invalid signatures are rejected with 401
-  3. Multiple simultaneous webhooks execute safely, each with a unique compose project name and isolated workspace -- no cross-contamination between concurrent runs
-**Plans**: 4 plans
+### v3.0 macOS Support (In Progress)
 
-Plans:
-- [x] 14-01-PLAN.md — Test harness, fixtures, and test-map update (Wave 0)
-- [x] 14-02-PLAN.md — webhook/listener.py + config.example.json (Wave 1, HOOK-02/HOOK-06)
-- [x] 14-03-PLAN.md — systemd unit file claude-secure-webhook.service (Wave 1, HOOK-01)
-- [x] 14-04-PLAN.md — install.sh --with-webhook extension (Wave 2, HOOK-01)
+- [x] **Phase 18: Platform Abstraction & Bash Portability** - Shared platform detection library and BSD/bash 3.2 portability fixes across all host scripts (completed 2026-04-13)
+- [x] **Phase 19: Docker Desktop Compatibility** - Compose topology and validator image work correctly under Docker Desktop on macOS (completed 2026-04-13)
+- [ ] **Phase 20: Network Enforcement on macOS** - Empirical spike resolves iptables-vs-pf, then implements network-level call enforcement
+- [ ] **Phase 21: launchd Service Management** - Webhook listener and reaper run as LaunchDaemons; installer completes end-to-end on macOS
+- [ ] **Phase 22: macOS Integration Tests** - TCP-level block tests and launchd lifecycle tests verify v3.0 against silent-failure modes
 
-### Phase 15: Event Handlers
-**Goal**: Incoming GitHub events are routed to the correct profile and dispatched with appropriate prompts
-**Depends on**: Phase 13, Phase 14
-**Requirements**: HOOK-03, HOOK-04, HOOK-05, HOOK-07
-**Success Criteria** (what must be TRUE):
-  1. When a GitHub Issue event (opened/labeled) arrives, the listener routes it to the correct profile and spawns a headless session with issue context in the prompt
-  2. When a push-to-main event arrives, the listener routes it to the correct profile and spawns a headless session with commit context in the prompt
-  3. When a CI failure event (workflow_run completed with failure) arrives, the listener routes it to the correct profile and spawns a headless session with failure context in the prompt
-  4. User can replay a stored webhook payload via CLI command for debugging
-**Plans**: 4 plans
+### Phase Details (v3.0 active phases)
 
-Plans:
-- [x] 15-01-PLAN.md — Test scaffold: test-phase15.sh, 9 fixtures, test-map.json update
-- [x] 15-02-PLAN.md — Default templates + listener.py event-type filter and top-level event_type injection
-- [x] 15-03-PLAN.md — bin/claude-secure extract_payload_field, render_template sed-bug fix, resolve_template fallback, replay subcommand
-- [x] 15-04-PLAN.md — install.sh copies webhook/templates/ to /opt/claude-secure/webhook/templates/
+#### Phase 18: Platform Abstraction & Bash Portability
+**Goal**: Every host script can detect its platform and runs reliably on macOS without silent BSD/bash 3.2 misbehavior
+**Requirements**: PLAT-02, PLAT-03, PLAT-04, PORT-01, PORT-02, PORT-03, PORT-04, TEST-01
+**Plans**: 5/5 complete
 
-### Phase 16: Result Channel
-**Goal**: Every headless execution produces a structured report pushed to a documentation repo and an audit log entry
-**Depends on**: Phase 13
-**Requirements**: OPS-01, OPS-02
-**Success Criteria** (what must be TRUE):
-  1. After a headless execution completes, a structured markdown report (with event metadata, result summary, and cost) is committed and pushed to a separate documentation repo
-  2. Every headless execution is logged to a structured JSONL file with webhook ID, event type, commit SHA, cost, and duration
-**Plans**: 4 plans
+#### Phase 19: Docker Desktop Compatibility
+**Goal**: The existing Docker Compose stack boots and runs the four security layers correctly on Docker Desktop for Mac
+**Requirements**: PLAT-05, COMPAT-01
+**Plans**: 3/3 complete
 
-Plans:
-- [x] 16-01-PLAN.md — Wave 0 test scaffold: harness, fixtures, default report templates (Nyquist self-healing)
-- [x] 16-02-PLAN.md — Wave 1a: resolve_report_template + config schema documentation
-- [x] 16-03-PLAN.md — Wave 1b: render + redact + publish + audit wired into do_spawn (OPS-01 + OPS-02 core)
-- [x] 16-04-PLAN.md — Wave 2: installer ships report templates + README operator docs
+#### Phase 20: Network Enforcement on macOS
+**Goal**: Non-whitelisted outbound calls are blocked at the network layer on macOS via the enforcement strategy chosen by the empirical spike
+**Depends on**: Phase 19
+**Requirements**: ENFORCE-01, ENFORCE-02
+**Plans**: TBD — requires real macOS hardware for empirical spike
 
-### Phase 17: Operational Hardening
-**Goal**: Orphaned containers from failed runs are automatically cleaned up and the full system is verified end-to-end
-**Depends on**: Phase 15, Phase 16
-**Requirements**: OPS-03
-**Success Criteria** (what must be TRUE):
-  1. A container reaper (systemd timer) automatically removes orphaned containers from failed or timed-out executions within a bounded time window
-  2. End-to-end integration tests verify the complete webhook-to-report pipeline including HMAC rejection, concurrent execution, orphan cleanup, and resource limit enforcement
+#### Phase 21: launchd Service Management
+**Goal**: The webhook listener and container reaper run as boot-persistent LaunchDaemons on macOS, and the installer completes the full claude-secure install path end-to-end
+**Depends on**: Phase 20
+**Requirements**: PLAT-01, SVC-01, SVC-02, SVC-03, SVC-04
 **Plans**: TBD
 
-Plans:
-- [x] 17-01: TBD
-- [x] 17-02: TBD
+#### Phase 22: macOS Integration Tests
+**Goal**: Automated tests cover the macOS code paths so silent-failure modes are caught before users hit them
+**Depends on**: Phase 21
+**Requirements**: TEST-02, TEST-03
+**Plans**: TBD
 
 ## Progress
 
-**Execution Order:**
-Phases execute in numeric order: 12 -> 13 -> 14 -> 15 -> 16 -> 17
-(Note: Phase 14 can proceed in parallel with Phase 13 as both depend only on Phase 12)
-
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 1. Docker Infrastructure | v1.0 | 2/2 | Complete | 2026-04-08 |
-| 2. Call Validation | v1.0 | 3/3 | Complete | 2026-04-08 |
-| 3. Secret Redaction | v1.0 | 2/2 | Complete | 2026-04-08 |
-| 4. Installation & Platform | v1.0 | 2/2 | Complete | 2026-04-08 |
-| 5. Integration Testing | v1.0 | 0/0 | Complete (per-phase) | 2026-04-08 |
-| 6. Service Logging | v1.0 | 3/3 | Complete | 2026-04-09 |
-| 7. Env-file Strategy | v1.0 | 2/2 | Complete | 2026-04-09 |
-| 8. Container Tooling | v1.0 | 1/1 | Complete | 2026-04-09 |
-| 9. Multi-Instance Support | v1.0 | 3/3 | Complete | 2026-04-10 |
-| 10. Automate Pre-push Tests | v1.0 | 2/2 | Complete | 2026-04-10 |
-| 11. Milestone Cleanup | v1.0 | 1/1 | Complete | 2026-04-11 |
-| 12. Profile System | v2.0 | 0/2 | Complete    | 2026-04-11 |
-| 13. Headless CLI Path | v2.0 | 3/3 | Complete    | 2026-04-11 |
-| 14. Webhook Listener | v2.0 | 4/4 | Complete   | 2026-04-12 |
-| 15. Event Handlers | v2.0 | 4/4 | Complete   | 2026-04-12 |
-| 16. Result Channel | v2.0 | 4/4 | Complete   | 2026-04-12 |
-| 17. Operational Hardening | v2.0 | 4/4 | Complete    | 2026-04-12 |
+| 1-11. MVP phases | v1.0 | 21/21 | Complete | 2026-04-11 |
+| 12-17. Headless Agent phases | v2.0 | 17/17 | Complete | 2026-04-12 |
+| 18. Platform Abstraction | v3.0 | 5/5 | Complete | 2026-04-13 |
+| 19. Docker Desktop Compat | v3.0 | 3/3 | Complete | 2026-04-13 |
+| 20. Network Enforcement on macOS | v3.0 | 0/? | Not started | - |
+| 21. launchd Service Management | v3.0 | 0/? | Not started | - |
+| 22. macOS Integration Tests | v3.0 | 0/? | Not started | - |
+| 23. Profile ↔ Doc Repo Binding | v4.0 | 3/3 | Complete | 2026-04-13 |
+| 24. Multi-File Publish Bundle | v4.0 | 3/3 | Complete | 2026-04-14 |
+| 25. Context Read & Bind Mount | v4.0 | 4/4 | Complete | 2026-04-14 |
+| 26. Stop Hook & Mandatory Reporting | v4.0 | 4/4 | Complete | 2026-04-14 |
+| 27-29. v2.0 Gap Closure | v2.0 gap | 6/6 | Complete | 2026-04-14 |

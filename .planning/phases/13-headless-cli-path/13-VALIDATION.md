@@ -1,10 +1,11 @@
 ---
 phase: 13
 slug: headless-cli-path
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: complete
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-04-11
+updated: "2026-04-14"
 ---
 
 # Phase 13 — Validation Strategy

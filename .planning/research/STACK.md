@@ -1,272 +1,310 @@
-# Stack Research: v2.0 Headless Agent Mode Additions
+# Technology Stack — v4.0 Agent Documentation Layer
 
-**Domain:** Event-driven ephemeral agent spawning (webhook listener, profile system, headless execution, report delivery)
-**Researched:** 2026-04-11
-**Confidence:** HIGH (official docs verified for Claude Code headless mode, Agent SDK, and Octokit; mature stable libraries)
+**Project:** claude-secure (milestone v4.0)
+**Researched:** 2026-04-13
+**Scope:** Additions/changes only. The v1.0–v3.0 stack (Docker Compose, Node 22 proxy, Python 3.11 validator, Bash hooks, Python webhook listener) is **already validated** and NOT re-researched here.
 
-**Scope:** This document covers ONLY the new technologies needed for v2.0. The existing v1.0 stack (Docker Compose, Node.js 22 proxy, Python 3.11 validator, iptables, Bash hooks, SQLite) is validated and unchanged.
+---
 
-## Recommended Stack Additions
+## TL;DR
 
-### Claude Code Execution (Headless)
+| Decision | Recommendation | Confidence |
+|---|---|---|
+| Remote write transport | **`git` CLI over HTTPS + fine-grained PAT** (extend Phase 16's existing `git push` path, NOT introduce `gh` or the REST API) | HIGH |
+| Token type | **GitHub Fine-Grained PAT**, single-repo scope, `Contents: read/write` + `Metadata: read` | HIGH |
+| Token storage | **Per-profile `.env` as `DOCS_REPO_TOKEN`**, loaded by existing profile loader, redacted by existing proxy redaction list | HIGH |
+| Clone strategy for writes | **`git clone --depth 1 --filter=blob:none --sparse` + `git sparse-checkout set <project>/`** (partial + shallow + sparse) | HIGH |
+| Clone strategy for reads (webhook ingest) | **Same sparse+shallow pattern** reused inside `do_spawn`, no separate cache | MEDIUM |
+| Read path for "what changed in the doc repo" | **Existing Phase 14 webhook listener + GitHub `push` / `issues` webhooks** — do NOT poll, do NOT use GraphQL | HIGH |
+| Conflict resolution on concurrent writes | **`git pull --rebase && git push` retry**, extend Phase 16 D-14 from 1 to 3 attempts with jittered backoff | HIGH |
+| Commit signing | **Not required** for v4.0. Defer to a hardening phase. PAT + HTTPS + TLS is the trust anchor | MEDIUM |
+| Webhook → task dispatch | **Reuse Phase 14 listener**; add an `issues.labeled` (label: `agent-task`) handler in Phase-15-style templates → `claude-secure spawn` with the issue body as the task prompt | HIGH |
+| What NOT to add | `gh` CLI, Octokit / PyGithub / ghapi, `libgit2` / `pygit2` / `dulwich`, ssh deploy keys, git-lfs, GPG signing, polling daemons, indexing DB, sidecar doc-writer container | HIGH |
 
-| Technology | Version | Purpose | Why Recommended | Confidence |
-|------------|---------|---------|-----------------|------------|
-| Claude Code CLI (`-p` flag) | latest (2.1.x) | Non-interactive Claude Code execution inside containers | Official headless mode. `-p` (or `--print`) runs non-interactively, prints output, exits. Combined with `--output-format json` gives structured results with session ID and metadata. Already installed in claude container. No additional dependency. | HIGH |
-| `--allowedTools` flag | -- | Granular tool permission per spawn | Prefix-match syntax (e.g., `Bash(git *)`) controls exactly which tools are auto-approved. Per-profile tool lists mean each service gets minimum required permissions. | HIGH |
-| `--max-turns` flag | -- | Prevent runaway execution | Limits agentic turns before stopping. Critical for ephemeral instances where cost/time must be bounded. | HIGH |
-| `--append-system-prompt` | -- | Per-event-type instructions | Injects event-specific context (issue body, CI failure log, push diff) without replacing Claude Code's built-in system prompt. | HIGH |
-| `--bare` flag | -- | Clean, reproducible headless runs | Skips hooks, skills, plugins, MCP servers, auto memory, CLAUDE.md auto-discovery. Recommended for scripted/SDK calls per official docs. Will become default for `-p` in a future release. Use explicit `--settings` and `--append-system-prompt` to load only what's needed. | HIGH |
+---
 
-**Decision: CLI `-p` over Agent SDK.** The Agent SDK (`@anthropic-ai/claude-agent-sdk`) is the newer programmatic interface with TypeScript/Python packages. However, for claude-secure v2.0, CLI `-p` is the right choice because:
-1. The claude container already has Claude Code CLI installed -- zero new dependencies
-2. The SDK requires `ANTHROPIC_API_KEY` (no OAuth support), while CLI supports OAuth tokens
-3. CLI invocation via `docker compose exec` or container entrypoint is simpler than embedding an SDK process
-4. The SDK spawns its own Claude Code process internally anyway -- adds a layer with no benefit in our containerized model
-5. `--output-format json` gives structured output (result, session_id, usage metadata) sufficient for report extraction
-6. The security wrapper's proxy and hooks work transparently with CLI -- SDK would need separate integration
+## What Phase 16 Already Gives Us (Reuse, Don't Rebuild)
 
-**If reconsidered later:** The Agent SDK becomes attractive if we need programmatic hooks (PreToolUse/PostToolUse callbacks in code), subagent orchestration, or streaming message inspection. For v2.0's "spawn, run, collect result" pattern, CLI is simpler and proven.
+**v4.0's doc layer is ~70% already built**. Phase 16 shipped a complete report-push pipeline. Everything below is either **reused from Phase 16** or **extended incrementally** — not replaced.
 
-### Webhook Listener (Host Process)
+| Existing capability (Phase 16) | Reused as-is for v4.0 |
+|---|---|
+| `git clone --depth 1 --branch` into `$TMPDIR/<spawn-uuid>` | YES — add `--filter=blob:none --sparse` to reduce bandwidth on large doc repos |
+| HTTPS + PAT transport, PAT in profile `.env` | YES — rename var from `REPORT_REPO_TOKEN` to `DOCS_REPO_TOKEN` (keep old name as deprecated alias) |
+| `profile.json` fields `report_repo`, `report_branch`, `report_path_prefix` | YES — add `docs_repo` alias and a new `docs_project_path` field for the per-project subtree |
+| Bash-level secret redaction of staged files via `_substitute_token_from_file` (Pitfall-1-safe awk) | YES — extend the redaction loop to run over **all** staged files, not just the single report file |
+| Ephemeral clone directory registered with `_CLEANUP_FILES` / `spawn_cleanup` trap | YES — no change |
+| `git push` with non-forced retry-on-rebase | YES — extend retry count from 1 → 3 with jittered backoff |
+| Audit log JSONL (`executions.jsonl`) with `report_url` field | YES — add `docs_touched[]` array listing every path written |
+| Proxy redaction (Anthropic path) scrubs any `.env` value that appears in request bodies | YES — `DOCS_REPO_TOKEN` inherits redaction for free via the Phase 7 env-file strategy |
 
-| Technology | Version | Purpose | Why Recommended | Confidence |
-|------------|---------|---------|-----------------|------------|
-| Node.js | 22 LTS | Webhook listener runtime | Already required on host for the project. LTS until April 2027. Async I/O is ideal for a webhook server that spawns Docker processes. | HIGH |
-| Node.js `http` (stdlib) | -- | HTTP server for webhook endpoint | Same zero-dependency philosophy as the proxy. A webhook listener is ~60 lines: parse JSON body, verify signature, dispatch handler. No framework needed. | HIGH |
-| Node.js `crypto` (stdlib) | -- | HMAC-SHA256 webhook signature verification | GitHub sends `x-hub-signature-256` header. `crypto.createHmac('sha256', secret).update(body).digest('hex')` verifies authenticity. Standard pattern, no library needed. | HIGH |
-| Node.js `child_process` (stdlib) | -- | Spawn `docker compose` commands | `child_process.spawn('docker', ['compose', ...])` to launch ephemeral instances. Async, non-blocking, captures stdout/stderr for logging. | HIGH |
+**Implication:** this milestone is a thin layer on top of Phase 16. The research below focuses strictly on the *gaps* — multi-file atomic commits, structured project docs, and bidirectional read path via webhooks.
 
-**Decision: stdlib `http` over `@octokit/webhooks`.** The `@octokit/webhooks` package (v13.x) provides typed event handling and signature verification. However:
-- It adds an npm dependency to a security tool (counter to project philosophy)
-- Signature verification is 5 lines with `crypto.createHmac`
-- We handle 3 event types (issues, push, workflow_run) -- no need for a typed event system
-- The listener runs on the host, not inside the security boundary, but minimizing dependencies remains good practice
+---
 
-**If reconsidered later:** Use `@octokit/webhooks` if event types grow beyond 5-6 or if GitHub changes their signature scheme.
+## New / Changed Stack Components
 
-### Profile System (Configuration)
+### 1. Git client — `git` CLI stays, with new flags
 
-| Technology | Version | Purpose | Why Recommended | Confidence |
-|------------|---------|---------|-----------------|------------|
-| JSON files | -- | Profile configuration (`profiles/{name}/profile.json`) | Consistent with existing `whitelist.json` pattern. Contains: allowed domains, env file path, workspace path, allowed tools, max turns, system prompt additions. | HIGH |
-| Bash | 5.x | Profile loader in `claude-secure` CLI | Extends existing CLI with `--profile NAME` flag. Reads profile config, sets COMPOSE_PROJECT_NAME, mounts correct workspace, loads profile-specific .env. | HIGH |
-| Docker Compose `--env-file` | v2.24+ | Per-profile environment injection | `docker compose --env-file profiles/svc/.env up` loads profile-specific secrets. Already supported by Compose v2. | HIGH |
-| Docker Compose bind mounts | v2.24+ | Per-profile workspace mounting | Override workspace volume via `-v` or environment variable in compose file. Profile config specifies workspace path on host. | HIGH |
+| Attribute | Value |
+|---|---|
+| Tool | `git` (already a host dependency) |
+| Version | `>= 2.34` required for `--filter=blob:none --sparse` on clone. Debian bookworm and Ubuntu 22.04+ ship 2.34+. Dev box currently runs **2.43.0**. |
+| Purpose | Shallow + partial + sparse clone of the docs repo for both write (report push) and read (webhook-dispatched task ingest) |
+| New flags to add | `--filter=blob:none` (partial clone — defers blob fetch until checkout), `--sparse` (initializes empty sparse-checkout so `set` can narrow), then `git sparse-checkout set <profile.docs_project_path>` |
+| Confidence | HIGH — Phase 16 already runs `git clone` successfully; sparse-checkout is stable since Git 2.25 |
 
-**No new technology needed.** The profile system is a configuration layer using existing tools: JSON for config, Bash for CLI integration, Docker Compose for runtime parameterization. Each profile directory (`profiles/{name}/`) contains:
-- `profile.json` -- allowed domains, tools, max turns, event handlers
-- `.env` -- service-specific secrets
-- `whitelist.json` -- service-specific secret-to-placeholder mappings
+**Why not `libgit2` / `pygit2` / `dulwich`:** Adds a C build dep (libgit2) or pure-python re-implementation (dulwich) to the security path. Any git-operation bug becomes a library compat problem. `git` CLI is boring, widely audited, and already present. No change.
 
-### Report Delivery (Writing to External Repo)
+---
 
-| Technology | Version | Purpose | Why Recommended | Confidence |
-|------------|---------|---------|-----------------|------------|
-| `git` CLI | 2.x | Clone, commit, push to documentation repo | Already in the claude container. Standard git operations inside the container, through the security proxy. No API abstraction needed. | HIGH |
-| `gh` CLI | 2.x | PR creation on documentation repo (optional) | If reports should go through PR review. `gh pr create --title "..." --body "..."` is non-interactive. Already available or easily added to container. | MEDIUM |
-| SSH deploy key or GitHub PAT | -- | Auth for pushing to docs repo | Deploy key (read-write, scoped to single repo) is more secure than a PAT. Loaded via profile's `.env`, mapped into container. Must be in whitelist.json for redaction. | HIGH |
+### 2. Transport: `git push` over HTTPS — NOT `gh` CLI, NOT the REST API
 
-**Decision: `git` CLI over Octokit REST API.** Using `@octokit/rest` for programmatic commits (create blob, create tree, create commit, update ref) is possible but:
-- Adds an npm dependency where none is needed
-- The claude container already has `git` installed
-- Claude Code itself can run `git commit` and `git push` via Bash tool -- the headless task prompt can instruct it to commit results
-- Git operations go through the security proxy and validator as normal whitelisted calls
+This is the load-bearing decision. Three candidates were evaluated.
 
-**Two report delivery patterns:**
-
-1. **Claude-driven (recommended for v2.0):** The headless prompt instructs Claude to write the report file and commit/push it. Git push goes through the validator (docs repo domain whitelisted in profile). Simplest -- no new code needed.
-
-2. **Host-driven (fallback):** Webhook listener extracts the result from `--output-format json` stdout, writes it to a cloned docs repo on the host, commits and pushes. More control but requires host-side git operations outside Docker.
-
-### Process Management (Host)
-
-| Technology | Version | Purpose | Why Recommended | Confidence |
-|------------|---------|---------|-----------------|------------|
-| systemd | system | Webhook listener daemon management | Standard on all target platforms (Linux, WSL2). `systemctl --user` for user-level service. Auto-restart on crash, journal logging, boot start. | HIGH |
-| systemd user service | -- | Run listener without root | `~/.config/systemd/user/claude-secure-webhook.service` runs as the developer's user. Has access to Docker socket and project files. | HIGH |
-
-**systemd unit file pattern:**
-```ini
-[Unit]
-Description=claude-secure webhook listener
-After=network.target docker.service
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/node /path/to/claude-secure/webhook/listener.js
-Restart=on-failure
-RestartSec=5
-Environment=WEBHOOK_SECRET=<from-env>
-Environment=WEBHOOK_PORT=9876
-WorkingDirectory=/path/to/claude-secure
-
-[Install]
-WantedBy=default.target
-```
-
-## Supporting Libraries
-
-| Library | Version | Purpose | When to Use |
-|---------|---------|---------|-------------|
-| Node.js `fs/promises` (stdlib) | -- | Read profile configs, write logs | Profile JSON loading in webhook listener |
-| Node.js `path` (stdlib) | -- | Path resolution for profiles/workspaces | Profile directory resolution |
-| Node.js `url` (stdlib) | -- | Parse webhook request URLs | Route matching in listener |
-| `jq` | 1.7+ | Parse `--output-format json` results in Bash | Extracting result/session_id from Claude CLI output |
-
-## Installation
+#### Option A (RECOMMENDED): `git` CLI + HTTPS + fine-grained PAT
 
 ```bash
-# No new packages to install -- all stdlib
-
-# Webhook listener setup (host-side)
-mkdir -p webhook/
-# Create listener.js (Node.js stdlib http server)
-# Create systemd user service file
-
-# Profile setup
-mkdir -p profiles/
-# Create profiles/{service-name}/profile.json
-# Create profiles/{service-name}/.env
-# Create profiles/{service-name}/whitelist.json
-
-# Claude container additions (Dockerfile)
-# gh CLI (optional, for PR creation): apt-get install gh
-# Deploy keys: mounted via Docker volume from profile config
+# Phase 16 form — token in URL, avoids argv leakage by passing through env
+git -c credential.helper= \
+    -c "http.extraheader=AUTHORIZATION: bearer $DOCS_REPO_TOKEN" \
+    push origin main
 ```
 
-## Alternatives Considered
+| Pros | Cons |
+|---|---|
+| Already proven in Phase 16 — zero new code to add a dep | Requires local clone (bandwidth, disk) |
+| No new host dependency, no new container layer | Token must be handled carefully to avoid argv exposure (already handled in Phase 16) |
+| **Atomic multi-file commits**: report.md, todo.md append, architecture.md patch land in **one commit** | |
+| `git rebase` handles concurrent writes correctly | |
+| Works identically inside the claude container AND on the host listener | |
+| Inherits all Phase 3 + Phase 16 redaction paths for free | |
 
-| Recommended | Alternative | When to Use Alternative |
-|-------------|-------------|-------------------------|
-| Claude CLI `-p` | `@anthropic-ai/claude-agent-sdk` (TypeScript) | If you need programmatic hooks, streaming message inspection, subagent orchestration, or SDK-native session management. Requires `ANTHROPIC_API_KEY` (no OAuth). Adds dependency. |
-| Claude CLI `-p` | `@anthropic-ai/claude-agent-sdk` (Python) | Same as TypeScript SDK. Python variant (`pip install claude-agent-sdk`). Better if webhook listener were Python. |
-| Node.js stdlib `http` | `@octokit/webhooks` (v13.x) | If handling many GitHub event types (>5-6) or if GitHub changes signature verification scheme. Adds typed event handling. |
-| Node.js stdlib `http` | Express + webhook middleware | If the listener needs to serve additional HTTP endpoints (dashboard, health checks, API). Overkill for a single-purpose webhook receiver. |
-| `git` CLI in container | `@octokit/rest` (npm) | If you need to create commits without cloning (via GitHub API blob/tree/commit). Useful for repos too large to clone. Adds npm dependency. |
-| `git` CLI in container | GitHub Actions (external) | If the webhook should trigger a GitHub Action instead of a local container. Moves execution to GitHub's infrastructure. Loses local security context and secret isolation. |
-| systemd user service | PM2 | If you prefer Node.js-native process management. Adds global npm dependency. systemd is already on the system and more reliable. |
-| systemd user service | Docker container for listener | If you want the listener containerized too. But it needs Docker socket access to spawn containers, creating a "Docker-in-Docker" situation. Host process is simpler. |
-| JSON profile files | YAML profile files | If profiles become complex enough to benefit from YAML's readability (comments, multi-line strings). JSON is consistent with existing whitelist.json. |
-| SSH deploy key | GitHub App installation token | If deploying to multiple repos or needing fine-grained permissions. More complex setup. Deploy key is simpler for single-repo writes. |
+#### Option B (REJECTED): `gh` CLI (`gh api`, `gh repo`, `gh issue`)
 
-## What NOT to Use
+`gh` v2.89 (March 2026) is stable and authoritative for human use. But as an automation primitive:
+
+| Pros | Cons |
+|---|---|
+| Ergonomic for issues/PRs | **Adds a new ~30MB host dependency** (Go binary) |
+| Built-in auth flow | Writes to its own `~/.config/gh/` — conflicts with per-profile auth isolation |
+| Handles rate limits automatically | `gh auth login` is interactive — bad for systemd/container contexts |
+| | **No atomic multi-file commit path** — `gh api` uses the Contents REST API, one file per call |
+| | Adds a new secret-store surface (`gh` keyring) that Phase 3 redaction doesn't cover |
+| | Recent regression: v2.88.0 broke `pr` commands for scope reasons (reverted in v2.88.1) |
+
+**Decision:** Do NOT add `gh`. The only scenario where `gh` would win is pull-request creation, and Phase 16 D-14 already decided on direct-to-branch commits. Keep that decision.
+
+#### Option C (REJECTED): GitHub REST API / GraphQL over `curl`
+
+Directly `PUT /repos/{owner}/{repo}/contents/{path}` with base64-encoded content.
+
+| Pros | Cons |
+|---|---|
+| No local clone needed | **No atomic multi-file commit** — 3 files = 3 API calls = 3 separate commits. A mid-sequence failure leaves the repo inconsistent |
+| Smaller bandwidth for tiny updates | Must GET current file SHA before PUT (2 API calls per file) |
+| No disk footprint | Rate-limited — 5000/hr shared across all profiles on the same token |
+| | No `git rebase`-style conflict repair — must re-read SHA and retry on 409 |
+| | Base64 payload bloats large reports ~33% |
+| | Requires a hand-rolled REST client in bash that can't use standard git semantics |
+
+**Decision:** Rejected. The atomicity gap alone disqualifies it. A v4.0 agent writing report.md + todo.md + architecture.md must commit those together or not at all.
+
+**Summary:** `git push` over HTTPS is the only viable transport. Same decision as Phase 16, re-validated under v4.0's multi-file write requirements.
+
+---
+
+### 3. Authentication: Fine-Grained PAT, per profile
+
+| Field | Value |
+|---|---|
+| Token type | **GitHub Fine-Grained Personal Access Token** (NOT classic PAT) |
+| Scope | Repository access → single repository (the docs repo for this profile) |
+| Permissions | `Contents: Read and write`, `Metadata: Read` (metadata is implicit/required) |
+| Storage | Profile `.env` as `DOCS_REPO_TOKEN=github_pat_...` — loaded by existing Phase 12 profile loader, mounted via existing `env_file` directive |
+| Redaction | **Automatic** — Phase 3 proxy redaction scrubs every `.env` value from Anthropic request bodies. Phase 16's `_substitute_token_from_file` already redacts `.env` values from staged report content. New token inherits both paths **for free**. |
+| Rotation | Manual. User edits `~/.claude-secure/profiles/<name>/.env` and re-spawns (Phase 12 loads per-spawn). |
+| Expiration | Enforced by GitHub (fine-grained PATs cannot be "no expiration"). Recommend 90-day rotation with calendar reminder. |
+
+**Why fine-grained over classic PAT:**
+- Classic PAT `repo` scope grants access to **every repo the user owns** — a leak is catastrophic.
+- Fine-grained PAT is scoped to **one repository**.
+- Expiration is enforced.
+- GitHub's own recommendation since 2023.
+
+**Why not GitHub App:** Adds significant ops surface — app registration, private key management, JWT generation, installation token exchange. Fine-grained PAT is the right point on the complexity curve for a solo-dev tool. Revisit in v5.0 if org-wide multi-repo coordination emerges.
+
+**Why not SSH deploy keys:** Already deferred in Phase 16. Key management adds surface, no meaningful security win over scoped+expiring HTTPS PAT, and HTTPS traverses corporate proxies more reliably.
+
+**Confidence:** HIGH. Sources: GitHub fine-grained PAT docs, Phase 16 precedent.
+
+---
+
+### 4. Read path: webhook-driven, NOT polling
+
+The milestone says the webhook "reads from" the doc repo. Two interpretations:
+
+**Interpretation A (CORRECT): Tasks arrive via webhooks from the doc repo itself.**
+
+The docs repo is just another GitHub repo — it fires `issues`, `issue_comment`, `push`, and `pull_request` events to the exact same Phase 14 listener endpoint. A new Phase-15-style template routes `issues.labeled` (label = `agent-task`) → `claude-secure spawn --profile <profile> --event-file <persisted>` with the issue body as the prompt.
+
+| Required changes | Size |
+|---|---|
+| Register docs repo as a webhook target in GitHub settings | User-side config, no code |
+| Add `docs_repo_full_name` to `profile.json` for reverse routing | 1 schema line |
+| New prompt template `webhook/templates/issues-labeled-agent-task.md` + handler wiring | Follows Phase 15 pattern, ~50 LOC |
+| Payload sanitization for issue body injected into prompt | **MUST reuse Phase 15's sanitization pass** — no shortcuts |
+
+**Interpretation B (REJECTED): Poll the docs repo.**
+
+Would add a new systemd timer `git fetch`ing every N seconds. Reasons to reject:
+- Duplicates the Phase 14 webhook listener.
+- Webhooks are push-based, ~0 latency, cost nothing when idle.
+- Timer adds a new scheduled-job surface already avoided in Phase 14.
+
+**Reading files FROM the doc repo at spawn time** (e.g., "give the agent current architecture.md so it has context"): handled by the **same shallow+sparse clone the agent already does for writing**. One clone, both directions. Read → mutate locally → commit → push → cleanup trap.
+
+**Confidence:** HIGH — all primitives exist.
+
+---
+
+### 5. Doc repo directory layout (pure convention, no new tool)
+
+```
+docs-repo/
+├── <project-slug>/                    # one per bound profile
+│   ├── todo.md
+│   ├── architecture.md
+│   ├── vision.md
+│   ├── ideas.md
+│   ├── specs/
+│   │   └── <feature>.md
+│   └── reports/                       # Phase 16 already writes here
+│       └── YYYY/MM/<event>-<id>.md
+└── README.md
+```
+
+**Requires zero new tooling.** Path convention enforced by `profile.json:docs_project_path` (default: slugified profile name). Sparse-checkout narrows to `<project-slug>/` per clone so unrelated profiles' histories don't transfer.
+
+---
+
+### 6. Multi-file commit & conflict handling
+
+Phase 16 writes **one** file per push. v4.0 writes **many** (report + todo append + architecture patch + new spec). Same primitive:
+
+```bash
+git add <project>/reports/2026/04/issues-labeled-a1b2c3d4.md \
+        <project>/todo.md \
+        <project>/specs/new-feature.md
+git commit -m "agent(<profile>): <event> <delivery_id_short>"
+
+# Extended retry loop with jittered backoff
+for attempt in 1 2 3; do
+  git push origin main && break
+  git pull --rebase origin main || { audit_status="docs_push_failed"; break; }
+  sleep $(( (RANDOM % 3) + 1 ))
+done
+```
+
+**Changes vs Phase 16:**
+- Retry count: 1 → 3 (concurrent-write probability increases when multiple profiles share one docs repo)
+- Add jittered backoff
+- Commit message `agent(<profile>): <event> <id>` so `git log --grep` is useful for humans
+
+**Why not `--force-with-lease`:** Never force-push to the docs repo. If rebase conflicts can't auto-resolve, audit as `status: "docs_push_failed"` and surface to stderr (Phase 16 D-17/D-18 pattern).
+
+---
+
+## Version Matrix (new / bumped only)
+
+| Component | Version | Notes |
+|---|---|---|
+| `git` CLI (host) | `>= 2.34` | Required for `--filter=blob:none --sparse` on clone. Dev box at 2.43. Bump installer dep check. |
+| Fine-grained PAT | n/a (GitHub feature) | Must expire. Recommend 90-day rotation. |
+| `jq` | `>= 1.6` | Already a dep. No bump. |
+| Python | `3.11+` | No bump. Webhook handler additions are pure stdlib. |
+| Node.js | `22 LTS` | No change. Proxy untouched. |
+| Docker Compose | `v2.24+` | No change. |
+| `gh` CLI | **NOT ADDED** | Explicit rejection — see Option B. |
+
+---
+
+## Installer Changes
+
+Minimal. Add to `install.sh`:
+
+1. **Dependency check:** `git --version` ≥ 2.34 (already installed; just bump the minimum check).
+2. **Profile schema doc:** Update `PROFILE_JSON_EXAMPLE` to include `docs_repo`, `docs_branch`, `docs_project_path`, and reference `DOCS_REPO_TOKEN` in the `.env` example.
+3. **New templates directory:** `webhook/agent-task-templates/` with a starter template for `issues-labeled` events. Copied to `/opt/claude-secure/webhook/agent-task-templates/` using the Phase 15 D-12 always-refresh pattern.
+4. **No new systemd units, no new daemons, no new containers.**
+
+---
+
+## What NOT to Add (Security-Surface Discipline)
+
+This is a **security** tool. The smallest viable addition wins.
 
 | Avoid | Why | Use Instead |
-|-------|-----|-------------|
-| `@anthropic-ai/claude-agent-sdk` for v2.0 | Adds dependency, requires API key (no OAuth), spawns CLI internally anyway, needs separate integration with proxy/hooks security layers | Claude Code CLI `-p` with `--output-format json` |
-| Express/Fastify for webhook listener | Framework overhead for a single-endpoint webhook receiver. Same argument as proxy -- security tool should minimize dependencies | Node.js stdlib `http` |
-| `@octokit/webhooks` for signature verification | npm dependency for 5 lines of `crypto.createHmac`. Counter to zero-dependency host-side philosophy | Node.js `crypto.createHmac('sha256', secret)` |
-| `@octokit/rest` for report commits | npm dependency where `git push` suffices. Claude container already has git. Report commits are simple single-file additions | `git` CLI inside container |
-| Docker-in-Docker for webhook listener | Listener needs Docker socket access to spawn containers. Running it inside Docker creates privilege escalation complexity and socket forwarding issues | Host-side Node.js process managed by systemd |
-| PM2 / forever / nodemon for listener | Global npm dependencies for process management. systemd is already present, more reliable, supports journal logging, boot start | systemd user service |
-| `--dangerously-skip-permissions` | Blanket permission bypass. Unsafe even in containers -- a prompt injection could `rm -rf` the workspace | `--allowedTools` with explicit tool list per profile |
-| Webhook listener in Python | Would add a second runtime to the host. Node.js is already required for the project. Consistency matters. | Node.js webhook listener |
-| Redis/PostgreSQL for event queue | Massive overkill for a solo-dev tool processing a few events per day. In-memory queue or direct spawn is sufficient | Direct `child_process.spawn` per event, with optional file-based queue for retry |
-| ngrok/Cloudflare Tunnel for webhook exposure | Adds external dependency for exposing webhook to internet. Fine for development but not for production daemon | Direct port exposure or reverse proxy (nginx) already on host |
+|---|---|---|
+| `gh` CLI | New ~30MB binary, conflicts with per-profile auth isolation, interactive auth flow, v2.88.0 scope regression, no atomic multi-file commit | `git` CLI already installed |
+| GitHub REST/GraphQL client libraries (`PyGithub`, `ghapi`, `octokit`) | Pip/npm supply chain on the security path. None offer atomic multi-file commits. | `git` CLI |
+| `libgit2` / `pygit2` / `dulwich` | C-ABI pin (libgit2) or pure-python re-implementation (dulwich). `git` CLI is battle-tested. | `git` CLI |
+| SSH deploy keys (this milestone) | Key management overhead, already deferred in Phase 16 | Fine-grained PAT |
+| GPG / Sigstore commit signing (this milestone) | Whole key-management surface; PAT+TLS is already the trust anchor; revisit in hardening | Plain commits authored as `claude-secure@localhost` |
+| `git-lfs` | Docs are markdown — kilobytes, not megabytes | Regular git blobs |
+| Polling daemon for docs repo | Duplicates the webhook listener; wasted bandwidth; timer surface | Webhook `push`/`issues` events |
+| Indexing DB for reports | `git log` + directory listing already indexes the repo. No search feature is in-scope. | Filesystem + `git log` |
+| Go/Rust microservice for git operations | We already have working bash. Rewrite-in-Rust is not a feature. | Bash + `git` CLI |
+| Webhook secret rotation daemon | Manual rotation is acceptable at solo-dev scale | Manual edit of profile `.env` |
+| `pre-commit` framework inside the agent clone | Adds install complexity inside an ephemeral clone | Manual redaction pass (already exists from Phase 16 D-15) |
+| A `docs-writer` sidecar container | Adds a 4th container to a deliberately 3-container stack; agent container already has `git` | Agent writes directly; ephemeral clone cleaned by existing trap |
 
-## Stack Patterns by Architecture Layer
+---
 
-### Webhook Flow (Host -> Docker)
+## Integration Points with Existing Stack
 
-```
-GitHub --[POST]--> Webhook Listener (host:9876)
-                        |
-                   Verify HMAC-SHA256 signature
-                   Parse event type + payload
-                   Load profile for target repo
-                        |
-                   child_process.spawn('docker', ['compose',
-                     '--project-name', profile.instance,
-                     '--env-file', profile.envFile,
-                     'run', '--rm', 'claude',
-                     'claude', '-p', prompt,
-                     '--bare',
-                     '--output-format', 'json',
-                     '--max-turns', profile.maxTurns,
-                     '--allowedTools', profile.allowedTools,
-                     '--append-system-prompt', eventPrompt
-                   ])
-                        |
-                   Capture stdout (JSON result)
-                   Log result + cleanup
-```
+| Existing component | v4.0 additive change |
+|---|---|
+| `bin/claude-secure` `do_spawn()` | Extend Phase 16's report-push section to support multi-file commits (not a new function — widen the `git add` scope). Back-compat: if only `report_url` is produced, behavior is identical to Phase 16. |
+| `profile.json` | Add `docs_repo`, `docs_branch` (default `main`), `docs_project_path` (default slugify(profile_name)). `report_repo`/`report_branch`/`report_path_prefix` become deprecated aliases. |
+| Proxy secret redaction (Phase 3) | **No code change** — `DOCS_REPO_TOKEN` is a regular profile `.env` var and enters redaction automatically via Phase 7's env-file strategy. |
+| PreToolUse hook (Phase 2) | **No code change** — `github.com` is already in most whitelists for git operations. If not, it's a whitelist edit, no hook logic change. |
+| Validator iptables rules | **No code change** — outbound to `github.com:443` flows through existing git operations. Call-ID registered by the hook before each `git push` invocation. |
+| Webhook listener (Phase 14) | Add 1 new template + handler wiring for `issues.labeled` events from the docs repo. Pattern is copy-paste from Phase 15. No listener core changes. |
+| Audit log `executions.jsonl` | Extend schema with `docs_touched: string[]` alongside existing `report_url`. Downward-compat: old readers ignore the new field. |
+| `spawn_cleanup` trap | **No change** — docs clone directory is already cleaned by `_CLEANUP_FILES`. |
+| `install.sh` | One new dir to copy into `/opt/claude-secure/webhook/agent-task-templates/`. No new systemd unit, no new container. |
 
-### Profile Directory Layout
+---
 
-```
-profiles/
-  service-a/
-    profile.json      # { "workspace": "/path/to/repo", "maxTurns": 25, ... }
-    .env               # SERVICE_A_API_KEY=xxx, GITHUB_TOKEN=xxx
-    whitelist.json     # Service-specific secret mappings
-  service-b/
-    profile.json
-    .env
-    whitelist.json
-```
+## Security Implications (the only section that matters)
 
-### Headless Execution Pattern
+1. **Token leak surface grows by 1 new secret per profile.** Mitigation: the new token flows through the exact same redaction path as every other secret (env_file → proxy redaction → report redaction). **No new redaction code needed.** This is the single biggest argument for reusing the Phase 16 transport.
 
-```bash
-# Minimal headless invocation
-claude -p "$PROMPT" \
-  --bare \
-  --output-format json \
-  --max-turns 25 \
-  --allowedTools "Read,Edit,Bash(git *),Glob,Grep" \
-  --append-system-prompt "$EVENT_CONTEXT"
+2. **Multi-file commits can leak more secrets than single-file commits** if redaction is incomplete. Mitigation: Phase 16's `_substitute_token_from_file` runs on every staged file before `git add`, iterating over `.env` values. Extend the loop to **all** staged paths, not just `report.md`. ~3-line bash change.
 
-# Extract result
-echo "$OUTPUT" | jq -r '.result'
-```
+3. **Webhook-dispatched tasks from the docs repo become a new prompt-injection vector.** Issue bodies can contain adversarial prompts. Mitigation: Phase 15 already sanitizes webhook payloads before prompt injection. The new `issues.labeled` handler **must** reuse that same sanitization pass. Additionally, gate dispatch on `sender.permissions` in the payload (only act when the labeling user has push access) or on a `profile.json:docs_task_senders` allowlist.
 
-### Report Delivery Pattern (Claude-driven)
+4. **Docs repo visibility.** If the docs repo is public, reports are public — a data exposure risk if Claude accidentally leaks project context. Mitigation: **strongly recommend docs repo be private**. Add a best-effort warning in the installer when `docs_repo` matches a public-repo URL pattern (cannot be fully verified without a GitHub API call we want to avoid).
 
-```bash
-# System prompt addition for report delivery
-REPORT_PROMPT="After completing your analysis, write a markdown report to
-./reports/YYYY-MM-DD-{event-type}-{brief-slug}.md and commit it with
-'git add reports/ && git commit -m \"report: {summary}\" && git push origin main'.
-The docs repo is already cloned at the working directory."
-```
+5. **Commit authorship.** Commits authored as `claude-secure <claude-secure@localhost>` (Phase 16 D-13, set via env vars, not host git config). Preserves the principle that the agent never touches user-level git identity.
 
-## Version Compatibility
+6. **No new inbound ports.** Phase 14 listener already bound to `127.0.0.1:9000`. Docs-repo webhooks point at the same endpoint. Zero new attack surface.
 
-| Component | Compatible With | Notes |
-|-----------|-----------------|-------|
-| Claude Code CLI `-p` | Claude Code 2.1.x+ | `-p` flag has been stable since early Claude Code releases. `--bare` is newer but documented as stable. |
-| `--output-format json` | Claude Code 2.1.x+ | Returns `{ result, session_id, is_error, ... }`. Schema stable per official docs. |
-| `--max-turns` | Claude Code 2.1.x+ | Limits agentic loop iterations. Available in both CLI and SDK. |
-| `--allowedTools` prefix match | Claude Code 2.1.x+ | `Bash(git *)` syntax. Space before `*` is significant -- documented gotcha. |
-| Node.js 22 LTS | Ubuntu 22.04+ / WSL2 | Already validated in v1.0. Webhook listener uses same runtime. |
-| systemd user services | Ubuntu 22.04+ / WSL2 | `systemctl --user` requires `loginctl enable-linger $USER` for services to persist after logout. WSL2 may need systemd enabled via `/etc/wsl.conf`. |
-| `x-hub-signature-256` | GitHub Webhooks API | SHA-256 HMAC. Replaced older SHA-1 `x-hub-signature`. Always use SHA-256. |
+7. **No new outbound hosts.** `github.com` is almost certainly already in the hook whitelist for existing git operations. If `api.github.com` ends up needed (it should NOT, given the "no REST API" decision), it's one whitelist line.
 
-## Integration Points with Existing v1.0 Stack
-
-| v1.0 Component | How v2.0 Interacts | Changes Needed |
-|----------------|-------------------|----------------|
-| Docker Compose topology | Webhook listener spawns instances via `docker compose run --rm` | Add `--rm` flag support; may need `run` service definition vs `up` |
-| COMPOSE_PROJECT_NAME | Profile system sets this per-service for instance isolation | Already works -- profiles just parameterize it |
-| Anthropic proxy | Headless Claude traffic flows through proxy as usual | None -- transparent to headless mode |
-| Validator + iptables | Call-IDs registered by hooks during headless execution | None -- hooks fire the same in headless mode |
-| PreToolUse hooks | Run inside container during headless execution | Verify hooks work with `--bare` flag (they should -- `--bare` skips only project-level config, not container-installed hooks) |
-| whitelist.json | Per-profile whitelist loaded via volume mount | Compose file needs parameterized whitelist path from profile |
-| .env / env_file | Per-profile .env loaded via `--env-file` | Already supported by Docker Compose |
-| Structured logging | Headless runs write to same log directory | Add event ID / profile name to log context |
-| Multi-instance support | Each profile spawns with unique COMPOSE_PROJECT_NAME | Already works -- profiles are a higher-level abstraction over instances |
+---
 
 ## Sources
 
-- [Claude Code headless mode docs](https://code.claude.com/docs/en/headless) -- verified `-p`, `--bare`, `--output-format`, `--max-turns`, `--allowedTools` flags. HIGH confidence.
-- [Claude Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview) -- verified SDK architecture (spawns CLI internally), TypeScript/Python packages, API key requirement. HIGH confidence.
-- [Claude Code permission modes](https://code.claude.com/docs/en/permission-modes) -- verified `--allowedTools` prefix match syntax, `--dangerously-skip-permissions` risks. HIGH confidence.
-- [@octokit/webhooks npm](https://www.npmjs.com/package/@octokit/webhooks) -- verified v13.x, signature verification API. MEDIUM confidence (version from Dec 2025 publish date).
-- [Octokit REST.js](https://octokit.github.io/rest.js/) -- verified programmatic git commit API (blob/tree/commit/updateRef). MEDIUM confidence.
-- Training data (Node.js crypto HMAC, child_process.spawn, systemd service files) -- HIGH confidence, stable APIs for years.
-- Training data (Docker Compose `run --rm`, `--env-file`) -- HIGH confidence, standard Docker Compose features.
-
----
-*Stack research for: claude-secure v2.0 headless agent mode*
-*Researched: 2026-04-11*
+- [Permissions required for fine-grained personal access tokens — GitHub Docs](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens) — HIGH confidence (official)
+- [Introducing fine-grained personal access tokens for GitHub — The GitHub Blog](https://github.blog/security/application-security/introducing-fine-grained-personal-access-tokens-for-github/) — HIGH confidence
+- [Webhook events and payloads — GitHub Docs](https://docs.github.com/en/webhooks/webhook-events-and-payloads) — HIGH confidence
+- [git-clone documentation](https://git-scm.com/docs/git-clone) — HIGH confidence
+- [git-sparse-checkout documentation](https://git-scm.com/docs/git-sparse-checkout) — HIGH confidence
+- [Get up to speed with partial clone and shallow clone — The GitHub Blog](https://github.blog/open-source/git/get-up-to-speed-with-partial-clone-and-shallow-clone/) — HIGH confidence
+- [GitHub CLI Releases (gh 2.89.0, March 2026)](https://github.com/cli/cli/releases) — HIGH confidence (used to justify REJECTION of `gh`)
+- `.planning/phases/16-result-channel/16-CONTEXT.md` — MANDATORY reference; defines the existing transport this work extends
+- `.planning/phases/14-webhook-listener/14-CONTEXT.md` — defines the inbound webhook substrate to be reused
+- `.planning/phases/15-event-handlers/15-CONTEXT.md` — defines the Phase 15 template fallback chain + payload sanitization pattern that the new `issues.labeled` handler must reuse
+- Local verification: `git --version` = 2.43.0, `gh --version` = 2.45.0 on dev host (confirms host already has both; only `git` is on the dependency list)

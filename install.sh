@@ -1,7 +1,29 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Phase 18 PORT-02: bash 4+ re-exec guard. Apple ships bash 3.2.57 forever;
+# we re-exec into brew bash 5 so the rest of this script can use bash 4+ idioms.
+# This block MUST remain bash 3.2 safe: no double-bracket tests, no lowercasing, no associative arrays.
+if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+  if command -v brew >/dev/null 2>&1; then
+    __brew_bash="$(brew --prefix 2>/dev/null)/bin/bash"
+    if [ -x "$__brew_bash" ]; then
+      exec "$__brew_bash" "$0" "$@"
+    fi
+  fi
+  echo "ERROR: bash 4+ required. On macOS run: brew install bash" >&2
+  exit 1
+fi
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/platform.sh
+source "$SCRIPT_DIR/lib/platform.sh"
+# Phase 18 PORT-01: prepend gnubin to PATH so plain date/stat/readlink/realpath
+# resolve to GNU coreutils on macOS. No-op on Linux/WSL2.
+if command -v claude_secure_bootstrap_path >/dev/null 2>&1; then
+  claude_secure_bootstrap_path || true
+fi
+
 _invoking_user="${SUDO_USER:-$USER}"
 _invoking_home="$(getent passwd "$_invoking_user" | cut -d: -f6)"
 if [ -z "$_invoking_home" ]; then
@@ -23,6 +45,57 @@ log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
+# PLAT-03 + PLAT-04: detect Homebrew and bootstrap GNU bash + coreutils + jq.
+# Called from check_dependencies() on macOS BEFORE the apt-style command audit.
+macos_bootstrap_deps() {
+  # PLAT-03: detect brew, do NOT auto-install
+  if ! command -v brew >/dev/null 2>&1; then
+    log_error "Homebrew is required on macOS but is not installed."
+    log_error ""
+    log_error "Install Homebrew by running:"
+    log_error "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    log_error ""
+    log_error "Then re-run this installer."
+    exit 1
+  fi
+
+  # PLAT-04: install bash, coreutils, jq via brew BEFORE any other macOS step
+  log_info "Bootstrapping GNU tools via Homebrew..."
+  local formula
+  for formula in bash coreutils jq; do
+    if brew list --formula "$formula" >/dev/null 2>&1; then
+      log_info "  $formula already installed"
+    else
+      log_info "  installing $formula..."
+      if ! brew install "$formula"; then
+        log_error "brew install $formula failed"
+        exit 1
+      fi
+    fi
+  done
+
+  # Post-bootstrap verification — fail loudly if anything is still missing
+  local brew_prefix
+  brew_prefix="$(brew --prefix 2>/dev/null)"
+  if [ -z "$brew_prefix" ]; then
+    log_error "brew --prefix returned empty after install"
+    exit 1
+  fi
+  local missing=()
+  [ -x "$brew_prefix/bin/bash" ] || missing+=("bash (run: brew install bash)")
+  [ -d "$brew_prefix/opt/coreutils/libexec/gnubin" ] || missing+=("coreutils (run: brew install coreutils)")
+  command -v jq >/dev/null 2>&1 || missing+=("jq (run: brew install jq)")
+  if [ "${#missing[@]}" -gt 0 ]; then
+    log_error "Post-bootstrap verification FAILED. Still missing:"
+    for m in "${missing[@]}"; do
+      log_error "  - $m"
+    done
+    exit 1
+  fi
+
+  log_info "macOS bootstrap complete (brew_prefix=$brew_prefix)"
+}
+
 parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -32,8 +105,61 @@ parse_args() {
   done
 }
 
+# PLAT-05: verify Docker Desktop >= 4.44.3 is installed and running on macOS.
+# Called from check_dependencies() only when detect_platform returns "macos".
+# Requires GNU sort on PATH (for `sort -V`) — claude_secure_bootstrap_path
+# must have run earlier in the Phase 18 prologue (line 23) before this.
+check_docker_desktop_version() {
+  local min_version="4.44.3"
+
+  # 1. Docker daemon running?
+  if ! docker info >/dev/null 2>&1; then
+    log_error "Docker Desktop is not running."
+    log_error "Start Docker Desktop from /Applications/Docker.app and re-run the installer."
+    exit 1
+  fi
+
+  # 2. Is this Docker Desktop (vs plain Docker Engine)?
+  local server_line
+  server_line="$(docker version 2>/dev/null | grep 'Server: Docker Desktop' || true)"
+  if [ -z "$server_line" ]; then
+    log_warn "Docker Desktop not detected in 'docker version' output."
+    log_warn "If you are running plain Docker Engine, ensure it satisfies the equivalent of Docker Desktop >= ${min_version}."
+    return 0
+  fi
+
+  # 3. Parse the version string "4.44.3" from "Server: Docker Desktop 4.44.3 (172823)".
+  local dd_version
+  dd_version="$(echo "$server_line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  if [ -z "$dd_version" ]; then
+    log_warn "Could not parse Docker Desktop version string: ${server_line}"
+    log_warn "Continuing — ensure Docker Desktop >= ${min_version} is installed."
+    return 0
+  fi
+
+  # 4. Compare with GNU sort -V (Phase 18 prologue guarantees gnubin on PATH).
+  # Semantics: printf both versions, sort -V, take the first line. If that
+  # line equals dd_version AND dd_version != min_version, dd_version is older.
+  local lowest
+  lowest="$(printf '%s\n%s\n' "$min_version" "$dd_version" | sort -V | head -1)"
+  if [ "$lowest" = "$dd_version" ] && [ "$dd_version" != "$min_version" ]; then
+    log_error "Docker Desktop ${dd_version} is installed but >= ${min_version} is required."
+    log_error "Upgrade Docker Desktop: https://docs.docker.com/desktop/release-notes/"
+    exit 1
+  fi
+
+  log_info "Docker Desktop ${dd_version} satisfies >= ${min_version}"
+}
+
 check_dependencies() {
   local missing=()
+
+  # PLAT-03 + PLAT-04: on macOS, install brew deps BEFORE auditing apt-style packages
+  local _plat
+  _plat="$(detect_platform)"
+  if [ "$_plat" = "macos" ]; then
+    macos_bootstrap_deps
+  fi
 
   command -v docker >/dev/null 2>&1 || missing+=("docker (https://docs.docker.com/engine/install/)")
   command -v curl >/dev/null 2>&1 || missing+=("curl (apt install curl)")
@@ -51,6 +177,11 @@ check_dependencies() {
     fi
   fi
 
+  # PLAT-05: macOS-only Docker Desktop version gate.
+  if [ "$_plat" = "macos" ]; then
+    check_docker_desktop_version
+  fi
+
   if [ ${#missing[@]} -gt 0 ]; then
     log_error "Missing required dependencies:"
     for dep in "${missing[@]}"; do
@@ -60,31 +191,6 @@ check_dependencies() {
   fi
 
   log_info "All dependencies satisfied"
-}
-
-detect_platform() {
-  if grep -qi microsoft /proc/version 2>/dev/null; then
-    PLATFORM="wsl2"
-    log_info "Detected WSL2 environment"
-
-    # Check for Docker Desktop vs Docker CE
-    local os_info
-    os_info=$(docker info --format '{{.OperatingSystem}}' 2>/dev/null || echo "unknown")
-    if echo "$os_info" | grep -qi "docker desktop"; then
-      log_warn "Docker Desktop detected. iptables may not work correctly."
-      log_warn "Recommended: use Docker CE installed directly in WSL2."
-    fi
-
-    # Log iptables backend
-    local ipt_version
-    ipt_version=$(iptables -V 2>/dev/null || echo "not found")
-    log_info "iptables version: $ipt_version"
-  else
-    PLATFORM="linux"
-    log_info "Detected native Linux environment"
-  fi
-
-  log_info "Detected platform: $PLATFORM"
 }
 
 check_existing() {
@@ -459,7 +565,20 @@ main() {
   echo ""
 
   check_dependencies
-  detect_platform
+  PLATFORM="$(detect_platform)"
+  log_info "Detected platform: $PLATFORM"
+  if [ "$PLATFORM" = "wsl2" ]; then
+    # Preserved WSL2 warnings: Docker Desktop + iptables version log
+    local os_info
+    os_info=$(docker info --format '{{.OperatingSystem}}' 2>/dev/null || echo "unknown")
+    if echo "$os_info" | grep -qi "docker desktop"; then
+      log_warn "Docker Desktop detected. iptables may not work correctly."
+      log_warn "Recommended: use Docker CE installed directly in WSL2."
+    fi
+    local ipt_version
+    ipt_version=$(iptables -V 2>/dev/null || echo "not found")
+    log_info "iptables version: $ipt_version"
+  fi
   check_existing
   setup_directories
   setup_auth
@@ -476,6 +595,6 @@ main() {
   log_info "Run 'claude-secure --profile default' to start."
 }
 
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]] && [ "${__INSTALL_SOURCE_ONLY:-0}" != "1" ]; then
   main "$@"
 fi

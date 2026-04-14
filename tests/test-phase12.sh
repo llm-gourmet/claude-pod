@@ -65,6 +65,10 @@ EOF
 _source_functions() {
   local tmpdir="$1"
   _setup_source_env "$tmpdir"
+  # Export APP_DIR so functions like create_profile can copy whitelist template
+  # from $APP_DIR/config/whitelist.json under set -u (main dispatch normally sets
+  # this via config.sh, but source-only mode bypasses that path).
+  export APP_DIR="$PROJECT_DIR"
   # shellcheck source=/dev/null
   __CLAUDE_SECURE_SOURCE_ONLY=1 source "$PROJECT_DIR/bin/claude-secure"
 }
@@ -216,6 +220,89 @@ test_prof_02c() {
   return 0
 }
 run_test "PROF-02c: resolve_profile_by_repo returns exit 1 for unknown repo" test_prof_02c
+
+# =========================================================================
+# PROF-02d: create_profile prompts for .repo and persists the value (HAPPY PATH)
+# Exercises the REAL bin/claude-secure create_profile (not create_test_profile helper)
+# via piped stdin. Will RED until Plan 29-02 patches bin/claude-secure with the prompt.
+# =========================================================================
+test_prof_02d_create_profile_prompts_for_repo() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
+
+  # Stdin sequence after 29-02:
+  #   line 1: ""               -> accept default workspace
+  #   line 2: "owner/my-repo"  -> NEW repo prompt
+  #   line 3: "1"              -> auth choice = OAuth
+  #   line 4: "oauth-token-xyz" -> OAuth token
+  printf '\nowner/my-repo\n1\noauth-token-xyz\n' | create_profile "myproj-d" >/dev/null 2>&1
+
+  local pdir="$CONFIG_DIR/profiles/myproj-d"
+  [ -f "$pdir/profile.json" ] || return 1
+  local repo
+  repo=$(jq -r '.repo // empty' "$pdir/profile.json")
+  [ "$repo" = "owner/my-repo" ] || return 1
+  return 0
+}
+run_test "PROF-02d: create_profile prompts for and persists .repo field" test_prof_02d_create_profile_prompts_for_repo
+
+# =========================================================================
+# PROF-02e: create_profile skip path -- empty repo input means no .repo key
+# Back-compat guard: pre-PROF-02 profiles omit .repo entirely, and skip path
+# must still produce a profile with no .repo key.
+# =========================================================================
+test_prof_02e_create_profile_skip_repo() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
+
+  # Stdin sequence: workspace default, BLANK repo (skip), auth=OAuth, token
+  printf '\n\n1\noauth-token-xyz\n' | create_profile "myproj-e" >/dev/null 2>&1
+
+  local pdir="$CONFIG_DIR/profiles/myproj-e"
+  [ -f "$pdir/profile.json" ] || return 1
+  # Positive assertion: workspace was still written (proves flow ran to completion
+  # through all 4 prompts, not that it hung at prompt 2)
+  local ws
+  ws=$(jq -r '.workspace // empty' "$pdir/profile.json")
+  [ -n "$ws" ] || return 1
+  # Skip path assertion: .repo key must be absent or empty
+  local repo
+  repo=$(jq -r '.repo // empty' "$pdir/profile.json")
+  [ -z "$repo" ] || return 1
+  # Additional guard: .env was written (proves setup_profile_auth ran — i.e. the
+  # blank "skip" line was consumed by the repo prompt, not the auth choice prompt)
+  [ -f "$pdir/.env" ] || return 1
+  return 0
+}
+run_test "PROF-02e: create_profile allows skipping .repo (empty input)" test_prof_02e_create_profile_skip_repo
+
+# =========================================================================
+# PROF-02f: create_profile warns on malformed repo but still saves value verbatim
+# Warn-don't-block policy (29-RESEARCH.md Pitfall 3 + Architecture Pattern 2).
+# =========================================================================
+test_prof_02f_create_profile_warns_on_bad_format() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
+
+  local stderr_log="$tmpdir/stderr.log"
+  # Capture stderr to a file; the garbage repo value must still persist
+  printf '\nnot-a-valid-repo-format\n1\noauth-token-xyz\n' \
+    | create_profile "myproj-f" >/dev/null 2>"$stderr_log"
+
+  local pdir="$CONFIG_DIR/profiles/myproj-f"
+  [ -f "$pdir/profile.json" ] || return 1
+  # Warning string present on stderr
+  grep -q 'Warning' "$stderr_log" || return 1
+  # Value saved verbatim (warn-don't-block)
+  local repo
+  repo=$(jq -r '.repo // empty' "$pdir/profile.json")
+  [ "$repo" = "not-a-valid-repo-format" ] || return 1
+  return 0
+}
+run_test "PROF-02f: create_profile warns on bad repo format but saves" test_prof_02f_create_profile_warns_on_bad_format
 
 # =========================================================================
 # PROF-03a: validate_profile with missing profile directory -> exit 1

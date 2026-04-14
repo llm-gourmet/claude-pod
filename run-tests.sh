@@ -1,5 +1,27 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Phase 18 PORT-02: bash 4+ re-exec guard.
+if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+  if command -v brew >/dev/null 2>&1; then
+    __brew_bash="$(brew --prefix 2>/dev/null)/bin/bash"
+    if [ -x "$__brew_bash" ]; then
+      exec "$__brew_bash" "$0" "$@"
+    fi
+  fi
+  echo "ERROR: bash 4+ required. On macOS run: brew install bash" >&2
+  exit 1
+fi
+
 set -uo pipefail
+
+# Phase 18 PORT-01: source the platform library and bootstrap PATH on macOS.
+__RUN_TESTS_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$__RUN_TESTS_SELF_DIR/lib/platform.sh" ]; then
+  # shellcheck source=lib/platform.sh
+  source "$__RUN_TESTS_SELF_DIR/lib/platform.sh"
+  if command -v claude_secure_bootstrap_path >/dev/null 2>&1; then
+    claude_secure_bootstrap_path || true
+  fi
+fi
 
 # claude-secure test runner
 # Convenience wrapper for running integration tests manually.

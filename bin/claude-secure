@@ -1,5 +1,38 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Phase 18 PORT-02: bash 4+ re-exec guard. Apple ships bash 3.2.57 forever;
+# we re-exec into brew bash 5 so the rest of this script can use bash 4+ idioms.
+# This block MUST remain bash 3.2 safe (no [[ ]], no ${var,,}, no declare -A).
+if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+  if command -v brew >/dev/null 2>&1; then
+    __brew_bash="$(brew --prefix 2>/dev/null)/bin/bash"
+    if [ -x "$__brew_bash" ]; then
+      exec "$__brew_bash" "$0" "$@"
+    fi
+  fi
+  echo "ERROR: bash 4+ required. On macOS run: brew install bash" >&2
+  exit 1
+fi
+
 set -euo pipefail
+
+# Phase 18 PORT-01: source the platform library and bootstrap PATH so GNU
+# coreutils (date, stat, readlink, realpath, sed, grep) shadow BSD versions
+# on macOS. No-op on Linux/WSL2.
+__CLAUDE_SECURE_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$__CLAUDE_SECURE_SELF_DIR/../lib/platform.sh" ]; then
+  # shellcheck source=../lib/platform.sh
+  source "$__CLAUDE_SECURE_SELF_DIR/../lib/platform.sh"
+elif [ -f "$__CLAUDE_SECURE_SELF_DIR/lib/platform.sh" ]; then
+  # Installed layout: lib/ alongside bin/
+  # shellcheck source=lib/platform.sh
+  source "$__CLAUDE_SECURE_SELF_DIR/lib/platform.sh"
+elif [ -f "/usr/local/share/claude-secure/lib/platform.sh" ]; then
+  # shellcheck source=/usr/local/share/claude-secure/lib/platform.sh
+  source "/usr/local/share/claude-secure/lib/platform.sh"
+fi
+if command -v claude_secure_bootstrap_path >/dev/null 2>&1; then
+  claude_secure_bootstrap_path || true
+fi
 
 # Source-only mode: load function definitions without executing main logic.
 # Used by tests: __CLAUDE_SECURE_SOURCE_ONLY=1 source bin/claude-secure
@@ -16,7 +49,7 @@ _CLEANUP_FILES=()
 
 cleanup() {
   for f in "${_CLEANUP_FILES[@]}"; do
-    rm -f "$f"
+    rm -rf "$f"
   done
 }
 trap cleanup EXIT
@@ -76,6 +109,188 @@ validate_profile() {
     echo "ERROR: Profile '$name' has invalid whitelist.json (not valid JSON)" >&2
     return 1
   fi
+  if ! validate_docs_binding "$name"; then
+    return 1
+  fi
+}
+
+# Phase 23 BIND-01: validate the four doc-repo fields + DOCS_REPO_TOKEN presence.
+# Opt-out semantics: if no doc fields are set, return 0 silently (back-compat).
+# Fail-closed semantics: if ANY field is set, ALL must be valid.
+# Alias: accepts legacy report_repo / report_branch as fallback sources.
+validate_docs_binding() {
+  local name="$1"
+  local pdir="$CONFIG_DIR/profiles/$name"
+  local pj="$pdir/profile.json"
+
+  local repo branch project_dir
+  repo=$(jq -r '.docs_repo // .report_repo // empty' "$pj")
+  branch=$(jq -r '.docs_branch // .report_branch // "main"' "$pj")
+  project_dir=$(jq -r '.docs_project_dir // empty' "$pj")
+
+  # Opt-out: no repo configured means no doc binding at all.
+  if [ -z "$repo" ]; then
+    return 0
+  fi
+
+  # docs_repo must be an HTTPS URL ending in .git with no whitespace
+  if [[ ! "$repo" =~ ^https://[^[:space:]]+\.git$ ]]; then
+    echo "ERROR: profile '$name' docs_repo must be HTTPS URL ending in .git (got: $repo)" >&2
+    return 1
+  fi
+  # docs_branch: DNS-safe chars only (alphanumeric + . _ / -)
+  if [[ ! "$branch" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+    echo "ERROR: profile '$name' docs_branch is malformed: $branch" >&2
+    return 1
+  fi
+  # docs_project_dir: required when docs_repo is set, must be relative, no '..'
+  if [ -z "$project_dir" ]; then
+    echo "ERROR: profile '$name' docs_repo set but docs_project_dir is missing" >&2
+    echo "       Add: jq '.docs_project_dir = \"projects/<slug>\"' > profile.json" >&2
+    return 1
+  fi
+  if [[ "$project_dir" =~ \.\. ]] || [[ "$project_dir" = /* ]]; then
+    echo "ERROR: profile '$name' docs_project_dir must be relative and contain no '..': $project_dir" >&2
+    return 1
+  fi
+
+  # DOCS_REPO_TOKEN (or legacy REPORT_REPO_TOKEN) must be present in .env.
+  # Read via grep, not by sourcing, to avoid polluting caller state.
+  if ! grep -qE '^(DOCS_REPO_TOKEN|REPORT_REPO_TOKEN)=' "$pdir/.env" 2>/dev/null; then
+    echo "ERROR: profile '$name' docs_repo set but DOCS_REPO_TOKEN missing from $pdir/.env" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+# Phase 23 BIND-02: Host-only secret projection.
+# Filters known host-only variables out of the profile .env before handing
+# the file to docker-compose as env_file:. The raw .env is still sourced
+# into host bash by load_profile_config (below), so publish_report,
+# push_with_retry, and do_profile_init_docs can still read the token.
+# Only the CONTAINER view is filtered -- the host process env is untouched.
+_HOST_ONLY_VARS=("DOCS_REPO_TOKEN" "REPORT_REPO_TOKEN")
+
+project_env_for_containers() {
+  local src="$1"
+  local dst
+  dst=$(mktemp "${TMPDIR:-/tmp}/cs-projected-env-XXXXXXXX")
+  _CLEANUP_FILES+=("$dst")
+  chmod 600 "$dst"
+
+  # Build anchored regex matching any host-only var assignment at line start.
+  # Anchoring prevents substring matches like MY_DOCS_REPO_TOKEN_OVERRIDE.
+  local pattern="^("
+  local first=1
+  local v
+  for v in "${_HOST_ONLY_VARS[@]}"; do
+    if [ $first -eq 1 ]; then
+      pattern+="$v"
+      first=0
+    else
+      pattern+="|$v"
+    fi
+  done
+  pattern+=")="
+
+  # grep -v removes matching lines. LC_ALL=C for deterministic ERE matching
+  # across glibc/BSD. `|| true` because grep returns 1 if zero lines survive.
+  LC_ALL=C grep -Ev "$pattern" "$src" > "$dst" || true
+
+  echo "$dst"
+}
+
+# Phase 23 BIND-03: emit a one-line deprecation warning exactly once per
+# profile per shell session. Uses a per-profile sentinel file under $TMPDIR.
+# Gate on `[ -t 2 ]` so JSON-parsing wrappers and CI logs stay silent.
+emit_deprecation_warning() {
+  local profile="$1"
+  local sentinel="${TMPDIR:-/tmp}/cs-deprecation-warned-${profile}"
+  if [ -e "$sentinel" ]; then
+    return 0
+  fi
+  # Always mark as warned first, so a concurrent call cannot double-fire.
+  : > "$sentinel" 2>/dev/null || true
+  _CLEANUP_FILES+=("$sentinel")
+  if [ -t 2 ]; then
+    echo "WARNING: profile '$profile' uses deprecated 'report_repo'/'REPORT_REPO_TOKEN' fields." >&2
+    echo "         Rename to 'docs_repo'/'DOCS_REPO_TOKEN' in profile.json and .env -- see README.md." >&2
+  else
+    # Non-terminal (CI/tests/wrappers): single short line on stderr for grep coverage.
+    echo "WARNING: profile '$profile' uses deprecated report_repo/REPORT_REPO_TOKEN -- rename to docs_repo/DOCS_REPO_TOKEN." >&2
+  fi
+  return 0
+}
+
+# Phase 23 BIND-03: resolve the doc-repo fields, preferring new names over
+# legacy. Exports DOCS_REPO, DOCS_BRANCH, DOCS_PROJECT_DIR, DOCS_MODE,
+# DOCS_REPO_TOKEN in the caller's shell. Back-fills REPORT_REPO_TOKEN from
+# DOCS_REPO_TOKEN if only the new name is set (so Phase 16 push_with_retry
+# and publish_report -- which read REPORT_REPO_TOKEN directly -- keep working).
+# Fires emit_deprecation_warning if any legacy field was the source of truth.
+resolve_docs_alias() {
+  local name="$1"
+  local pdir="$CONFIG_DIR/profiles/$name"
+  local pj="$pdir/profile.json"
+  local deprecated=0
+
+  # Field reads
+  local new_repo legacy_repo
+  new_repo=$(jq -r '.docs_repo // empty' "$pj" 2>/dev/null)
+  legacy_repo=$(jq -r '.report_repo // empty' "$pj" 2>/dev/null)
+  if [ -n "$new_repo" ]; then
+    DOCS_REPO="$new_repo"
+  elif [ -n "$legacy_repo" ]; then
+    DOCS_REPO="$legacy_repo"
+    deprecated=1
+  else
+    DOCS_REPO=""
+  fi
+
+  local new_branch legacy_branch
+  new_branch=$(jq -r '.docs_branch // empty' "$pj" 2>/dev/null)
+  legacy_branch=$(jq -r '.report_branch // empty' "$pj" 2>/dev/null)
+  if [ -n "$new_branch" ]; then
+    DOCS_BRANCH="$new_branch"
+  elif [ -n "$legacy_branch" ]; then
+    DOCS_BRANCH="$legacy_branch"
+    deprecated=1
+  else
+    DOCS_BRANCH="main"
+  fi
+
+  DOCS_PROJECT_DIR=$(jq -r '.docs_project_dir // empty' "$pj" 2>/dev/null)
+  DOCS_MODE=$(jq -r '.docs_mode // "report_only"' "$pj" 2>/dev/null)
+
+  # Token alias: prefer DOCS_REPO_TOKEN, fall back to REPORT_REPO_TOKEN.
+  # Both names have already been sourced into the caller's shell (load_profile_config
+  # ran `set -a; source .env; set +a` before calling us).
+  if [ -z "${DOCS_REPO_TOKEN:-}" ] && [ -n "${REPORT_REPO_TOKEN:-}" ]; then
+    DOCS_REPO_TOKEN="$REPORT_REPO_TOKEN"
+    deprecated=1
+  fi
+  # Back-fill legacy name from new name so Phase 16 publish_report /
+  # push_with_retry (which read REPORT_REPO_TOKEN) keeps working under the
+  # new schema even when the user has renamed everything.
+  if [ -z "${REPORT_REPO_TOKEN:-}" ] && [ -n "${DOCS_REPO_TOKEN:-}" ]; then
+    REPORT_REPO_TOKEN="$DOCS_REPO_TOKEN"
+  fi
+  # Same back-fill for REPORT_REPO so publish_report's `repo_url="${REPORT_REPO:-}"` still resolves.
+  if [ -z "${REPORT_REPO:-}" ] && [ -n "${DOCS_REPO:-}" ]; then
+    REPORT_REPO="$DOCS_REPO"
+  fi
+  if [ -z "${REPORT_BRANCH:-}" ] && [ -n "${DOCS_BRANCH:-}" ]; then
+    REPORT_BRANCH="$DOCS_BRANCH"
+  fi
+
+  export DOCS_REPO DOCS_BRANCH DOCS_PROJECT_DIR DOCS_MODE DOCS_REPO_TOKEN
+  export REPORT_REPO REPORT_BRANCH REPORT_REPO_TOKEN
+
+  if [ "$deprecated" = "1" ]; then
+    emit_deprecation_warning "$name"
+  fi
+  return 0
 }
 
 create_profile() {
@@ -92,8 +307,20 @@ create_profile() {
   ws_path="$(realpath -m "$ws_path")"
   mkdir -p "$ws_path"
 
+  # Repo prompt (optional — enables webhook routing via resolve_profile_by_repo). Added for PROF-02.
+  read -rp "GitHub repository for webhook routing (owner/repo) [skip]: " repo
+  repo="${repo:-}"
+  if [ -n "$repo" ] && ! [[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+    echo "Warning: '$repo' does not look like owner/repo format — saved anyway." >&2
+  fi
+
   # Build profile.json
-  jq -n --arg ws "$ws_path" '{"workspace": $ws}' > "$tmpdir/profile.json"
+  if [ -n "$repo" ]; then
+    jq -n --arg ws "$ws_path" --arg repo "$repo" \
+      '{"workspace": $ws, "repo": $repo}' > "$tmpdir/profile.json"
+  else
+    jq -n --arg ws "$ws_path" '{"workspace": $ws}' > "$tmpdir/profile.json"
+  fi
 
   # Copy whitelist template
   cp "$APP_DIR/config/whitelist.json" "$tmpdir/whitelist.json"
@@ -207,7 +434,16 @@ load_profile_config() {
   export COMPOSE_PROJECT_NAME="claude-${name}"
   export COMPOSE_FILE="$APP_DIR/docker-compose.yml"
   export WORKSPACE_PATH
-  export SECRETS_FILE="$pdir/.env"
+  # Phase 23 BIND-02: project raw .env to a filtered copy that omits
+  # host-only variables (DOCS_REPO_TOKEN, REPORT_REPO_TOKEN). docker-compose
+  # reads env_file: from this path; the raw .env is still sourced into host
+  # bash below for publish_report / init-docs consumption.
+  if [ -f "$pdir/.env" ]; then
+    SECRETS_FILE=$(project_env_for_containers "$pdir/.env")
+    export SECRETS_FILE
+  else
+    export SECRETS_FILE="$pdir/.env"
+  fi
   export WHITELIST_PATH="$pdir/whitelist.json"
   export LOG_DIR="$CONFIG_DIR/logs"
   export LOG_PREFIX="${name}-"
@@ -221,6 +457,8 @@ load_profile_config() {
     source "$pdir/.env"
     set +a
   fi
+  # Phase 23 BIND-03: resolve new/legacy field aliases and export DOCS_* vars.
+  resolve_docs_alias "$name"
 }
 
 load_superuser_config() {
@@ -336,7 +574,7 @@ spawn_project_name() {
 spawn_cleanup() {
   docker compose down -v --remove-orphans 2>/dev/null || true
   for f in "${_CLEANUP_FILES[@]}"; do
-    rm -f "$f"
+    rm -rf "$f"
   done
 }
 
@@ -806,6 +1044,110 @@ render_report_template() {
   printf '%s' "$rendered"
 }
 
+# Phase 24 RPT-01: validate that a rendered report body contains all 6
+# mandatory H2 sections from webhook/report-templates/bundle.md. Anchored
+# regex (^## Section$) prevents partial matches inside code blocks or
+# headings like "## Goal Achievements".
+#
+# Caller (Phase 26 Stop hook) is responsible for re-prompting Claude if a
+# report is malformed. Phase 24 ships the validator only.
+#
+# Args:
+#   $1 = body_path  (path to rendered report markdown)
+# Returns:
+#   0 if all 6 sections present
+#   1 if any are missing (stderr lists every missing section)
+verify_bundle_sections() {
+  local body_path="$1"
+  if [ ! -f "$body_path" ]; then
+    echo "ERROR: verify_bundle_sections: file not found: $body_path" >&2
+    return 1
+  fi
+
+  local _required=(
+    "^## Goal$"
+    "^## Where Worked$"
+    "^## What Changed$"
+    "^## What Failed$"
+    "^## How to Test$"
+    "^## Future Findings$"
+  )
+  local section missing=0
+  for section in "${_required[@]}"; do
+    if ! LC_ALL=C grep -qE "$section" "$body_path"; then
+      echo "ERROR: report missing mandatory section: ${section#^## }" | sed 's/\$$//' >&2
+      missing=1
+    fi
+  done
+  if [ "$missing" -ne 0 ]; then
+    return 1
+  fi
+  return 0
+}
+
+# Phase 24 RPT-04: strip markdown constructs that can exfiltrate data.
+#
+# Order matters: HTML comments first (they can hide <img> beacons), then
+# raw HTML tags, then external image references (inline + reference-style).
+#
+# Local image references (relative paths, ./img.png, img/foo.svg) are
+# PRESERVED because they cannot exfiltrate (no DNS, no external fetch).
+#
+# This function runs AFTER redact_report_file in the publish_docs_bundle
+# pipeline. The reverse order would let secrets hidden inside HTML comments
+# escape the redactor (Pitfall 1 in 24-RESEARCH.md).
+#
+# Uses GNU sed semantics. On macOS, Phase 18 PORT-01 PATH-shims gnubin so
+# `sed` is GNU sed even on Darwin.
+#
+# Args:
+#   $1 = path  (file is edited in place)
+# Returns:
+#   0 always (no-op on missing constructs is fine)
+#   1 only if the file does not exist
+sanitize_markdown_file() {
+  local f="$1"
+  if [ ! -f "$f" ]; then
+    return 1
+  fi
+
+  local tmp
+  tmp=$(mktemp "${TMPDIR:-/tmp}/cs-sanitize-XXXXXXXX")
+  _CLEANUP_FILES+=("$tmp")
+
+  # Pass 1: strip HTML comments (multi-line). The :a; N; $!ba; idiom slurps
+  # the entire file into pattern space so multi-line <!-- ... --> matches.
+  # The non-greedy approximation [^-]|-[^-]|--[^>] is the canonical POSIX
+  # workaround for sed's lack of PCRE lazy quantifiers.
+  LC_ALL=C sed -E \
+    -e ':a' -e 'N' -e '$!ba' \
+    -e 's/<!--([^-]|-[^-]|--[^>])*-->//g' \
+    "$f" > "$tmp" && mv "$tmp" "$f"
+
+  # Pass 2: strip raw HTML tags (opening, closing, self-closing). Aggressive
+  # by design — the bundle template is plain markdown and any user-agent-
+  # interpreted HTML is a potential beacon.
+  LC_ALL=C sed -E -i.bak 's|</?[A-Za-z][A-Za-z0-9-]*[^>]*>||g' "$f"
+  rm -f "$f.bak"
+
+  # Pass 3: strip external inline image references.
+  # Matches: ![alt](http://...) | ![alt](https://...) | ![alt](//...)
+  # Does NOT match: ![alt](./local.png), ![alt](img/foo.svg)
+  # NOTE: Uses '#' as the s-command delimiter because the regex's alternation
+  # '(https?:|//)' contains literal '|' — using '|' as a sed delimiter here
+  # terminates the substitution early ("unknown option to `s'" error).
+  LC_ALL=C sed -E -i.bak 's#!\[[^]]*\]\((https?:|//)[^)]*\)##g' "$f"
+  rm -f "$f.bak"
+
+  # Pass 4: strip reference-style image definitions pointing at external URLs.
+  # Matches: [ref]: https://... | [ref]: http://... | [ref]: //...
+  # Deletes the entire line (GFM image references are line-anchored).
+  LC_ALL=C sed -E -i.bak '/^\[[^]]+\]:[[:space:]]+(https?:|\/\/)/d' "$f"
+  rm -f "$f.bak"
+
+  return 0
+}
+
 # Phase 16 D-15 / Pattern B / Pitfall 1: redact every non-empty profile
 # .env value from a rendered report file in place. Uses awk-from-file
 # LITERAL substring replace (index + substr) so any value metacharacter
@@ -1110,6 +1452,519 @@ ASKPASS
   return 0
 }
 
+# Phase 23 DOCS-01: bootstrap projects/<slug>/ layout in the doc repo.
+# Reuses the Phase 16 publish_report clone pattern and push_with_retry
+# non-ff handler. Idempotent: second run adds zero commits.
+#
+# Args:
+#   $1 = profile name
+# Returns:
+#   0 on success (including no-op when layout already exists)
+#   1 on any failure (validation, clone, commit, push)
+do_profile_init_docs() {
+  local profile="$1"
+
+  if ! validate_profile_name "$profile"; then
+    return 1
+  fi
+  # load_profile_config was already called by the top-level profile
+  # resolution block at line ~1793; DOCS_* vars are in the environment.
+  # Call again defensively for tests that invoke do_profile_init_docs directly.
+  # Note: validate_profile is intentionally NOT called here -- the CLI dispatch
+  # block already calls it before reaching this function, and calling it again
+  # would block tests that patch docs_repo to file:// URLs for local git testing.
+  load_profile_config "$profile"
+
+  if [ -z "${DOCS_REPO:-}" ]; then
+    echo "ERROR: profile '$profile' has no docs_repo configured (set .docs_repo in profile.json)" >&2
+    return 1
+  fi
+  if [ -z "${DOCS_REPO_TOKEN:-}" ]; then
+    echo "ERROR: profile '$profile' has no DOCS_REPO_TOKEN in .env" >&2
+    return 1
+  fi
+  if [ -z "${DOCS_PROJECT_DIR:-}" ]; then
+    echo "ERROR: profile '$profile' has no docs_project_dir (set .docs_project_dir in profile.json, e.g. \"projects/$profile\")" >&2
+    return 1
+  fi
+
+  local clone_dir
+  clone_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-init-docs-XXXXXXXX")
+  _CLEANUP_FILES+=("$clone_dir")
+
+  # Askpass helper -- same pattern as publish_report (line 1072-1082).
+  local askpass="$clone_dir/.askpass.sh"
+  cat > "$askpass" <<'ASKPASS'
+#!/bin/sh
+case "$1" in
+  Username*) printf 'x-access-token\n' ;;
+  Password*) printf '%s\n' "$GIT_ASKPASS_PAT" ;;
+esac
+ASKPASS
+  chmod 700 "$askpass"
+
+  # Clone with Phase 16 bounded-clone flags + PAT scrub on stderr.
+  # Falls back to git-init for empty repos that have no branches yet.
+  local pat="$DOCS_REPO_TOKEN"
+  local clone_err="$clone_dir/clone.err"
+  local _git_env
+  _git_env=(
+    LC_ALL=C
+    GIT_ASKPASS="$askpass"
+    GIT_ASKPASS_PAT="$pat"
+    GIT_TERMINAL_PROMPT=0
+    GIT_HTTP_LOW_SPEED_LIMIT=1
+    GIT_HTTP_LOW_SPEED_TIME=30
+  )
+  if ! env "${_git_env[@]}" \
+       timeout 60 \
+       git -c credential.helper= -c credential.helper='' \
+           -c core.autocrlf=false \
+           clone --depth 1 --branch "$DOCS_BRANCH" --quiet \
+                 "$DOCS_REPO" "$clone_dir/repo" 2>"$clone_err"; then
+    # Branch not found: the repo may exist on a different default branch,
+    # or may be completely empty. Try cloning without --branch first.
+    if grep -qiE "remote branch .* not found|not found in upstream" "$clone_err" 2>/dev/null; then
+      local clone_err2="$clone_dir/clone2.err"
+      if env "${_git_env[@]}" \
+           timeout 60 \
+           git -c credential.helper= -c credential.helper='' \
+               -c core.autocrlf=false \
+               clone --depth 1 --quiet \
+                     "$DOCS_REPO" "$clone_dir/repo" 2>"$clone_err2"; then
+        # Repo exists on a different default branch. Use it as-is; DOCS_BRANCH
+        # will be the push target so the commit lands on the existing branch.
+        local actual_branch
+        actual_branch=$(git -C "$clone_dir/repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        DOCS_BRANCH="${actual_branch:-$DOCS_BRANCH}"
+      else
+        # Truly empty repo — bootstrap with git init.
+        git init -q "$clone_dir/repo"
+        git -C "$clone_dir/repo" symbolic-ref HEAD "refs/heads/$DOCS_BRANCH"
+        env "${_git_env[@]}" \
+          git -C "$clone_dir/repo" \
+              -c credential.helper= -c credential.helper='' \
+              remote add origin "$DOCS_REPO"
+      fi
+    else
+      sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$clone_err" >&2
+      return 1
+    fi
+  fi
+
+  # Create project layout. mkdir -p is idempotent; stub writer never overwrites.
+  local proj="$clone_dir/repo/$DOCS_PROJECT_DIR"
+  mkdir -p "$proj/specs" "$proj/reports"
+
+  # Stub writer: only creates the file if absent. Keeps init-docs idempotent.
+  _write_stub() {
+    local path="$1" content="$2"
+    if [ -f "$path" ]; then
+      return 0
+    fi
+    printf '%s' "$content" > "$path"
+  }
+
+  _write_stub "$proj/todo.md" "# Todo -- $profile
+
+- [ ] (add items)
+"
+  _write_stub "$proj/architecture.md" "# Architecture -- $profile
+
+Describe the system's structure here.
+"
+  _write_stub "$proj/vision.md" "# Vision -- $profile
+
+Describe the project goal here.
+"
+  _write_stub "$proj/ideas.md" "# Ideas -- $profile
+
+Append-only findings.
+"
+  _write_stub "$proj/reports/INDEX.md" "# Report Index -- $profile
+
+| Date | Session | Summary |
+|------|---------|---------|
+"
+  _write_stub "$proj/specs/.gitkeep" ""
+
+  # Stage the project subdir. git add is idempotent on unchanged files.
+  if ! git -C "$clone_dir/repo" -c core.autocrlf=false add "$DOCS_PROJECT_DIR/"; then
+    echo "ERROR: git add failed for $DOCS_PROJECT_DIR" >&2
+    return 1
+  fi
+
+  # Idempotency gate: if the working tree matches HEAD after staging,
+  # nothing to do. Exit 0 without creating a commit.
+  if git -C "$clone_dir/repo" diff --cached --quiet; then
+    echo "Doc layout already initialized at $DOCS_PROJECT_DIR -- nothing to do."
+    return 0
+  fi
+
+  # Atomic commit (single commit per Phase 23 success criterion 4).
+  local commit_msg="docs($profile): initialize $DOCS_PROJECT_DIR layout"
+  local commit_err="$clone_dir/commit.err"
+  if ! LC_ALL=C \
+       GIT_AUTHOR_NAME="claude-secure" \
+       GIT_AUTHOR_EMAIL="claude-secure@localhost" \
+       GIT_COMMITTER_NAME="claude-secure" \
+       GIT_COMMITTER_EMAIL="claude-secure@localhost" \
+       git -C "$clone_dir/repo" -c core.autocrlf=false \
+           commit -q -m "$commit_msg" 2>"$commit_err"; then
+    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$commit_err" >&2
+    return 1
+  fi
+
+  # Push via the Phase 16 non-ff retry engine. push_with_retry reads
+  # REPORT_REPO_TOKEN (back-filled from DOCS_REPO_TOKEN by resolve_docs_alias).
+  if ! push_with_retry "$clone_dir" "$DOCS_BRANCH"; then
+    return 1
+  fi
+
+  echo "Initialized $DOCS_PROJECT_DIR in $DOCS_REPO ($DOCS_BRANCH)"
+  return 0
+}
+
+# =============================================================================
+# Phase 26 SPOOL-03: fork-and-disown async shipper. Never blocks the spawn
+# return. Called from do_spawn (~line 2253) and interactive *) (~line 2850).
+#
+# Functions:
+#   run_spool_shipper        -- background fork entrypoint (called after spawn)
+#   run_spool_shipper_inline -- synchronous drain entrypoint (Plan 04 stale-drain)
+#   _spool_shipper_loop      -- shared retry body (3-attempt jittered backoff)
+#   _spool_audit_write       -- audit JSONL writer for spool events (separate file)
+#
+# Audit writes go to $LOG_DIR/${LOG_PREFIX}spool-audit.jsonl (NOT executions.jsonl)
+# to avoid O_APPEND PIPE_BUF collision with do_spawn's concurrent writes (Pitfall 4).
+# =============================================================================
+
+# Phase 26 SPOOL-03: background fork entrypoint.
+# Forks _spool_shipper_loop to background with disown so spawn return is never
+# gated on shipper completion. Returns in < 100ms even when publish_docs_bundle
+# would take 5+ seconds.
+run_spool_shipper() {
+  local session_id="${1:-unknown}"
+  local spool_file="${LOG_DIR:-./logs}/spool.md"
+
+  # Test escape hatch (Rule 3 deviation pattern — see Phase 16 D-23 / CLAUDE_SECURE_FAKE_CLAUDE_STDOUT).
+  # CLAUDE_SECURE_SKIP_SPOOL_SHIPPER=1 suppresses the shipper for unit tests.
+  if [ "${CLAUDE_SECURE_SKIP_SPOOL_SHIPPER:-0}" = "1" ]; then
+    return 0
+  fi
+
+  # No spool = no report configured (D-05 silent skip).
+  [ -f "$spool_file" ] || return 0
+
+  # Fork to background. Both >/dev/null 2>&1 redirect AND disown are required:
+  #   - redirect: prevents interleave with the envelope emit that follows immediately
+  #   - disown: detaches child PID from the parent shell's job table so spawn_cleanup
+  #     trap does not reap the child before it finishes (Pitfall 2).
+  ( _spool_shipper_loop "$spool_file" "$session_id" >/dev/null 2>&1 ) & disown
+}
+
+# Phase 26 SPOOL-03 / D-07: synchronous drain entrypoint.
+# Runs _spool_shipper_loop in the current shell (blocking). Used by Plan 04's
+# stale-drain call site at spawn preamble to flush leftover spools from prior
+# crashed sessions before the new session starts.
+# Drain failures MUST NOT crash the caller — always returns 0 at the top level.
+run_spool_shipper_inline() {
+  local session_id="${1:-unknown}"
+  local spool_file="${LOG_DIR:-./logs}/spool.md"
+
+  [ -f "$spool_file" ] || return 0
+
+  # Run synchronously; ignore return value so callers never see a drain failure.
+  _spool_shipper_loop "$spool_file" "$session_id" || true
+  return 0
+}
+
+# Phase 26 SPOOL-03: shared retry body.
+# 3-attempt loop with jittered backoff (0s, 5±2s, 10±2s).
+# On success: writes pushed audit entry, deletes spool file, returns 0.
+# After 3 failures: writes push_failed audit entry, leaves spool.md for next
+# spawn's inline drain (D-07), returns 1.
+_spool_shipper_loop() {
+  local spool_file="$1" session_id="$2"
+  local attempt=0 max_attempts=3
+  local summary="Phase 26 spool: ${session_id}"
+  local delivery_id="${session_id}"
+  local rc=0 report_url=""
+  local _tmpout
+
+  while [ "$attempt" -lt "$max_attempts" ]; do
+    # Jittered backoff: attempt 0 → 0s, attempt 1 → 5±2s, attempt 2 → 10±2s
+    # Computed BEFORE incrementing so attempt 0 gets 0s delay.
+    if [ "$attempt" -gt 0 ]; then
+      local base=$(( attempt * 5 ))
+      local jitter=$(( (RANDOM % 5) - 2 ))
+      local delay=$(( base + jitter ))
+      [ "$delay" -lt 0 ] && delay=0
+      sleep "$delay"
+    fi
+
+    attempt=$(( attempt + 1 ))
+
+    # Capture publish output safely — use a tempfile so $? reflects
+    # publish_docs_bundle exit code, not tail's exit code (pipefail caveat).
+    _tmpout="$(mktemp 2>/dev/null || echo "/tmp/spool-shipper-$$")"
+    if publish_docs_bundle "$spool_file" "$session_id" "$summary" "$delivery_id" >"$_tmpout" 2>&1; then
+      report_url="$(tail -1 "$_tmpout" 2>/dev/null || true)"
+      rm -f "$_tmpout" 2>/dev/null || true
+      _spool_audit_write "pushed" "$attempt" "$report_url" ""
+      rm -f "$spool_file"
+      return 0
+    fi
+    rc=$?
+    rm -f "$_tmpout" 2>/dev/null || true
+  done
+
+  _spool_audit_write "push_failed" "$attempt" "" "publish_docs_bundle rc=$rc (attempts: ${max_attempts})"
+  # Leave spool.md in place for the next spawn's inline drain (D-07).
+  return 1
+}
+
+# Phase 26 SPOOL-03: audit JSONL writer for spool events.
+# Writes to $LOG_DIR/${LOG_PREFIX}spool-audit.jsonl (SEPARATE from executions.jsonl
+# to avoid O_APPEND PIPE_BUF collision — Pitfall 4).
+# Always silent on write failures (|| true) — audit writes must not crash the shipper.
+_spool_audit_write() {
+  local status="$1" attempt="$2" report_url="$3" error="$4"
+  local audit_file="${LOG_DIR:-./logs}/${LOG_PREFIX:-}spool-audit.jsonl"
+  local ts
+  mkdir -p "${LOG_DIR:-./logs}" 2>/dev/null || true
+  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "unknown")"
+  jq -cn \
+    --arg ts "$ts" \
+    --arg profile "${PROFILE:-}" \
+    --arg status "$status" \
+    --arg report_url "$report_url" \
+    --arg error "${error:0:200}" \
+    --argjson attempt "$attempt" \
+    '{
+      ts: $ts,
+      profile: $profile,
+      spool_status: $status,
+      attempt: $attempt,
+      report_url: (if ($report_url | length) > 0 then $report_url else null end),
+      error: (if ($error | length) > 0 then $error else null end)
+    }' >> "$audit_file" 2>/dev/null || true
+}
+
+# Phase 24 DOCS-02/03 + RPT-01..05: publish a rendered agent report + INDEX.md
+# update as exactly one atomic git commit, through the existing host-side
+# secret redaction pipeline + a markdown sanitizer that strips exfil beacons.
+#
+# HOST-SIDE FUNCTION. Runs in host bash, NEVER inside any container. Requires
+# DOCS_REPO_TOKEN in the host environment (Phase 23 BIND-02 host-only PAT
+# projection). The container cannot reach this code path.
+#
+# Composition (the entire function body is composed of pre-existing primitives):
+#   - verify_bundle_sections   (Plan 02; RPT-01)
+#   - redact_report_file       (bin/claude-secure:1039; Phase 16 D-15; RPT-03)
+#   - sanitize_markdown_file   (Plan 02; RPT-04)
+#   - push_with_retry          (bin/claude-secure:1174; Phase 17 3-attempt rebase; RPT-05)
+#
+# Order discipline (24-RESEARCH.md Pitfall 1): redact MUST run BEFORE sanitize.
+# Reverse order would let secrets hidden inside HTML comments escape the
+# redactor (the sanitizer strips the comment, then redactor sees no match).
+#
+# Idempotency: NOT idempotent (24-RESEARCH.md Pitfall 3). Two publishes with
+# the same session_id is a caller bug; the never-overwrite guard returns 1.
+#
+# Args:
+#   $1 = body_path     (path to rendered report markdown — Phase 26 Stop hook outputs this)
+#   $2 = session_id    (Claude session UUID; MUST be unique per publish)
+#   $3 = summary_line  (one-line summary for INDEX.md; newlines are collapsed, pipes escaped)
+#   $4 = delivery_id   (optional; defaults to "manual-$$"; appears in commit message)
+#
+# Returns:
+#   0 on success (stdout last line = report URL for HTTPS, or rel path for file://)
+#   1 on any failure (validation, clone, redact-readable check, never-overwrite, commit, push)
+publish_docs_bundle() {
+  local body_path="$1"
+  local session_id="$2"
+  local summary_line="$3"
+  local delivery_id="${4:-manual-$$}"
+
+  # Precondition guards (RPT-01 + arg validation)
+  if [ -z "$body_path" ] || [ ! -f "$body_path" ]; then
+    echo "ERROR: publish_docs_bundle: body path missing or not a file: $body_path" >&2
+    return 1
+  fi
+  if [ -z "$session_id" ]; then
+    echo "ERROR: publish_docs_bundle: session_id is required" >&2
+    return 1
+  fi
+  if ! verify_bundle_sections "$body_path"; then
+    return 1
+  fi
+
+  # Profile-driven config must already be loaded by the caller (load_profile_config).
+  if [ -z "${PROFILE:-}" ]; then
+    echo "ERROR: publish_docs_bundle: PROFILE not set" >&2
+    return 1
+  fi
+  if [ -z "${DOCS_REPO:-}" ]; then
+    echo "ERROR: publish_docs_bundle: profile '$PROFILE' has no docs_repo configured" >&2
+    return 1
+  fi
+  if [ -z "${DOCS_REPO_TOKEN:-}" ]; then
+    echo "ERROR: publish_docs_bundle: DOCS_REPO_TOKEN missing from profile env" >&2
+    return 1
+  fi
+  if [ -z "${DOCS_PROJECT_DIR:-}" ]; then
+    echo "ERROR: publish_docs_bundle: docs_project_dir missing from profile" >&2
+    return 1
+  fi
+
+  local _env_file="$CONFIG_DIR/profiles/$PROFILE/.env"
+  if [ ! -r "$_env_file" ]; then
+    echo "ERROR: publish_docs_bundle: cannot read $_env_file for redaction" >&2
+    return 1
+  fi
+
+  # Ephemeral clone dir (mirrors publish_report:1262 pattern). spawn_cleanup
+  # wipes it on process exit so partial state never leaks.
+  local clone_dir
+  clone_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-publish-XXXXXXXX")
+  _CLEANUP_FILES+=("$clone_dir")
+
+  # Askpass helper (mirrors publish_report:1267 / do_profile_init_docs:1380).
+  local askpass="$clone_dir/.askpass.sh"
+  cat > "$askpass" <<'ASKPASS'
+#!/bin/sh
+case "$1" in
+  Username*) printf 'x-access-token\n' ;;
+  Password*) printf '%s\n' "$GIT_ASKPASS_PAT" ;;
+esac
+ASKPASS
+  chmod 700 "$askpass"
+
+  # Bounded clone with PAT scrub on stderr (mirrors publish_report:1280).
+  local pat="$DOCS_REPO_TOKEN"
+  local clone_err="$clone_dir/clone.err"
+  if ! LC_ALL=C \
+       GIT_ASKPASS="$askpass" \
+       GIT_ASKPASS_PAT="$pat" \
+       GIT_TERMINAL_PROMPT=0 \
+       GIT_HTTP_LOW_SPEED_LIMIT=1 \
+       GIT_HTTP_LOW_SPEED_TIME=30 \
+       timeout 60 \
+       git -c credential.helper= -c credential.helper='' \
+           -c core.autocrlf=false \
+           clone --depth 1 --branch "$DOCS_BRANCH" --quiet \
+                 "$DOCS_REPO" "$clone_dir/repo" 2>"$clone_err"; then
+    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$clone_err" >&2
+    return 1
+  fi
+
+  # Concurrency fix: INDEX.md is append-only, so concurrent publishers both
+  # append their own summary line. A plain rebase in push_with_retry collides
+  # on the "last line" context, producing a merge conflict. Enable git's
+  # builtin "union" merge driver for INDEX.md via clone-local gitattributes
+  # (not committed to the repo) so concurrent rebases auto-merge by keeping
+  # BOTH sets of appended lines. This is exactly what the union driver does:
+  # take every line from every side of the merge.
+  mkdir -p "$clone_dir/repo/.git/info"
+  printf '%s/reports/INDEX.md merge=union\n' "$DOCS_PROJECT_DIR" \
+    >> "$clone_dir/repo/.git/info/attributes"
+
+  # Clone-local identity so push_with_retry's rebase path (which replays our
+  # commit via git-rebase, not a fresh commit with GIT_AUTHOR_* env vars) has
+  # a valid committer identity. Without this, a concurrent-push retry dies
+  # with "empty ident name not allowed" during rebase replay.
+  git -C "$clone_dir/repo" config user.email "claude-secure@localhost"
+  git -C "$clone_dir/repo" config user.name  "claude-secure"
+
+  # DOCS-02: path construction + never-overwrite guard.
+  local year month day
+  year=$(date -u +%Y)
+  month=$(date -u +%m)
+  day=$(date -u +%Y-%m-%d)
+  local rel_report_path="${DOCS_PROJECT_DIR}/reports/${year}/${month}/${day}-${session_id}.md"
+  local abs_report_path="$clone_dir/repo/$rel_report_path"
+  if [ -e "$abs_report_path" ]; then
+    echo "ERROR: report already exists at $rel_report_path -- refusing to overwrite" >&2
+    echo "       (if this is a replay, use a different session-id)" >&2
+    return 1
+  fi
+  if ! mkdir -p "$(dirname "$abs_report_path")"; then
+    echo "ERROR: cannot create report directory" >&2
+    return 1
+  fi
+  if ! cp "$body_path" "$abs_report_path"; then
+    echo "ERROR: cannot copy body to $abs_report_path" >&2
+    return 1
+  fi
+
+  # DOCS-03: append summary line to INDEX.md. The file MUST already exist
+  # from a prior `claude-secure profile init-docs` run (Phase 23).
+  local rel_index_path="${DOCS_PROJECT_DIR}/reports/INDEX.md"
+  local abs_index_path="$clone_dir/repo/$rel_index_path"
+  if [ ! -f "$abs_index_path" ]; then
+    echo "ERROR: INDEX.md not found at $rel_index_path" >&2
+    echo "       Run 'claude-secure profile init-docs --profile $PROFILE' first." >&2
+    return 1
+  fi
+
+  local ts_iso safe_summary
+  ts_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  # Pipe-escape (table column delimiter) and newline-collapse the summary.
+  safe_summary="${summary_line//|/\\|}"
+  safe_summary="${safe_summary//$'\n'/ }"
+  printf '| %s | %s | %s |\n' "$ts_iso" "$session_id" "$safe_summary" >> "$abs_index_path"
+
+  # RPT-03 redact THEN RPT-04 sanitize. Order matters (24-RESEARCH.md Pitfall 1).
+  local f
+  for f in "$abs_report_path" "$abs_index_path"; do
+    if ! redact_report_file "$f" "$_env_file"; then
+      echo "ERROR: redaction failed for $f" >&2
+      return 1
+    fi
+    if ! sanitize_markdown_file "$f"; then
+      echo "ERROR: sanitization failed for $f" >&2
+      return 1
+    fi
+  done
+
+  # RPT-02: stage both files in one git add.
+  if ! git -C "$clone_dir/repo" -c core.autocrlf=false add "$rel_report_path" "$rel_index_path"; then
+    echo "ERROR: git add failed" >&2
+    return 1
+  fi
+  # NOTE: NO `diff --cached --quiet` gate here (24-RESEARCH.md Pitfall 3).
+  # Phase 24 is not idempotent. The never-overwrite guard + unique session-id
+  # in the INDEX.md row guarantee a non-empty diff for legitimate calls.
+
+  # RPT-02: single atomic commit. PAT scrub on stderr.
+  local commit_msg="report: ${session_id} (${delivery_id})"
+  local commit_err="$clone_dir/commit.err"
+  if ! LC_ALL=C \
+       GIT_AUTHOR_NAME="claude-secure" \
+       GIT_AUTHOR_EMAIL="claude-secure@localhost" \
+       GIT_COMMITTER_NAME="claude-secure" \
+       GIT_COMMITTER_EMAIL="claude-secure@localhost" \
+       git -C "$clone_dir/repo" -c core.autocrlf=false \
+           commit -q -m "$commit_msg" 2>"$commit_err"; then
+    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$commit_err" >&2
+    return 1
+  fi
+
+  # RPT-05: push via Phase 17 3-attempt rebase loop. push_with_retry reads
+  # REPORT_REPO_TOKEN, which Phase 23 resolve_docs_alias back-filled from
+  # DOCS_REPO_TOKEN, so no extra wiring is needed here.
+  if ! push_with_retry "$clone_dir" "$DOCS_BRANCH"; then
+    return 1
+  fi
+
+  # Emit report URL on stdout (mirrors publish_report:1333). For file://
+  # remotes the "blob" URL is still useful as a stable path.
+  local url_base="${DOCS_REPO%.git}"
+  printf '%s/blob/%s/%s\n' "$url_base" "$DOCS_BRANCH" "$rel_report_path"
+  return 0
+}
+
 # Phase 16: best-effort audit writer for early-return spawn_error paths.
 # Called from do_spawn precondition checks before delivery_id/event_type
 # are known. Uses synthetic manual-<uuid> and "unknown" event_type.
@@ -1121,6 +1976,126 @@ _spawn_error_audit() {
   LOG_DIR="${LOG_DIR:-$CONFIG_DIR/logs}" \
     write_audit_entry "$_ts" "$_did" "" "unknown" "${PROFILE:-unknown}" \
       "" "" "" "" "" "" "spawn_error" "" "${err_msg:0:200}" 2>/dev/null || true
+}
+
+# Phase 25 CTX-01..CTX-04: sparse shallow partial clone of the doc repo's
+# projects/<slug>/ subtree, bind-mounted read-only into the claude container
+# at /agent-docs. HOST-SIDE ONLY -- the PAT is consumed only by the host git
+# invocation; the container only sees a read-only filesystem at /agent-docs/.
+#
+# Skips silently when DOCS_REPO is empty (CTX-03).
+# Fails closed on clone/sparse-checkout errors -- a misconfiguration should
+# surface loudly, not degrade silently (see 25-RESEARCH.md Open Question 1).
+# The mount source is the project SUBDIRECTORY, not the clone root -- this
+# structurally excludes .git/ from the bind mount (CTX-04).
+#
+# Exports: AGENT_DOCS_HOST_PATH (absolute, realpath-normalized) on success;
+#          empty string on the CTX-03 no-docs skip path; unset on error.
+# Returns: 0 on success or silent skip; 1 on any clone/sparse-checkout error.
+fetch_docs_context() {
+  # CTX-03: opt-out -- silent skip when no docs repo is configured.
+  if [ -z "${DOCS_REPO:-}" ]; then
+    echo "info: fetch_docs_context: skipped (no docs_repo configured)" >&2
+    AGENT_DOCS_HOST_PATH=""
+    export AGENT_DOCS_HOST_PATH
+    return 0
+  fi
+
+  # Defensive: Phase 23 validate_docs_binding already enforces these when
+  # docs_repo is set, but fetch_docs_context runs on the do_spawn path which
+  # may skip full validation. Re-check to fail fast with a clear error.
+  if [ -z "${DOCS_BRANCH:-}" ] || [ -z "${DOCS_PROJECT_DIR:-}" ] || [ -z "${DOCS_REPO_TOKEN:-}" ]; then
+    echo "ERROR: fetch_docs_context: docs_repo set but DOCS_BRANCH / DOCS_PROJECT_DIR / DOCS_REPO_TOKEN missing" >&2
+    return 1
+  fi
+
+  local clone_root
+  clone_root=$(mktemp -d "${TMPDIR:-/tmp}/cs-agent-docs-XXXXXXXX")
+  # Register cleanup IMMEDIATELY after mktemp -- before any git call -- so
+  # a mid-clone failure cannot leak the temp dir (Phase 24 discipline).
+  _CLEANUP_FILES+=("$clone_root")
+
+  # Askpass helper -- identical pattern to do_profile_init_docs (line ~1485)
+  # and publish_docs_bundle (line ~1696). The PAT never appears in argv.
+  local askpass="$clone_root/.askpass.sh"
+  cat > "$askpass" <<'ASKPASS'
+#!/bin/sh
+case "$1" in
+  Username*) printf 'x-access-token\n' ;;
+  Password*) printf '%s\n' "$GIT_ASKPASS_PAT" ;;
+esac
+ASKPASS
+  chmod 700 "$askpass"
+
+  local pat="$DOCS_REPO_TOKEN"
+  local clone_err="$clone_root/clone.err"
+  local _git_env
+  _git_env=(
+    LC_ALL=C
+    GIT_ASKPASS="$askpass"
+    GIT_ASKPASS_PAT="$pat"
+    GIT_TERMINAL_PROMPT=0
+    GIT_HTTP_LOW_SPEED_LIMIT=1
+    GIT_HTTP_LOW_SPEED_TIME=30
+  )
+
+  # CTX-01: sparse + shallow + partial clone. --filter=blob:none defers
+  # blob fetch until checkout; --sparse initializes an empty sparse-checkout
+  # so `set` can narrow to one subdirectory. Both flags require git 2.25+.
+  # NOTE: git silently ignores --depth and --filter when cloning from a
+  # local file:// URL (25-RESEARCH.md Pitfall 3) -- harmless for tests.
+  if ! env "${_git_env[@]}" \
+       timeout 60 \
+       git -c credential.helper= -c credential.helper='' \
+           -c core.autocrlf=false \
+           clone --depth=1 --filter=blob:none --sparse \
+                 --branch "$DOCS_BRANCH" --quiet \
+                 "$DOCS_REPO" "$clone_root/repo" 2>"$clone_err"; then
+    # CTX-04 / security: scrub PAT from stderr before surfacing.
+    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$clone_err" >&2
+    echo "ERROR: fetch_docs_context: clone failed (see scrubbed stderr above)" >&2
+    return 1
+  fi
+
+  # Narrow the working tree to the project subdir. Cone mode (default since
+  # git 2.27) is faster on large repos and matches the single-prefix case.
+  local sparse_err="$clone_root/sparse.err"
+  if ! git -C "$clone_root/repo" sparse-checkout set "$DOCS_PROJECT_DIR" 2>"$sparse_err"; then
+    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$sparse_err" >&2
+    echo "ERROR: fetch_docs_context: sparse-checkout set failed for $DOCS_PROJECT_DIR" >&2
+    return 1
+  fi
+
+  # CTX-04: the bind-mount source is the SUBDIRECTORY, not the clone root.
+  # .git/ lives at $clone_root/repo/.git/ -- completely outside the mount
+  # source. Verified empirically on git 2.43.0 (see 25-RESEARCH.md Example 1).
+  local mount_src="$clone_root/repo/$DOCS_PROJECT_DIR"
+  if [ ! -d "$mount_src" ]; then
+    echo "ERROR: fetch_docs_context: project subdir missing after sparse-checkout: $DOCS_PROJECT_DIR" >&2
+    echo "       Did you run 'claude-secure profile init-docs --profile $PROFILE'?" >&2
+    return 1
+  fi
+
+  # Open Question 3: fail fast on empty subtree (typo'd docs_project_dir
+  # after sparse-checkout gives an empty dir with no error).
+  if [ -z "$(ls -A "$mount_src" 2>/dev/null)" ]; then
+    echo "ERROR: fetch_docs_context: project subdir is empty after sparse-checkout: $DOCS_PROJECT_DIR" >&2
+    echo "       Run 'claude-secure profile init-docs --profile $PROFILE' to bootstrap the project layout." >&2
+    return 1
+  fi
+
+  # Open Question 5: normalize through realpath to collapse macOS /tmp ->
+  # /private/tmp symlinks that could confuse Docker Desktop bind mounts.
+  # GNU realpath is guaranteed by Phase 18 PATH bootstrap on macOS.
+  local resolved
+  if resolved=$(realpath "$mount_src" 2>/dev/null) && [ -n "$resolved" ]; then
+    mount_src="$resolved"
+  fi
+
+  AGENT_DOCS_HOST_PATH="$mount_src"
+  export AGENT_DOCS_HOST_PATH
+  echo "info: fetch_docs_context: mounted $DOCS_PROJECT_DIR (host: $mount_src) read-only at /agent-docs" >&2
+  return 0
 }
 
 do_spawn() {
@@ -1232,15 +2207,38 @@ do_spawn() {
   audit_branch=$(echo "$EVENT_JSON" | jq -r '.pull_request.head.ref // (.ref // empty | sub("^refs/heads/"; ""))')
   [ "$audit_branch" = "null" ] && audit_branch=""
 
-  # Phase 16 / D-12: read report_repo fields from profile.json and export as env vars
-  # so publish_report can consume them via REPORT_REPO / REPORT_BRANCH / REPORT_PATH_PREFIX.
-  # REPORT_REPO_TOKEN comes from profile.env (loaded earlier via load_profile_config).
+  # Phase 16 / D-12 (patched in Phase 28 for OPS-01 forward compat):
+  # Read report_repo fields from profile.json and export as env vars so publish_report
+  # can consume them via REPORT_REPO / REPORT_BRANCH / REPORT_PATH_PREFIX.
+  # REPORT_REPO_TOKEN comes from profile.env (loaded earlier via load_profile_config
+  # -> resolve_docs_alias, which also back-fills REPORT_REPO from DOCS_REPO when only
+  # the new Phase 23 field names are set). The fallback ordering below (docs_* first,
+  # report_* legacy second) matches validate_docs_binding:127 so Phase 23-migrated
+  # profiles never silently skip report publishing. DO NOT add a .docs_path_prefix
+  # alias here -- no such Phase 23 field exists and inventing one is out of scope.
   local _profile_json="$CONFIG_DIR/profiles/$PROFILE/profile.json"
   if [ -f "$_profile_json" ]; then
-    REPORT_REPO=$(jq -r '.report_repo // empty' "$_profile_json")
-    REPORT_BRANCH=$(jq -r '.report_branch // "main"' "$_profile_json")
+    REPORT_REPO=$(jq -r '.docs_repo // .report_repo // empty' "$_profile_json")
+    REPORT_BRANCH=$(jq -r '.docs_branch // .report_branch // "main"' "$_profile_json")
     REPORT_PATH_PREFIX=$(jq -r '.report_path_prefix // "reports"' "$_profile_json")
     export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX
+  fi
+
+  # Phase 26 D-07: drain any leftover spool from a prior crashed session.
+  # Synchronous, non-fatal — failures are logged but do not abort the new spawn.
+  run_spool_shipper_inline "$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d - || echo "drain-$$")" || true
+
+  # Phase 25 CTX-01..CTX-04: sparse shallow clone of the doc repo's
+  # projects/<slug>/ subtree, bind-mounted read-only into the claude
+  # container at /agent-docs. Skips silently when DOCS_REPO is empty
+  # (CTX-03). Exports AGENT_DOCS_HOST_PATH for docker-compose.yml to
+  # consume on the `docker compose up -d --wait` call below.
+  # Fail-closed: a clone/sparse-checkout failure aborts the spawn so
+  # misconfigurations (expired PAT, renamed branch, typo'd project dir)
+  # surface loudly rather than silently running without context.
+  if ! fetch_docs_context; then
+    _spawn_error_audit "spawn: fetch_docs_context failed"
+    return 1
   fi
 
   # Resolve and render prompt template (per D-13 through D-17)
@@ -1382,6 +2380,11 @@ do_spawn() {
     "$audit_status" \
     "$report_url" \
     "$_audit_err_short" 2>/dev/null || true
+
+  # Phase 26 SPOOL-03: fork-and-disown spool shipper after audit write.
+  # Uses $_audit_session (Claude session_id from line ~2205), not $delivery_id.
+  # ${_audit_session:-unknown} guards against malformed Claude output.
+  run_spool_shipper "${_audit_session:-unknown}"
 
   # Emit envelope to stdout.
   echo "$envelope_json"
@@ -1615,13 +2618,12 @@ reap_stale_event_files() {
   EVENTS_DELETED=$deleted
 }
 
-# D-08: single-flight reaper cycle. Acquires a non-blocking flock on
-# $LOG_DIR/${LOG_PREFIX}reaper.lock. If held (e.g., timer-driven cycle
-# already running when operator invokes `claude-secure reap`), the second
-# instance exits 0 silently with a journal log line.
+# D-08 (Phase 18 PORT-03): single-flight reaper cycle. Uses mkdir-based atomic
+# locking with a PID file for stale-lock reclaim. Replaces the previous flock
+# primitive which is util-linux-only and not available on macOS without an
+# extra brew formula. mkdir is atomic on every POSIX filesystem.
 do_reap() {
   local dry_run=0
-  # Parse optional --dry-run flag.
   while [ $# -gt 0 ]; do
     case "$1" in
       --dry-run) dry_run=1; shift ;;
@@ -1639,16 +2641,34 @@ do_reap() {
   done
   export REAPER_DRY_RUN=$dry_run
 
-  local lock_file="${LOG_DIR:-$CONFIG_DIR/logs}/${LOG_PREFIX:-}reaper.lock"
-  mkdir -p "$(dirname "$lock_file")" 2>/dev/null || true
+  # Phase 18 PORT-03: mkdir-based atomic lock with PID file.
+  local lockdir="${LOG_DIR:-$CONFIG_DIR/logs}/${LOG_PREFIX:-}reaper.lockdir"
+  local pidfile="$lockdir/pid"
+  mkdir -p "$(dirname "$lockdir")" 2>/dev/null || true
 
-  # Acquire exclusive non-blocking lock on FD 9.
-  exec 9>"$lock_file"
-  chmod 666 "$lock_file" 2>/dev/null || true
-  if ! flock -n 9; then
-    echo "reaper: another instance is running (lock held), skipping cycle"
-    return 0
+  if ! mkdir "$lockdir" 2>/dev/null; then
+    # Lockdir already exists — check holder liveness
+    local holder_pid=0
+    if [ -r "$pidfile" ]; then
+      holder_pid="$(cat "$pidfile" 2>/dev/null || echo 0)"
+    fi
+    if [ "${holder_pid:-0}" -gt 0 ] && kill -0 "$holder_pid" 2>/dev/null; then
+      echo "reaper: another instance is running (pid=$holder_pid lockdir=$lockdir), skipping cycle"
+      return 0
+    fi
+    # Stale: holder is dead. Reclaim.
+    echo "reaper: stale lockdir found (dead holder pid=$holder_pid), reclaiming"
+    rm -f "$pidfile" 2>/dev/null || true
+    rmdir "$lockdir" 2>/dev/null || true
+    if ! mkdir "$lockdir" 2>/dev/null; then
+      echo "reaper: failed to acquire lockdir after reclaim attempt, skipping cycle"
+      return 0
+    fi
   fi
+  echo "$$" > "$pidfile" 2>/dev/null || true
+  # Cleanup on any exit path (normal return, error, signal)
+  # shellcheck disable=SC2064
+  trap "rm -f '$pidfile' 2>/dev/null || true; rmdir '$lockdir' 2>/dev/null || true" EXIT
 
   echo "reaper: cycle start prefix=${INSTANCE_PREFIX:-cs-}"
 
@@ -1916,12 +2936,56 @@ case "$CMD" in
     # Drop the "reap" literal so only the remaining flags (if any) go to do_reap.
     do_reap "${REMAINING_ARGS[@]:1}"
     ;;
+  profile)
+    # Phase 23 DOCS-01: profile subcommand dispatch.
+    # Uses the existing REMAINING_ARGS array set by parse_log_flags.
+    PROFILE_SUB="${REMAINING_ARGS[1]:-}"
+    case "$PROFILE_SUB" in
+      init-docs)
+        if [ -z "${PROFILE:-}" ]; then
+          echo "ERROR: --profile is required for 'profile init-docs'" >&2
+          exit 1
+        fi
+        do_profile_init_docs "$PROFILE"
+        exit $?
+        ;;
+      ""|--help|-h|help)
+        echo "Usage: claude-secure --profile NAME profile <subcommand>"
+        echo ""
+        echo "Profile subcommands:"
+        echo "  init-docs    Bootstrap the per-project doc repo layout (DOCS-01)"
+        echo ""
+        echo "Required profile fields for init-docs:"
+        echo "  profile.json: docs_repo, docs_branch, docs_project_dir"
+        echo "  .env:         DOCS_REPO_TOKEN (host-only, never mounted into container)"
+        exit 0
+        ;;
+      *)
+        echo "ERROR: Unknown profile subcommand: $PROFILE_SUB" >&2
+        echo "Run: claude-secure --profile NAME profile --help" >&2
+        exit 1
+        ;;
+    esac
+    ;;
   *)
     mkdir -p "$LOG_DIR"
     # 777 required: three containers write as different UIDs (claude:1001, node:1000, root:0)
     chmod 777 "$LOG_DIR"
+    # Phase 26 D-07: drain any leftover spool from a prior crashed session.
+    run_spool_shipper_inline "$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d - || echo "drain-$$")" || true
     cleanup_containers
+    # Phase 25 CTX-01..CTX-04: populate /agent-docs mount for interactive
+    # sessions too. Non-fatal on the interactive path: if fetch fails,
+    # print a warning and continue so interactive users are not blocked by
+    # a transient doc-repo misconfiguration while iterating on profile.json.
+    if ! fetch_docs_context; then
+      echo "warning: fetch_docs_context failed on interactive path; continuing without /agent-docs mount" >&2
+      AGENT_DOCS_HOST_PATH=""
+      export AGENT_DOCS_HOST_PATH
+    fi
     docker compose up -d
     docker compose exec -it claude claude --dangerously-skip-permissions
+    # Phase 26 SPOOL-03: fork-and-disown spool shipper after interactive exit.
+    run_spool_shipper "$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d - || echo "manual-$$")"
     ;;
 esac

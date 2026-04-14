@@ -122,6 +122,42 @@ def _run_ipt(*args, check=True):
     return subprocess.run(cmd, check=check, capture_output=True, text=True)
 
 
+def iptables_probe():
+    """Startup probe: verify `iptables -L` is functional.
+
+    Logs 'iptables probe: OK' on success, 'iptables probe: FAIL ...' on
+    failure. Never raises — returns True/False. On the classic
+    "iptables who?" failure (QEMU on Apple Silicon or kernel module
+    mismatch), logs an extra actionable hint pointing at native arm64
+    base images. See Phase 19 research Pitfall 1.
+    """
+    try:
+        result = subprocess.run(
+            ["iptables", "-L"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        logger.error("iptables probe: FAIL (iptables binary not on PATH)")
+        return False
+
+    if result.returncode == 0:
+        logger.info("iptables probe: OK")
+        return True
+
+    stderr = (result.stderr or "").strip()
+    logger.error("iptables probe: FAIL rc=%d stderr=%s", result.returncode, stderr)
+    if "iptables who?" in stderr or "do you need to insmod" in stderr:
+        logger.error(
+            "iptables probe: hint — this usually means the container is running "
+            "under QEMU emulation or on a kernel without netfilter. On Apple "
+            "Silicon Docker Desktop, ensure the image is built for native "
+            "linux/arm64 (no --platform linux/amd64 override)."
+        )
+    return False
+
+
 def add_iptables_rule(ip, call_id):
     """Insert a temporary ACCEPT rule for *ip* at position 4 in OUTPUT."""
     try:
@@ -380,6 +416,11 @@ if __name__ == "__main__":
 
     # Initialize database
     init_db()
+
+    # Phase 19 COMPAT-01: probe iptables BEFORE setup so operators get a
+    # definitive "iptables probe: OK/FAIL" line in the logs even when
+    # setup_default_iptables silently no-ops outside Docker.
+    iptables_probe()
 
     # Set up default iptables rules (may fail outside Docker)
     try:
