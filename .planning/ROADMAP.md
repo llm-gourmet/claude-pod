@@ -172,6 +172,30 @@
 **Plans**: TBD
 **Research flag**: Stop hook API field names (`stop_hook_active`, re-prompt semantics) must be re-verified with Context7 at plan time — API is version-sensitive.
 
+### v2.0 Gap Closure (Audit Follow-Up)
+
+- [ ] **Phase 27: v2.0 Verification Backfill** - Create missing VERIFICATION.md for phases 12, 13, 16; update 6 stale VALIDATION.md files; fix stale traceability checkboxes (PROF-01/02/03, OPS-01/02)
+- [ ] **Phase 28: OPS-01 docs_repo Backfill Fix** - Fix `do_spawn:2077` to use `.report_repo // .docs_repo // empty`; prevents silent report skip for Phase 23-migrated profiles
+- [ ] **Phase 29: PROF-02 create_profile Repo Prompt** - Add `.repo` field prompt to `create_profile` to eliminate manual JSON editing after profile creation
+
+### Phase 27: v2.0 Verification Backfill
+**Goal**: Bring v2.0 audit artifacts up to standard — create 3 missing VERIFICATION.md files, update 6 stale VALIDATION.md files, and fix stale traceability checkboxes so the audit can pass cleanly
+**Gap Closure:** Closes documentation gaps from v2.0-MILESTONE-AUDIT.md
+**Requirements:** PROF-01, PROF-02, PROF-03 (checkbox fix), OPS-01, OPS-02 (traceability fix)
+**Plans**: TBD
+
+### Phase 28: OPS-01 docs_repo Backfill Fix
+**Goal**: `do_spawn` correctly resolves `REPORT_REPO` from Phase 23's canonical `docs_repo` field so migrated profiles never silently skip report publishing
+**Gap Closure:** Closes medium-priority integration concern from v2.0-MILESTONE-AUDIT.md (Contract 5 partial)
+**Requirements:** OPS-01 (forward compatibility)
+**Plans**: TBD
+
+### Phase 29: PROF-02 create_profile Repo Prompt
+**Goal**: `create_profile` prompts for the `.repo` field during interactive setup, eliminating the manual JSON edit step that creates onboarding friction
+**Gap Closure:** Closes PROF-02 UX gap from v2.0-MILESTONE-AUDIT.md
+**Requirements:** PROF-02
+**Plans**: TBD
+
 ## Progress
 
 **Execution Order:**
@@ -207,3 +231,6 @@
 | 24. Multi-File Publish Bundle | v4.0 | 3/3 | Complete   | 2026-04-14 |
 | 25. Context Read & Bind Mount | v4.0 | 4/4 | Complete    | 2026-04-14 |
 | 26. Stop Hook & Mandatory Reporting | v4.0 | 0/0 | Not started | - |
+| 27. v2.0 Verification Backfill | v2.0 gap | 0/0 | Not started | - |
+| 28. OPS-01 docs_repo Backfill Fix | v2.0 gap | 0/0 | Not started | - |
+| 29. PROF-02 create_profile Repo Prompt | v2.0 gap | 0/0 | Not started | - |
