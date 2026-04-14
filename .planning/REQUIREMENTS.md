@@ -10,7 +10,7 @@ Requirements for headless agent mode. Each maps to roadmap phases.
 ### Profiles
 
 - [ ] **PROF-01**: User can create a profile with its own whitelist.json, .env, and workspace directory
-- [ ] **PROF-02**: User can map a GitHub repository URL to a profile so events route correctly
+- [x] **PROF-02**: User can map a GitHub repository URL to a profile so events route correctly
 - [ ] **PROF-03**: Profile resolution fails closed -- missing or invalid profile blocks execution, never falls back to default
 
 ### Headless Execution
@@ -79,7 +79,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | PROF-01 | Phase 12 → Phase 27 (verif backfill) | Pending |
-| PROF-02 | Phase 12 → Phase 29 (UX fix) | Pending |
+| PROF-02 | Phase 12 → Phase 29 (UX fix) | Complete |
 | PROF-03 | Phase 12 → Phase 27 (verif backfill) | Pending |
 | HEAD-01 | Phase 13 | Complete |
 | HEAD-02 | Phase 13 | Complete |

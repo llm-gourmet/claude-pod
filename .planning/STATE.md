@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: macOS Support
-status: verifying
-stopped_at: Completed 28-01-PLAN.md
-last_updated: "2026-04-14T11:54:18.010Z"
+status: executing
+stopped_at: Completed 29-01-PLAN.md
+last_updated: "2026-04-14T12:12:09.041Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 14
   completed_phases: 12
-  total_plans: 40
-  completed_plans: 40
+  total_plans: 42
+  completed_plans: 41
   percent: 88
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** No secret ever leaves the isolated environment uncontrolled -- every outbound call is validated, every secret in LLM context is redacted, and Claude Code cannot bypass the security layers.
-**Current focus:** Phase 28 — ops01-docs-repo-fix
+**Current focus:** Phase 29 — prof02-repo-prompt
 
 ## Current Position
 
-Phase: 28 (ops01-docs-repo-fix) — EXECUTING
-Plan: 1 of 1
-Status: Phase complete — ready for verification
+Phase: 29 (prof02-repo-prompt) — EXECUTING
+Plan: 2 of 2
+Status: Ready to execute
 Last activity: 2026-04-14
 
 Progress: [█████████░] 88% (15/17 plans)
@@ -78,6 +78,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 25 P03 | 2min | 2 tasks | 1 files |
 | Phase 25 P04 | 5 | 1 tasks | 1 files |
 | Phase 28-ops01-docs-repo-fix P01 | 5min | 2 tasks | 2 files |
+| Phase 29 P01 | 1min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -139,6 +140,7 @@ Recent decisions affecting current work:
 - [Phase 25]: 25-04: exec guard uses 'true' as cheapest liveness probe in test_agent_docs_no_git_dir_in_container to convert silent false-positive into loud FAIL
 - [Phase 28-ops01-docs-repo-fix]: OPS-01 fix: ordering locked to new-first (.docs_repo // .report_repo // empty) to mirror validate_docs_binding:127 and be forward-compat with legacy removal
 - [Phase 28-ops01-docs-repo-fix]: REPORT_PATH_PREFIX deliberately unchanged -- no .docs_path_prefix alias exists in Phase 23 schema
+- [Phase 29]: 29-01: Wave 0 RED tests added using piped stdin into sourced create_profile to exercise real prompt flow (Nyquist guard against helper-only fix)
 
 ### Pending Todos
 
@@ -165,5 +167,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
-Stopped at: Completed 28-01-PLAN.md
+Stopped at: Completed 29-01-PLAN.md
 Resume file: None
