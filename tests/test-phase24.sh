@@ -95,7 +95,10 @@ _count_commits() {
 }
 
 # Helper: install bundle fixture profile, seed bare repo, run init-docs
-# to create INDEX.md, and return the bare-repo path.
+# to create INDEX.md. Sets global SETUP_BARE_REPO with the bare-repo path.
+# NOTE: must NOT be called via command substitution -- side effects (source_cs,
+# load_profile_config) must propagate to the caller shell so publish_docs_bundle
+# and the loaded globals (DOCS_REPO, PROFILE, etc) are visible to the test body.
 _setup_bundle_profile() {
   local profile_name="$1"
   install_fixture "profile-24-bundle" "$profile_name"
@@ -103,10 +106,13 @@ _setup_bundle_profile() {
   bare_repo=$(_setup_bare_repo)
   _patch_docs_repo "$profile_name" "$bare_repo"
   source_cs
+  # In the real CLI flow, PROFILE is set by arg parsing before load_profile_config
+  # runs. The test harness bypasses arg parsing, so set it explicitly here.
+  export PROFILE="$profile_name"
   load_profile_config "$profile_name"
   # Seed projects/<slug>/reports/INDEX.md by running init-docs once.
   do_profile_init_docs "$profile_name" 2>/dev/null || return 1
-  echo "$bare_repo"
+  SETUP_BARE_REPO="$bare_repo"
 }
 
 # =========================================================================
@@ -179,7 +185,8 @@ test_sanitize_markdown_file() {
 # =========================================================================
 
 test_bundle_path_layout() {
-  local bare; bare=$(_setup_bundle_profile "bundle-layout") || return 1
+  _setup_bundle_profile "bundle-layout" || return 1
+  local bare="$SETUP_BARE_REPO"
   declare -F publish_docs_bundle >/dev/null || return 1
   publish_docs_bundle "$PROJECT_DIR/tests/fixtures/bundles/valid-body.md" \
     "sess-layout-001" "summary layout" "manual-layout" 2>/dev/null || return 1
@@ -193,7 +200,8 @@ test_bundle_path_layout() {
 }
 
 test_bundle_never_overwrites() {
-  local bare; bare=$(_setup_bundle_profile "bundle-overwrite") || return 1
+  _setup_bundle_profile "bundle-overwrite" || return 1
+  local bare="$SETUP_BARE_REPO"
   publish_docs_bundle "$PROJECT_DIR/tests/fixtures/bundles/valid-body.md" \
     "sess-dup" "first" "manual-1" 2>/dev/null || return 1
   if publish_docs_bundle "$PROJECT_DIR/tests/fixtures/bundles/valid-body.md" \
@@ -209,7 +217,8 @@ test_bundle_never_overwrites() {
 # =========================================================================
 
 test_bundle_updates_index() {
-  local bare; bare=$(_setup_bundle_profile "bundle-index") || return 1
+  _setup_bundle_profile "bundle-index" || return 1
+  local bare="$SETUP_BARE_REPO"
   publish_docs_bundle "$PROJECT_DIR/tests/fixtures/bundles/valid-body.md" \
     "sess-index-001" "summary one" "manual-i1" 2>/dev/null || return 1
 
@@ -227,7 +236,8 @@ test_bundle_updates_index() {
 # =========================================================================
 
 test_bundle_single_commit() {
-  local bare; bare=$(_setup_bundle_profile "bundle-single") || return 1
+  _setup_bundle_profile "bundle-single" || return 1
+  local bare="$SETUP_BARE_REPO"
   local before; before=$(_count_commits "$bare")
   publish_docs_bundle "$PROJECT_DIR/tests/fixtures/bundles/valid-body.md" \
     "sess-single-001" "summary single" "manual-s1" 2>/dev/null || return 1
@@ -237,7 +247,8 @@ test_bundle_single_commit() {
 }
 
 test_bundle_failure_clean_tree() {
-  local bare; bare=$(_setup_bundle_profile "bundle-fail") || return 1
+  _setup_bundle_profile "bundle-fail" || return 1
+  local bare="$SETUP_BARE_REPO"
   local before; before=$(_count_commits "$bare")
   if publish_docs_bundle "$PROJECT_DIR/tests/fixtures/bundles/missing-section-body.md" \
       "sess-fail-001" "summary fail" "manual-f1" 2>/dev/null; then
@@ -253,7 +264,8 @@ test_bundle_failure_clean_tree() {
 # =========================================================================
 
 test_bundle_redacts_secrets() {
-  local bare; bare=$(_setup_bundle_profile "bundle-redact") || return 1
+  _setup_bundle_profile "bundle-redact" || return 1
+  local bare="$SETUP_BARE_REPO"
   publish_docs_bundle "$PROJECT_DIR/tests/fixtures/bundles/secret-body.md" \
     "sess-redact-001" "summary redact" "manual-r1" 2>/dev/null || return 1
 
@@ -275,7 +287,8 @@ test_bundle_redacts_secrets() {
 # =========================================================================
 
 test_bundle_sanitizes_external_image() {
-  local bare; bare=$(_setup_bundle_profile "bundle-sanitize") || return 1
+  _setup_bundle_profile "bundle-sanitize" || return 1
+  local bare="$SETUP_BARE_REPO"
   publish_docs_bundle "$PROJECT_DIR/tests/fixtures/bundles/exfil-body.md" \
     "sess-exfil-001" "summary exfil" "manual-e1" 2>/dev/null || return 1
 
@@ -296,7 +309,8 @@ test_bundle_sanitizes_external_image() {
 # =========================================================================
 
 test_bundle_push_rebase_retry() {
-  local bare; bare=$(_setup_bundle_profile "bundle-rebase") || return 1
+  _setup_bundle_profile "bundle-rebase" || return 1
+  local bare="$SETUP_BARE_REPO"
   publish_docs_bundle "$PROJECT_DIR/tests/fixtures/bundles/valid-body.md" \
     "sess-rebase-A" "summary A" "manual-rA" 2>/dev/null || return 1
   local scratch; scratch=$(mktemp -d "$TEST_TMPDIR/scratch-foreign-XXXXXXXX")
@@ -311,7 +325,8 @@ test_bundle_push_rebase_retry() {
 }
 
 test_bundle_concurrent_race() {
-  local bare; bare=$(_setup_bundle_profile "bundle-race") || return 1
+  _setup_bundle_profile "bundle-race" || return 1
+  local bare="$SETUP_BARE_REPO"
   local rcA rcB
   ( PROFILE=bundle-race load_profile_config bundle-race; \
     publish_docs_bundle "$PROJECT_DIR/tests/fixtures/bundles/valid-body.md" \

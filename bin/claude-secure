@@ -1613,6 +1613,220 @@ Append-only findings.
   return 0
 }
 
+# Phase 24 DOCS-02/03 + RPT-01..05: publish a rendered agent report + INDEX.md
+# update as exactly one atomic git commit, through the existing host-side
+# secret redaction pipeline + a markdown sanitizer that strips exfil beacons.
+#
+# HOST-SIDE FUNCTION. Runs in host bash, NEVER inside any container. Requires
+# DOCS_REPO_TOKEN in the host environment (Phase 23 BIND-02 host-only PAT
+# projection). The container cannot reach this code path.
+#
+# Composition (the entire function body is composed of pre-existing primitives):
+#   - verify_bundle_sections   (Plan 02; RPT-01)
+#   - redact_report_file       (bin/claude-secure:1039; Phase 16 D-15; RPT-03)
+#   - sanitize_markdown_file   (Plan 02; RPT-04)
+#   - push_with_retry          (bin/claude-secure:1174; Phase 17 3-attempt rebase; RPT-05)
+#
+# Order discipline (24-RESEARCH.md Pitfall 1): redact MUST run BEFORE sanitize.
+# Reverse order would let secrets hidden inside HTML comments escape the
+# redactor (the sanitizer strips the comment, then redactor sees no match).
+#
+# Idempotency: NOT idempotent (24-RESEARCH.md Pitfall 3). Two publishes with
+# the same session_id is a caller bug; the never-overwrite guard returns 1.
+#
+# Args:
+#   $1 = body_path     (path to rendered report markdown — Phase 26 Stop hook outputs this)
+#   $2 = session_id    (Claude session UUID; MUST be unique per publish)
+#   $3 = summary_line  (one-line summary for INDEX.md; newlines are collapsed, pipes escaped)
+#   $4 = delivery_id   (optional; defaults to "manual-$$"; appears in commit message)
+#
+# Returns:
+#   0 on success (stdout last line = report URL for HTTPS, or rel path for file://)
+#   1 on any failure (validation, clone, redact-readable check, never-overwrite, commit, push)
+publish_docs_bundle() {
+  local body_path="$1"
+  local session_id="$2"
+  local summary_line="$3"
+  local delivery_id="${4:-manual-$$}"
+
+  # Precondition guards (RPT-01 + arg validation)
+  if [ -z "$body_path" ] || [ ! -f "$body_path" ]; then
+    echo "ERROR: publish_docs_bundle: body path missing or not a file: $body_path" >&2
+    return 1
+  fi
+  if [ -z "$session_id" ]; then
+    echo "ERROR: publish_docs_bundle: session_id is required" >&2
+    return 1
+  fi
+  if ! verify_bundle_sections "$body_path"; then
+    return 1
+  fi
+
+  # Profile-driven config must already be loaded by the caller (load_profile_config).
+  if [ -z "${PROFILE:-}" ]; then
+    echo "ERROR: publish_docs_bundle: PROFILE not set" >&2
+    return 1
+  fi
+  if [ -z "${DOCS_REPO:-}" ]; then
+    echo "ERROR: publish_docs_bundle: profile '$PROFILE' has no docs_repo configured" >&2
+    return 1
+  fi
+  if [ -z "${DOCS_REPO_TOKEN:-}" ]; then
+    echo "ERROR: publish_docs_bundle: DOCS_REPO_TOKEN missing from profile env" >&2
+    return 1
+  fi
+  if [ -z "${DOCS_PROJECT_DIR:-}" ]; then
+    echo "ERROR: publish_docs_bundle: docs_project_dir missing from profile" >&2
+    return 1
+  fi
+
+  local _env_file="$CONFIG_DIR/profiles/$PROFILE/.env"
+  if [ ! -r "$_env_file" ]; then
+    echo "ERROR: publish_docs_bundle: cannot read $_env_file for redaction" >&2
+    return 1
+  fi
+
+  # Ephemeral clone dir (mirrors publish_report:1262 pattern). spawn_cleanup
+  # wipes it on process exit so partial state never leaks.
+  local clone_dir
+  clone_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-publish-XXXXXXXX")
+  _CLEANUP_FILES+=("$clone_dir")
+
+  # Askpass helper (mirrors publish_report:1267 / do_profile_init_docs:1380).
+  local askpass="$clone_dir/.askpass.sh"
+  cat > "$askpass" <<'ASKPASS'
+#!/bin/sh
+case "$1" in
+  Username*) printf 'x-access-token\n' ;;
+  Password*) printf '%s\n' "$GIT_ASKPASS_PAT" ;;
+esac
+ASKPASS
+  chmod 700 "$askpass"
+
+  # Bounded clone with PAT scrub on stderr (mirrors publish_report:1280).
+  local pat="$DOCS_REPO_TOKEN"
+  local clone_err="$clone_dir/clone.err"
+  if ! LC_ALL=C \
+       GIT_ASKPASS="$askpass" \
+       GIT_ASKPASS_PAT="$pat" \
+       GIT_TERMINAL_PROMPT=0 \
+       GIT_HTTP_LOW_SPEED_LIMIT=1 \
+       GIT_HTTP_LOW_SPEED_TIME=30 \
+       timeout 60 \
+       git -c credential.helper= -c credential.helper='' \
+           -c core.autocrlf=false \
+           clone --depth 1 --branch "$DOCS_BRANCH" --quiet \
+                 "$DOCS_REPO" "$clone_dir/repo" 2>"$clone_err"; then
+    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$clone_err" >&2
+    return 1
+  fi
+
+  # Concurrency fix: INDEX.md is append-only, so concurrent publishers both
+  # append their own summary line. A plain rebase in push_with_retry collides
+  # on the "last line" context, producing a merge conflict. Enable git's
+  # builtin "union" merge driver for INDEX.md via clone-local gitattributes
+  # (not committed to the repo) so concurrent rebases auto-merge by keeping
+  # BOTH sets of appended lines. This is exactly what the union driver does:
+  # take every line from every side of the merge.
+  mkdir -p "$clone_dir/repo/.git/info"
+  printf '%s/reports/INDEX.md merge=union\n' "$DOCS_PROJECT_DIR" \
+    >> "$clone_dir/repo/.git/info/attributes"
+
+  # Clone-local identity so push_with_retry's rebase path (which replays our
+  # commit via git-rebase, not a fresh commit with GIT_AUTHOR_* env vars) has
+  # a valid committer identity. Without this, a concurrent-push retry dies
+  # with "empty ident name not allowed" during rebase replay.
+  git -C "$clone_dir/repo" config user.email "claude-secure@localhost"
+  git -C "$clone_dir/repo" config user.name  "claude-secure"
+
+  # DOCS-02: path construction + never-overwrite guard.
+  local year month day
+  year=$(date -u +%Y)
+  month=$(date -u +%m)
+  day=$(date -u +%Y-%m-%d)
+  local rel_report_path="${DOCS_PROJECT_DIR}/reports/${year}/${month}/${day}-${session_id}.md"
+  local abs_report_path="$clone_dir/repo/$rel_report_path"
+  if [ -e "$abs_report_path" ]; then
+    echo "ERROR: report already exists at $rel_report_path -- refusing to overwrite" >&2
+    echo "       (if this is a replay, use a different session-id)" >&2
+    return 1
+  fi
+  if ! mkdir -p "$(dirname "$abs_report_path")"; then
+    echo "ERROR: cannot create report directory" >&2
+    return 1
+  fi
+  if ! cp "$body_path" "$abs_report_path"; then
+    echo "ERROR: cannot copy body to $abs_report_path" >&2
+    return 1
+  fi
+
+  # DOCS-03: append summary line to INDEX.md. The file MUST already exist
+  # from a prior `claude-secure profile init-docs` run (Phase 23).
+  local rel_index_path="${DOCS_PROJECT_DIR}/reports/INDEX.md"
+  local abs_index_path="$clone_dir/repo/$rel_index_path"
+  if [ ! -f "$abs_index_path" ]; then
+    echo "ERROR: INDEX.md not found at $rel_index_path" >&2
+    echo "       Run 'claude-secure profile init-docs --profile $PROFILE' first." >&2
+    return 1
+  fi
+
+  local ts_iso safe_summary
+  ts_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  # Pipe-escape (table column delimiter) and newline-collapse the summary.
+  safe_summary="${summary_line//|/\\|}"
+  safe_summary="${safe_summary//$'\n'/ }"
+  printf '| %s | %s | %s |\n' "$ts_iso" "$session_id" "$safe_summary" >> "$abs_index_path"
+
+  # RPT-03 redact THEN RPT-04 sanitize. Order matters (24-RESEARCH.md Pitfall 1).
+  local f
+  for f in "$abs_report_path" "$abs_index_path"; do
+    if ! redact_report_file "$f" "$_env_file"; then
+      echo "ERROR: redaction failed for $f" >&2
+      return 1
+    fi
+    if ! sanitize_markdown_file "$f"; then
+      echo "ERROR: sanitization failed for $f" >&2
+      return 1
+    fi
+  done
+
+  # RPT-02: stage both files in one git add.
+  if ! git -C "$clone_dir/repo" -c core.autocrlf=false add "$rel_report_path" "$rel_index_path"; then
+    echo "ERROR: git add failed" >&2
+    return 1
+  fi
+  # NOTE: NO `diff --cached --quiet` gate here (24-RESEARCH.md Pitfall 3).
+  # Phase 24 is not idempotent. The never-overwrite guard + unique session-id
+  # in the INDEX.md row guarantee a non-empty diff for legitimate calls.
+
+  # RPT-02: single atomic commit. PAT scrub on stderr.
+  local commit_msg="report: ${session_id} (${delivery_id})"
+  local commit_err="$clone_dir/commit.err"
+  if ! LC_ALL=C \
+       GIT_AUTHOR_NAME="claude-secure" \
+       GIT_AUTHOR_EMAIL="claude-secure@localhost" \
+       GIT_COMMITTER_NAME="claude-secure" \
+       GIT_COMMITTER_EMAIL="claude-secure@localhost" \
+       git -C "$clone_dir/repo" -c core.autocrlf=false \
+           commit -q -m "$commit_msg" 2>"$commit_err"; then
+    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$commit_err" >&2
+    return 1
+  fi
+
+  # RPT-05: push via Phase 17 3-attempt rebase loop. push_with_retry reads
+  # REPORT_REPO_TOKEN, which Phase 23 resolve_docs_alias back-filled from
+  # DOCS_REPO_TOKEN, so no extra wiring is needed here.
+  if ! push_with_retry "$clone_dir" "$DOCS_BRANCH"; then
+    return 1
+  fi
+
+  # Emit report URL on stdout (mirrors publish_report:1333). For file://
+  # remotes the "blob" URL is still useful as a stable path.
+  local url_base="${DOCS_REPO%.git}"
+  printf '%s/blob/%s/%s\n' "$url_base" "$DOCS_BRANCH" "$rel_report_path"
+  return 0
+}
+
 # Phase 16: best-effort audit writer for early-return spawn_error paths.
 # Called from do_spawn precondition checks before delivery_id/event_type
 # are known. Uses synthetic manual-<uuid> and "unknown" event_type.
