@@ -171,7 +171,7 @@
   4. The Stop hook's `stop_hook_active` guard prevents recursive re-prompting: a test that seeds a broken report template confirms the hook re-prompts once, then yields without looping, even if the second attempt still fails
 **Plans**: 4 plans
   - [ ] 26-01-PLAN.md — Wave 0: tests/test-phase26.sh RED harness + fixtures + test-map.json (SPOOL-01/02/03 stubs)
-  - [ ] 26-02-PLAN.md — Wave 1: claude/hooks/stop-hook.sh + claude/settings.json Stop entry (SPOOL-01, SPOOL-02)
+  - [x] 26-02-PLAN.md — Wave 1: claude/hooks/stop-hook.sh + claude/settings.json Stop entry (SPOOL-01, SPOOL-02) — completed 2026-04-14
   - [ ] 26-03-PLAN.md — Wave 2: run_spool_shipper family + do_spawn and interactive call sites (SPOOL-03)
   - [ ] 26-04-PLAN.md — Wave 3: stale-spool drain at spawn preamble + README Phase 26 section (SPOOL-01/03 edge case)
 **Research flag resolved**: Stop hook API field names verified via code.claude.com/docs/en/hooks — `stop_hook_active` guard, nested `{hooks:[...]}` settings.json form, block/approve JSON output schema all HIGH confidence (see 26-RESEARCH.md).

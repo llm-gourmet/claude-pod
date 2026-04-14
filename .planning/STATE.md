@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-04-11)
 
 ## Current Position
 
-Phase: 26 (stop-hook-mandatory-reporting) — DISCUSSING
-Plan: 0 of TBD
-Status: Phase 29 complete (UAT passed 2026-04-14) — ready to discuss Phase 26
+Phase: 26 (stop-hook-mandatory-reporting)
+Plan: 2 of 4 complete
+Status: Plan 02 complete — stop-hook.sh + settings.json registration done; Plans 03/04 pending
 Last activity: 2026-04-14
 
 Progress: [█████████░] 88% (15/17 plans)
@@ -80,6 +80,7 @@ Progress: [█████████░] 88% (15/17 plans)
 | Phase 28-ops01-docs-repo-fix P01 | 5min | 2 tasks | 2 files |
 | Phase 29 P01 | 1min | 1 tasks | 1 files |
 | Phase 29-prof02-repo-prompt P02 | 5min | 1 tasks | 2 files |
+| Phase 26 P02 | 5min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -144,6 +145,9 @@ Recent decisions affecting current work:
 - [Phase 29]: 29-01: Wave 0 RED tests added using piped stdin into sourced create_profile to exercise real prompt flow (Nyquist guard against helper-only fix)
 - [Phase 29-prof02-repo-prompt]: 29-02: create_profile repo regex ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ with warn-don't-block save-verbatim policy; empty input omits .repo key (back-compat)
 - [Phase 29-prof02-repo-prompt]: 29-02: Rule 3 deviation — exported APP_DIR in tests/test-phase12.sh _source_functions to unblock silent unbound-var failures masking the new PROF-02d/e/f assertions
+- [Phase 26]: Plan 26-02: TEST_SPOOL_FILE_OVERRIDE overrides SPOOL_FILE in stop-hook.sh — allows tests to use temp paths without /var/log mount
+- [Phase 26]: Plan 26-02: stop_hook_active guard uses jq // false coercion + 2>/dev/null || echo false fallback (Pitfall 6 malformed-JSON defense)
+- [Phase 26]: Plan 26-02: Stop entry in settings.json has NO matcher field — Stop hooks do not support matchers per official Claude Code docs
 
 ### Pending Todos
 
@@ -170,5 +174,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
-Stopped at: Completed 29-02-PLAN.md
+Stopped at: Completed 26-02-PLAN.md (stop-hook.sh + settings.json)
 Resume file: None
