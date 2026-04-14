@@ -51,7 +51,7 @@
 - [x] **Phase 23: Profile ↔ Doc Repo Binding** - Profile schema holds doc repo coordinates and host-only PAT; `init-docs` bootstraps per-project directory layout (completed 2026-04-13)
 - [x] **Phase 24: Multi-File Publish Bundle** - Host-side `publish_docs_bundle` writes standardized reports + INDEX.md as single atomic commit through existing redaction pipeline (completed 2026-04-14)
 - [x] **Phase 25: Context Read & Read-Only Bind Mount** - Sparse shallow clone of doc repo bind-mounted read-only at `/agent-docs/` so agents can read project context without push access (completed 2026-04-14; gap-closure plan 25-04 addresses Phase 25 UAT test-harness bugs on WSL2)
-- [ ] **Phase 26: Stop Hook & Mandatory Reporting** - Stop hook verifies local spool (no network); host-side async shipper pushes reports with jittered backoff, never blocking Claude exit
+- [x] **Phase 26: Stop Hook & Mandatory Reporting** - Stop hook verifies local spool (no network); host-side async shipper pushes reports with jittered backoff, never blocking Claude exit (completed 2026-04-14)
 
 ## Phase Details
 
@@ -174,7 +174,7 @@
   - [x] 26-02-PLAN.md — Wave 1: claude/hooks/stop-hook.sh + claude/settings.json Stop entry (SPOOL-01, SPOOL-02) — completed 2026-04-14
 
   - [x] 26-03-PLAN.md — Wave 2: run_spool_shipper family + do_spawn and interactive call sites (SPOOL-03)
-  - [ ] 26-04-PLAN.md — Wave 3: stale-spool drain at spawn preamble + README Phase 26 section (SPOOL-01/03 edge case)
+  - [x] 26-04-PLAN.md — Wave 3: stale-spool drain at spawn preamble + README Phase 26 section (SPOOL-01/03 edge case)
 **Research flag resolved**: Stop hook API field names verified via code.claude.com/docs/en/hooks — `stop_hook_active` guard, nested `{hooks:[...]}` settings.json form, block/approve JSON output schema all HIGH confidence (see 26-RESEARCH.md).
 
 ### v2.0 Gap Closure (Audit Follow-Up)
@@ -238,7 +238,7 @@
 | 23. Profile ↔ Doc Repo Binding | v4.0 | 3/3 | Complete   | 2026-04-13 |
 | 24. Multi-File Publish Bundle | v4.0 | 3/3 | Complete   | 2026-04-14 |
 | 25. Context Read & Bind Mount | v4.0 | 4/4 | Complete    | 2026-04-14 |
-| 26. Stop Hook & Mandatory Reporting | v4.0 | 3/4 | In Progress|  |
+| 26. Stop Hook & Mandatory Reporting | v4.0 | 4/4 | Complete   | 2026-04-14 |
 | 27. v2.0 Verification Backfill | v2.0 gap | 0/0 | Not started | - |
 | 28. OPS-01 docs_repo Backfill Fix | v2.0 gap | 1/1 | Complete   | 2026-04-14 |
 | 29. PROF-02 create_profile Repo Prompt | v2.0 gap | 2/2 | Complete   | 2026-04-14 |
