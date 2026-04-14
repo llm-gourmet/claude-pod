@@ -224,10 +224,10 @@ Requirements for the agent documentation layer. Each maps to roadmap phases.
 
 ### Outbound Reporting (RPT)
 
-- [ ] **RPT-01**: Every agent execution produces a report using the standardized template: Goal, Where Worked, What Changed (thematic), What Failed, How to Test, Future Findings
+- [x] **RPT-01**: Every agent execution produces a report using the standardized template: Goal, Where Worked, What Changed (thematic), What Failed, How to Test, Future Findings
 - [ ] **RPT-02**: Report and INDEX.md update are committed as a single atomic git commit — never a partial push
 - [ ] **RPT-03**: Every file staged for commit passes through the existing secret redaction pipeline before push
-- [ ] **RPT-04**: Every file staged for commit is sanitized to strip external image references, HTML comments, and raw HTML before commit (prevents markdown exfil beacons)
+- [x] **RPT-04**: Every file staged for commit is sanitized to strip external image references, HTML comments, and raw HTML before commit (prevents markdown exfil beacons)
 - [ ] **RPT-05**: Push uses `git push` over HTTPS, never force-push, with 3-attempt jittered retry on non-fast-forward
 
 ### Mandatory Enforcement (SPOOL)
@@ -255,10 +255,10 @@ Which phases cover which v4.0 requirements. Updated during roadmap creation.
 | DOCS-01 | Phase 23 | Complete |
 | DOCS-02 | Phase 24 | Pending |
 | DOCS-03 | Phase 24 | Pending |
-| RPT-01 | Phase 24 | Pending |
+| RPT-01 | Phase 24 | Complete |
 | RPT-02 | Phase 24 | Pending |
 | RPT-03 | Phase 24 | Pending |
-| RPT-04 | Phase 24 | Pending |
+| RPT-04 | Phase 24 | Complete |
 | RPT-05 | Phase 24 | Pending |
 | SPOOL-01 | Phase 26 | Pending |
 | SPOOL-02 | Phase 26 | Pending |
