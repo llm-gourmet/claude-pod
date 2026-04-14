@@ -4,13 +4,13 @@ milestone: v3.0
 milestone_name: macOS Support
 status: verifying
 stopped_at: Completed 27-01-PLAN.md
-last_updated: "2026-04-14T14:01:55.563Z"
+last_updated: "2026-04-14T18:47:12.620Z"
 last_activity: 2026-04-14
 progress:
-  total_phases: 9
-  completed_phases: 6
-  total_plans: 22
-  completed_plans: 22
+  total_phases: 15
+  completed_phases: 15
+  total_plans: 49
+  completed_plans: 49
   percent: 88
 ---
 
