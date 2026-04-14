@@ -238,7 +238,7 @@
 | 23. Profile ↔ Doc Repo Binding | v4.0 | 3/3 | Complete   | 2026-04-13 |
 | 24. Multi-File Publish Bundle | v4.0 | 3/3 | Complete   | 2026-04-14 |
 | 25. Context Read & Bind Mount | v4.0 | 4/4 | Complete    | 2026-04-14 |
-| 26. Stop Hook & Mandatory Reporting | v4.0 | 4/4 | Complete   | 2026-04-14 |
+| 26. Stop Hook & Mandatory Reporting | v4.0 | 4/4 | Complete    | 2026-04-14 |
 | 27. v2.0 Verification Backfill | v2.0 gap | 0/0 | Not started | - |
 | 28. OPS-01 docs_repo Backfill Fix | v2.0 gap | 1/1 | Complete   | 2026-04-14 |
 | 29. PROF-02 create_profile Repo Prompt | v2.0 gap | 2/2 | Complete   | 2026-04-14 |
