@@ -1625,6 +1625,132 @@ Append-only findings.
   return 0
 }
 
+# =============================================================================
+# Phase 26 SPOOL-03: fork-and-disown async shipper. Never blocks the spawn
+# return. Called from do_spawn (~line 2253) and interactive *) (~line 2850).
+#
+# Functions:
+#   run_spool_shipper        -- background fork entrypoint (called after spawn)
+#   run_spool_shipper_inline -- synchronous drain entrypoint (Plan 04 stale-drain)
+#   _spool_shipper_loop      -- shared retry body (3-attempt jittered backoff)
+#   _spool_audit_write       -- audit JSONL writer for spool events (separate file)
+#
+# Audit writes go to $LOG_DIR/${LOG_PREFIX}spool-audit.jsonl (NOT executions.jsonl)
+# to avoid O_APPEND PIPE_BUF collision with do_spawn's concurrent writes (Pitfall 4).
+# =============================================================================
+
+# Phase 26 SPOOL-03: background fork entrypoint.
+# Forks _spool_shipper_loop to background with disown so spawn return is never
+# gated on shipper completion. Returns in < 100ms even when publish_docs_bundle
+# would take 5+ seconds.
+run_spool_shipper() {
+  local session_id="${1:-unknown}"
+  local spool_file="${LOG_DIR:-./logs}/spool.md"
+
+  # Test escape hatch (Rule 3 deviation pattern — see Phase 16 D-23 / CLAUDE_SECURE_FAKE_CLAUDE_STDOUT).
+  # CLAUDE_SECURE_SKIP_SPOOL_SHIPPER=1 suppresses the shipper for unit tests.
+  if [ "${CLAUDE_SECURE_SKIP_SPOOL_SHIPPER:-0}" = "1" ]; then
+    return 0
+  fi
+
+  # No spool = no report configured (D-05 silent skip).
+  [ -f "$spool_file" ] || return 0
+
+  # Fork to background. Both >/dev/null 2>&1 redirect AND disown are required:
+  #   - redirect: prevents interleave with the envelope emit that follows immediately
+  #   - disown: detaches child PID from the parent shell's job table so spawn_cleanup
+  #     trap does not reap the child before it finishes (Pitfall 2).
+  ( _spool_shipper_loop "$spool_file" "$session_id" >/dev/null 2>&1 ) & disown
+}
+
+# Phase 26 SPOOL-03 / D-07: synchronous drain entrypoint.
+# Runs _spool_shipper_loop in the current shell (blocking). Used by Plan 04's
+# stale-drain call site at spawn preamble to flush leftover spools from prior
+# crashed sessions before the new session starts.
+# Drain failures MUST NOT crash the caller — always returns 0 at the top level.
+run_spool_shipper_inline() {
+  local session_id="${1:-unknown}"
+  local spool_file="${LOG_DIR:-./logs}/spool.md"
+
+  [ -f "$spool_file" ] || return 0
+
+  # Run synchronously; ignore return value so callers never see a drain failure.
+  _spool_shipper_loop "$spool_file" "$session_id" || true
+  return 0
+}
+
+# Phase 26 SPOOL-03: shared retry body.
+# 3-attempt loop with jittered backoff (0s, 5±2s, 10±2s).
+# On success: writes pushed audit entry, deletes spool file, returns 0.
+# After 3 failures: writes push_failed audit entry, leaves spool.md for next
+# spawn's inline drain (D-07), returns 1.
+_spool_shipper_loop() {
+  local spool_file="$1" session_id="$2"
+  local attempt=0 max_attempts=3
+  local summary="Phase 26 spool: ${session_id}"
+  local delivery_id="${session_id}"
+  local rc=0 report_url=""
+  local _tmpout
+
+  while [ "$attempt" -lt "$max_attempts" ]; do
+    # Jittered backoff: attempt 0 → 0s, attempt 1 → 5±2s, attempt 2 → 10±2s
+    # Computed BEFORE incrementing so attempt 0 gets 0s delay.
+    if [ "$attempt" -gt 0 ]; then
+      local base=$(( attempt * 5 ))
+      local jitter=$(( (RANDOM % 5) - 2 ))
+      local delay=$(( base + jitter ))
+      [ "$delay" -lt 0 ] && delay=0
+      sleep "$delay"
+    fi
+
+    attempt=$(( attempt + 1 ))
+
+    # Capture publish output safely — use a tempfile so $? reflects
+    # publish_docs_bundle exit code, not tail's exit code (pipefail caveat).
+    _tmpout="$(mktemp 2>/dev/null || echo "/tmp/spool-shipper-$$")"
+    if publish_docs_bundle "$spool_file" "$session_id" "$summary" "$delivery_id" >"$_tmpout" 2>&1; then
+      report_url="$(tail -1 "$_tmpout" 2>/dev/null || true)"
+      rm -f "$_tmpout" 2>/dev/null || true
+      _spool_audit_write "pushed" "$attempt" "$report_url" ""
+      rm -f "$spool_file"
+      return 0
+    fi
+    rc=$?
+    rm -f "$_tmpout" 2>/dev/null || true
+  done
+
+  _spool_audit_write "push_failed" "$attempt" "" "publish_docs_bundle rc=$rc (attempts: ${max_attempts})"
+  # Leave spool.md in place for the next spawn's inline drain (D-07).
+  return 1
+}
+
+# Phase 26 SPOOL-03: audit JSONL writer for spool events.
+# Writes to $LOG_DIR/${LOG_PREFIX}spool-audit.jsonl (SEPARATE from executions.jsonl
+# to avoid O_APPEND PIPE_BUF collision — Pitfall 4).
+# Always silent on write failures (|| true) — audit writes must not crash the shipper.
+_spool_audit_write() {
+  local status="$1" attempt="$2" report_url="$3" error="$4"
+  local audit_file="${LOG_DIR:-./logs}/${LOG_PREFIX:-}spool-audit.jsonl"
+  local ts
+  mkdir -p "${LOG_DIR:-./logs}" 2>/dev/null || true
+  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "unknown")"
+  jq -cn \
+    --arg ts "$ts" \
+    --arg profile "${PROFILE:-}" \
+    --arg status "$status" \
+    --arg report_url "$report_url" \
+    --arg error "${error:0:200}" \
+    --argjson attempt "$attempt" \
+    '{
+      ts: $ts,
+      profile: $profile,
+      spool_status: $status,
+      attempt: $attempt,
+      report_url: (if ($report_url | length) > 0 then $report_url else null end),
+      error: (if ($error | length) > 0 then $error else null end)
+    }' >> "$audit_file" 2>/dev/null || true
+}
+
 # Phase 24 DOCS-02/03 + RPT-01..05: publish a rendered agent report + INDEX.md
 # update as exactly one atomic git commit, through the existing host-side
 # secret redaction pipeline + a markdown sanitizer that strips exfil beacons.

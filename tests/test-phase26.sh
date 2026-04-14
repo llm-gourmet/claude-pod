@@ -230,33 +230,143 @@ test_settings_json_has_stop_hook() {
 
 test_run_spool_shipper_function_exists() {
   # FAILS until Plan 03 defines run_spool_shipper in bin/claude-secure
-  grep -q 'run_spool_shipper()' "$PROJECT_DIR/bin/claude-secure" || return 1
+  grep -q '^run_spool_shipper()' "$PROJECT_DIR/bin/claude-secure" || return 1
+  grep -q '^run_spool_shipper_inline()' "$PROJECT_DIR/bin/claude-secure" || return 1
+  grep -q '^_spool_shipper_loop()' "$PROJECT_DIR/bin/claude-secure" || return 1
+  grep -q '^_spool_audit_write()' "$PROJECT_DIR/bin/claude-secure" || return 1
+  grep -q 'CLAUDE_SECURE_SKIP_SPOOL_SHIPPER' "$PROJECT_DIR/bin/claude-secure" || return 1
+  grep -q '& disown' "$PROJECT_DIR/bin/claude-secure" || return 1
+  grep -q 'spool-audit.jsonl' "$PROJECT_DIR/bin/claude-secure" || return 1
   return 0
 }
 
 test_shipper_returns_immediately() {
-  # FAILS until Plan 03 implements run_spool_shipper with background fork
-  # This is tested via timing: shipper with a slow stub must return fast
-  grep -q 'run_spool_shipper()' "$PROJECT_DIR/bin/claude-secure" || return 1
-  return 1  # Sentinel: NOT IMPLEMENTED — Plan 03 must implement timing test
+  # Tests that run_spool_shipper returns in < 2s even when the shipper loop
+  # would take longer (background fork + disown must detach immediately).
+  local spool_file="$TEST_TMPDIR/spool-timing-$$.md"
+  echo "## test spool" > "$spool_file"
+  export LOG_DIR="$TEST_TMPDIR"
+  export LOG_PREFIX="test26-timing-"
+  export PROFILE="test-profile"
+
+  # Source cs with a mock publish_docs_bundle that sleeps 5s (would block if not forked)
+  local result
+  result=$(
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    # Override after source so the background subshell inherits the slow mock
+    publish_docs_bundle() { sleep 5; echo "http://example.com/report"; return 0; }
+    local start end
+    start=$(date +%s%3N 2>/dev/null || date +%s)
+    run_spool_shipper "test-session-timing-$$"
+    end=$(date +%s%3N 2>/dev/null || date +%s)
+    echo "$start $end"
+  )
+  rm -f "$spool_file"
+
+  local start_ms end_ms elapsed_ms
+  start_ms=$(echo "$result" | awk '{print $1}')
+  end_ms=$(echo "$result" | awk '{print $2}')
+  # If milliseconds available (13-digit), use them; otherwise seconds (10-digit)
+  if [ "${#start_ms}" -ge 13 ]; then
+    elapsed_ms=$(( end_ms - start_ms ))
+  else
+    elapsed_ms=$(( (end_ms - start_ms) * 1000 ))
+  fi
+  # Must return in < 2000ms (background fork should be immediate)
+  [ "$elapsed_ms" -lt 2000 ] || return 1
+  return 0
 }
 
 test_shipper_deletes_spool_on_success() {
-  # FAILS until Plan 03 implements run_spool_shipper
-  grep -q 'run_spool_shipper()' "$PROJECT_DIR/bin/claude-secure" || return 1
-  return 1  # Sentinel: NOT IMPLEMENTED — Plan 03 must implement
+  # Tests that _spool_shipper_loop deletes spool.md when publish_docs_bundle succeeds
+  local spool_file="$TEST_TMPDIR/spool-delete-$$.md"
+  echo "## test spool" > "$spool_file"
+  export LOG_DIR="$TEST_TMPDIR"
+  export LOG_PREFIX="test26-delete-"
+  export PROFILE="test-profile"
+
+  (
+    # Source bin/claude-secure in library mode, then override publish_docs_bundle.
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    publish_docs_bundle() { echo "http://example.com/report"; return 0; }
+    _spool_shipper_loop "$spool_file" "test-session-delete-$$"
+  )
+
+  # Spool file must be deleted on success
+  [ ! -f "$spool_file" ] || { rm -f "$spool_file"; return 1; }
+
+  # Audit file must exist with pushed status
+  local audit_file="$TEST_TMPDIR/test26-delete-spool-audit.jsonl"
+  [ -f "$audit_file" ] || return 1
+  grep -q '"spool_status":"pushed"' "$audit_file" || return 1
+  return 0
 }
 
 test_shipper_logs_push_failed_with_attempt() {
-  # FAILS until Plan 03 implements _spool_audit_write in bin/claude-secure
-  grep -q '_spool_audit_write' "$PROJECT_DIR/bin/claude-secure" || return 1
-  return 1  # Sentinel: NOT IMPLEMENTED — Plan 03 must implement
+  # Tests that _spool_shipper_loop writes push_failed with attempt=3 after all retries fail
+  local spool_file="$TEST_TMPDIR/spool-fail-$$.md"
+  echo "## test spool" > "$spool_file"
+  export LOG_DIR="$TEST_TMPDIR"
+  export LOG_PREFIX="test26-fail-"
+  export PROFILE="test-profile"
+
+  (
+    # Source in library mode, then override to mock.
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    publish_docs_bundle() { return 1; }
+    # Override sleep to be a no-op so test runs fast (no 5s/10s wait)
+    sleep() { :; }
+    _spool_shipper_loop "$spool_file" "test-session-fail-$$"
+  )
+
+  # Spool file must be RETAINED on failure (for next spawn's drain)
+  [ -f "$spool_file" ] || return 1
+  rm -f "$spool_file"
+
+  # Audit file must have push_failed entry with attempt=3
+  local audit_file="$TEST_TMPDIR/test26-fail-spool-audit.jsonl"
+  [ -f "$audit_file" ] || return 1
+  grep -q '"spool_status":"push_failed"' "$audit_file" || return 1
+  grep -q '"attempt":3' "$audit_file" || return 1
+  return 0
 }
 
 test_shipper_publishes_malformed_best_effort() {
-  # FAILS until Plan 03 implements run_spool_shipper (D-04: publish even if malformed)
-  grep -q 'run_spool_shipper()' "$PROJECT_DIR/bin/claude-secure" || return 1
-  return 1  # Sentinel: NOT IMPLEMENTED — Plan 03 must implement
+  # Tests D-04: broken/malformed spool files must be published anyway (best-effort)
+  # The shipper must attempt publish even if verify_bundle_sections would fail.
+  # (publish_docs_bundle internally calls verify_bundle_sections and may return 1,
+  # but the shipper simply retries and audit-logs — it does not skip broken files.)
+  local spool_file="$TEST_TMPDIR/spool-malformed-$$.md"
+  # Write a spool with missing sections (malformed per verify_bundle_sections)
+  echo "# Malformed report — missing all required sections" > "$spool_file"
+  export LOG_DIR="$TEST_TMPDIR"
+  export LOG_PREFIX="test26-malformed-"
+  export PROFILE="test-profile"
+
+  (
+    # Source in library mode, then override publish_docs_bundle with mock that succeeds.
+    # D-04: best-effort — publish even if file is malformed (don't skip broken reports).
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    publish_docs_bundle() { echo "http://example.com/malformed-report"; return 0; }
+    _spool_shipper_loop "$spool_file" "test-session-malformed-$$"
+  )
+
+  # Spool must be deleted (publish succeeded)
+  [ ! -f "$spool_file" ] || { rm -f "$spool_file"; return 1; }
+
+  # Audit must show pushed
+  local audit_file="$TEST_TMPDIR/test26-malformed-spool-audit.jsonl"
+  [ -f "$audit_file" ] || return 1
+  grep -q '"spool_status":"pushed"' "$audit_file" || return 1
+  return 0
 }
 
 # =========================================================================
