@@ -224,7 +224,7 @@ emit_deprecation_warning() {
 }
 
 # Phase 23 BIND-03: resolve the doc-repo fields, preferring new names over
-# legacy. Exports DOCS_REPO, DOCS_BRANCH, DOCS_PROJECT_DIR, DOCS_MODE,
+# legacy. Exports DOCS_REPO, DOCS_BRANCH, DOCS_PROJECT_DIR,
 # DOCS_REPO_TOKEN in the caller's shell. Back-fills REPORT_REPO_TOKEN from
 # DOCS_REPO_TOKEN if only the new name is set (so Phase 16 push_with_retry
 # and publish_report -- which read REPORT_REPO_TOKEN directly -- keep working).
@@ -261,7 +261,6 @@ resolve_docs_alias() {
   fi
 
   DOCS_PROJECT_DIR=$(jq -r '.docs_project_dir // empty' "$pj" 2>/dev/null)
-  DOCS_MODE=$(jq -r '.docs_mode // "report_only"' "$pj" 2>/dev/null)
 
   # Token alias: prefer DOCS_REPO_TOKEN, fall back to REPORT_REPO_TOKEN.
   # Both names have already been sourced into the caller's shell (load_profile_config
@@ -284,7 +283,7 @@ resolve_docs_alias() {
     REPORT_BRANCH="$DOCS_BRANCH"
   fi
 
-  export DOCS_REPO DOCS_BRANCH DOCS_PROJECT_DIR DOCS_MODE DOCS_REPO_TOKEN
+  export DOCS_REPO DOCS_BRANCH DOCS_PROJECT_DIR DOCS_REPO_TOKEN
   export REPORT_REPO REPORT_BRANCH REPORT_REPO_TOKEN
 
   if [ "$deprecated" = "1" ]; then

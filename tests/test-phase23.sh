@@ -123,14 +123,13 @@ test_no_docs_fields_ok() {
 }
 
 test_docs_vars_exported() {
-  # After load_profile_config, DOCS_REPO/BRANCH/PROJECT_DIR/MODE must be exported
+  # After load_profile_config, DOCS_REPO/BRANCH/PROJECT_DIR must be exported
   install_fixture "profile-23-docs" "docs-vars"
   source_cs
   load_profile_config "docs-vars"
   [ "${DOCS_REPO:-}" = "https://github.com/owner/docs-test.git" ] || return 1
   [ "${DOCS_BRANCH:-}" = "main" ] || return 1
   [ "${DOCS_PROJECT_DIR:-}" = "projects/docs-test" ] || return 1
-  [ "${DOCS_MODE:-}" = "report_only" ] || return 1
   return 0
 }
 
