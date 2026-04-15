@@ -3,6 +3,5 @@
   "repo": "test/phase26",
   "docs_repo": "",
   "docs_branch": "main",
-  "docs_project_dir": "phase-26-spool",
-  "docs_mode": "report_only"
+  "docs_project_dir": "phase-26-spool"
 }
