@@ -297,6 +297,9 @@ create_profile() {
   local pdir="$CONFIG_DIR/profiles/$name"
   local tmpdir
   tmpdir=$(mktemp -d)
+  # Register with global cleanup trap so a failed setup_profile_auth (or any
+  # other abort before the atomic mv below) never leaves a half-built profile.
+  _CLEANUP_FILES+=("$tmpdir")
 
   echo "Creating profile '$name'..."
 
@@ -355,25 +358,52 @@ create_profile() {
 
 setup_profile_auth() {
   local dir="$1"
+  # Mirror install.sh setup_auth hardening: require TTY, validate non-empty,
+  # reject newline-tainted paste, write the .env in one grouped redirection.
+  if [ ! -t 0 ]; then
+    echo "ERROR: No TTY on stdin — cannot prompt for credentials." >&2
+    echo "ERROR: Run 'claude-secure --profile <name>' from an interactive terminal." >&2
+    return 1
+  fi
   echo "Choose authentication method:"
   echo "  1) OAuth token [recommended]"
   echo "  2) API key"
   read -rp "Choice [1]: " auth_choice
   auth_choice="${auth_choice:-1}"
+  local var_name value
   case "$auth_choice" in
     2)
-      read -rsp "API key: " key; echo ""
-      echo "ANTHROPIC_API_KEY=${key}" > "$dir/.env"
+      read -rsp "API key: " value; echo ""
+      if [ -z "$value" ]; then
+        echo "ERROR: API key was empty. Profile creation aborted — no .env written." >&2
+        return 1
+      fi
+      var_name="ANTHROPIC_API_KEY"
       ;;
     *)
       echo "Run 'claude setup-token' first to get your OAuth token."
-      read -rsp "OAuth token: " token; echo ""
-      echo "CLAUDE_CODE_OAUTH_TOKEN=${token}" > "$dir/.env"
+      read -rsp "OAuth token: " value; echo ""
+      if [ -z "$value" ]; then
+        echo "ERROR: OAuth token was empty. Profile creation aborted — no .env written." >&2
+        echo "ERROR: Get your token with: claude setup-token" >&2
+        return 1
+      fi
+      var_name="CLAUDE_CODE_OAUTH_TOKEN"
       ;;
   esac
-  echo "" >> "$dir/.env"
-  echo "# Add secrets below (must match env_var in whitelist.json)" >> "$dir/.env"
-  echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$dir/.env"
+  case "$value" in
+    *$'\n'*|*$'\r'*)
+      echo "ERROR: ${var_name} contains a newline or carriage return (paste buffer leakage?)." >&2
+      echo "ERROR: Profile creation aborted — no .env written." >&2
+      return 1
+      ;;
+  esac
+  {
+    printf '%s=%s\n' "$var_name" "$value"
+    printf '\n'
+    printf '# Add secrets below (must match env_var in whitelist.json)\n'
+    printf '# Example: GITHUB_TOKEN=ghp_your_token_here\n'
+  } > "$dir/.env"
   chmod 600 "$dir/.env"
 }
 
