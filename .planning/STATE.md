@@ -143,9 +143,10 @@ Recent decisions affecting current work:
 | 260411-mre | Add run-tests.sh script and document testing | 2026-04-11 | dbb11c5 | [260411-mre-add-run-tests-script-and-document-testin](./quick/260411-mre-add-run-tests-script-and-document-testin/) |
 | 260412-q2o | Fix install.sh CONFIG_DIR resolves to /root under sudo | 2026-04-12 | 2e1820a | [260412-q2o-fix-install-sh-config-dir-resolves-to-ro](./quick/260412-q2o-fix-install-sh-config-dir-resolves-to-ro/) |
 | 260412-w1y | Update README.md to document v2.0 features | 2026-04-12 | 5a8a9a5 | [260412-w1y-update-readme-md-to-document-v2-0-featur](./quick/260412-w1y-update-readme-md-to-document-v2-0-featur/) |
+| 260415-crq | take care of untracked and not staged changes | 2026-04-15 | 943c890 | [260415-crq-take-care-of-untracked-and-not-staged-ch](./quick/260415-crq-take-care-of-untracked-and-not-staged-ch/) |
 
 ## Session Continuity
 
-Last activity: 2026-04-12 - Completed quick task 260412-w1y: Update README.md to document v2.0 features
+Last activity: 2026-04-15 - Completed quick task 260415-crq: take care of untracked and not staged changes
 Stopped at: Completed 27-01-PLAN.md
 Resume file: None
