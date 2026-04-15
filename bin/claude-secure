@@ -2001,11 +2001,25 @@ fetch_docs_context() {
     return 0
   fi
 
+  # Phase 28 fix (pre-push test regression): if DOCS_PROJECT_DIR is empty,
+  # this is a legacy Phase 16 profile that uses report_repo for the result
+  # channel only. Phase 23's resolve_docs_alias back-filled DOCS_REPO from
+  # report_repo, but there is no docs_project_dir so the profile never opted
+  # into agent docs fetching. Treat as "no docs configured" and skip silently
+  # rather than fail-closed. Opting into docs requires an explicit
+  # docs_project_dir in profile.json.
+  if [ -z "${DOCS_PROJECT_DIR:-}" ]; then
+    echo "info: fetch_docs_context: skipped (no docs_project_dir; legacy report_repo profile)" >&2
+    AGENT_DOCS_HOST_PATH=""
+    export AGENT_DOCS_HOST_PATH
+    return 0
+  fi
+
   # Defensive: Phase 23 validate_docs_binding already enforces these when
   # docs_repo is set, but fetch_docs_context runs on the do_spawn path which
   # may skip full validation. Re-check to fail fast with a clear error.
-  if [ -z "${DOCS_BRANCH:-}" ] || [ -z "${DOCS_PROJECT_DIR:-}" ] || [ -z "${DOCS_REPO_TOKEN:-}" ]; then
-    echo "ERROR: fetch_docs_context: docs_repo set but DOCS_BRANCH / DOCS_PROJECT_DIR / DOCS_REPO_TOKEN missing" >&2
+  if [ -z "${DOCS_BRANCH:-}" ] || [ -z "${DOCS_REPO_TOKEN:-}" ]; then
+    echo "ERROR: fetch_docs_context: docs_repo + docs_project_dir set but DOCS_BRANCH / DOCS_REPO_TOKEN missing" >&2
     return 1
   fi
 
