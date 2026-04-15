@@ -1,7 +1,0 @@
-{
-  "workspace": "/tmp/claude-secure-test-ws-24-bundle",
-  "repo": "owner/docs-bundle",
-  "docs_repo": "https://github.com/owner/docs-bundle.git",
-  "docs_branch": "main",
-  "docs_project_dir": "projects/docs-bundle"
-}

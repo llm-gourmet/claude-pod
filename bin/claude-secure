@@ -1117,9 +1117,6 @@ verify_bundle_sections() {
 # Local image references (relative paths, ./img.png, img/foo.svg) are
 # PRESERVED because they cannot exfiltrate (no DNS, no external fetch).
 #
-# This function runs AFTER redact_report_file in the publish_docs_bundle
-# pipeline. The reverse order would let secrets hidden inside HTML comments
-# escape the redactor (Pitfall 1 in 24-RESEARCH.md).
 #
 # Uses GNU sed semantics. On macOS, Phase 18 PORT-01 PATH-shims gnubin so
 # `sed` is GNU sed even on Darwin.
@@ -1649,345 +1646,6 @@ Append-only findings.
   return 0
 }
 
-# =============================================================================
-# Phase 26 SPOOL-03: fork-and-disown async shipper. Never blocks the spawn
-# return. Called from do_spawn (~line 2253) and interactive *) (~line 2850).
-#
-# Functions:
-#   run_spool_shipper        -- background fork entrypoint (called after spawn)
-#   run_spool_shipper_inline -- synchronous drain entrypoint (Plan 04 stale-drain)
-#   _spool_shipper_loop      -- shared retry body (3-attempt jittered backoff)
-#   _spool_audit_write       -- audit JSONL writer for spool events (separate file)
-#
-# Audit writes go to $LOG_DIR/${LOG_PREFIX}spool-audit.jsonl (NOT executions.jsonl)
-# to avoid O_APPEND PIPE_BUF collision with do_spawn's concurrent writes (Pitfall 4).
-# =============================================================================
-
-# Phase 26 SPOOL-03: background fork entrypoint.
-# Forks _spool_shipper_loop to background with disown so spawn return is never
-# gated on shipper completion. Returns in < 100ms even when publish_docs_bundle
-# would take 5+ seconds.
-run_spool_shipper() {
-  local session_id="${1:-unknown}"
-  local spool_file="${LOG_DIR:-./logs}/spool.md"
-
-  # Test escape hatch (Rule 3 deviation pattern — see Phase 16 D-23 / CLAUDE_SECURE_FAKE_CLAUDE_STDOUT).
-  # CLAUDE_SECURE_SKIP_SPOOL_SHIPPER=1 suppresses the shipper for unit tests.
-  if [ "${CLAUDE_SECURE_SKIP_SPOOL_SHIPPER:-0}" = "1" ]; then
-    return 0
-  fi
-
-  # No spool = no report configured (D-05 silent skip).
-  [ -f "$spool_file" ] || return 0
-
-  # Fork to background. Both >/dev/null 2>&1 redirect AND disown are required:
-  #   - redirect: prevents interleave with the envelope emit that follows immediately
-  #   - disown: detaches child PID from the parent shell's job table so spawn_cleanup
-  #     trap does not reap the child before it finishes (Pitfall 2).
-  ( _spool_shipper_loop "$spool_file" "$session_id" >/dev/null 2>&1 ) & disown
-}
-
-# Phase 26 SPOOL-03 / D-07: synchronous drain entrypoint.
-# Runs _spool_shipper_loop in the current shell (blocking). Used by Plan 04's
-# stale-drain call site at spawn preamble to flush leftover spools from prior
-# crashed sessions before the new session starts.
-# Drain failures MUST NOT crash the caller — always returns 0 at the top level.
-run_spool_shipper_inline() {
-  local session_id="${1:-unknown}"
-  local spool_file="${LOG_DIR:-./logs}/spool.md"
-
-  [ -f "$spool_file" ] || return 0
-
-  # Run synchronously; ignore return value so callers never see a drain failure.
-  _spool_shipper_loop "$spool_file" "$session_id" || true
-  return 0
-}
-
-# Phase 26 SPOOL-03: shared retry body.
-# 3-attempt loop with jittered backoff (0s, 5±2s, 10±2s).
-# On success: writes pushed audit entry, deletes spool file, returns 0.
-# After 3 failures: writes push_failed audit entry, leaves spool.md for next
-# spawn's inline drain (D-07), returns 1.
-_spool_shipper_loop() {
-  local spool_file="$1" session_id="$2"
-  local attempt=0 max_attempts=3
-  local summary="Phase 26 spool: ${session_id}"
-  local delivery_id="${session_id}"
-  local rc=0 report_url=""
-  local _tmpout
-
-  while [ "$attempt" -lt "$max_attempts" ]; do
-    # Jittered backoff: attempt 0 → 0s, attempt 1 → 5±2s, attempt 2 → 10±2s
-    # Computed BEFORE incrementing so attempt 0 gets 0s delay.
-    if [ "$attempt" -gt 0 ]; then
-      local base=$(( attempt * 5 ))
-      local jitter=$(( (RANDOM % 5) - 2 ))
-      local delay=$(( base + jitter ))
-      [ "$delay" -lt 0 ] && delay=0
-      sleep "$delay"
-    fi
-
-    attempt=$(( attempt + 1 ))
-
-    # Capture publish output safely — use a tempfile so $? reflects
-    # publish_docs_bundle exit code, not tail's exit code (pipefail caveat).
-    _tmpout="$(mktemp 2>/dev/null || echo "/tmp/spool-shipper-$$")"
-    if publish_docs_bundle "$spool_file" "$session_id" "$summary" "$delivery_id" >"$_tmpout" 2>&1; then
-      report_url="$(tail -1 "$_tmpout" 2>/dev/null || true)"
-      rm -f "$_tmpout" 2>/dev/null || true
-      _spool_audit_write "pushed" "$attempt" "$report_url" ""
-      rm -f "$spool_file"
-      return 0
-    fi
-    rc=$?
-    rm -f "$_tmpout" 2>/dev/null || true
-  done
-
-  _spool_audit_write "push_failed" "$attempt" "" "publish_docs_bundle rc=$rc (attempts: ${max_attempts})"
-  # Leave spool.md in place for the next spawn's inline drain (D-07).
-  return 1
-}
-
-# Phase 26 SPOOL-03: audit JSONL writer for spool events.
-# Writes to $LOG_DIR/${LOG_PREFIX}spool-audit.jsonl (SEPARATE from executions.jsonl
-# to avoid O_APPEND PIPE_BUF collision — Pitfall 4).
-# Always silent on write failures (|| true) — audit writes must not crash the shipper.
-_spool_audit_write() {
-  local status="$1" attempt="$2" report_url="$3" error="$4"
-  local audit_file="${LOG_DIR:-./logs}/${LOG_PREFIX:-}spool-audit.jsonl"
-  local ts
-  mkdir -p "${LOG_DIR:-./logs}" 2>/dev/null || true
-  ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || echo "unknown")"
-  jq -cn \
-    --arg ts "$ts" \
-    --arg profile "${PROFILE:-}" \
-    --arg status "$status" \
-    --arg report_url "$report_url" \
-    --arg error "${error:0:200}" \
-    --argjson attempt "$attempt" \
-    '{
-      ts: $ts,
-      profile: $profile,
-      spool_status: $status,
-      attempt: $attempt,
-      report_url: (if ($report_url | length) > 0 then $report_url else null end),
-      error: (if ($error | length) > 0 then $error else null end)
-    }' >> "$audit_file" 2>/dev/null || true
-}
-
-# Phase 24 DOCS-02/03 + RPT-01..05: publish a rendered agent report + INDEX.md
-# update as exactly one atomic git commit, through the existing host-side
-# secret redaction pipeline + a markdown sanitizer that strips exfil beacons.
-#
-# HOST-SIDE FUNCTION. Runs in host bash, NEVER inside any container. Requires
-# DOCS_REPO_TOKEN in the host environment (Phase 23 BIND-02 host-only PAT
-# projection). The container cannot reach this code path.
-#
-# Composition (the entire function body is composed of pre-existing primitives):
-#   - verify_bundle_sections   (Plan 02; RPT-01)
-#   - redact_report_file       (bin/claude-secure:1039; Phase 16 D-15; RPT-03)
-#   - sanitize_markdown_file   (Plan 02; RPT-04)
-#   - push_with_retry          (bin/claude-secure:1174; Phase 17 3-attempt rebase; RPT-05)
-#
-# Order discipline (24-RESEARCH.md Pitfall 1): redact MUST run BEFORE sanitize.
-# Reverse order would let secrets hidden inside HTML comments escape the
-# redactor (the sanitizer strips the comment, then redactor sees no match).
-#
-# Idempotency: NOT idempotent (24-RESEARCH.md Pitfall 3). Two publishes with
-# the same session_id is a caller bug; the never-overwrite guard returns 1.
-#
-# Args:
-#   $1 = body_path     (path to rendered report markdown — Phase 26 Stop hook outputs this)
-#   $2 = session_id    (Claude session UUID; MUST be unique per publish)
-#   $3 = summary_line  (one-line summary for INDEX.md; newlines are collapsed, pipes escaped)
-#   $4 = delivery_id   (optional; defaults to "manual-$$"; appears in commit message)
-#
-# Returns:
-#   0 on success (stdout last line = report URL for HTTPS, or rel path for file://)
-#   1 on any failure (validation, clone, redact-readable check, never-overwrite, commit, push)
-publish_docs_bundle() {
-  local body_path="$1"
-  local session_id="$2"
-  local summary_line="$3"
-  local delivery_id="${4:-manual-$$}"
-
-  # Precondition guards (RPT-01 + arg validation)
-  if [ -z "$body_path" ] || [ ! -f "$body_path" ]; then
-    echo "ERROR: publish_docs_bundle: body path missing or not a file: $body_path" >&2
-    return 1
-  fi
-  if [ -z "$session_id" ]; then
-    echo "ERROR: publish_docs_bundle: session_id is required" >&2
-    return 1
-  fi
-  if ! verify_bundle_sections "$body_path"; then
-    return 1
-  fi
-
-  # Profile-driven config must already be loaded by the caller (load_profile_config).
-  if [ -z "${PROFILE:-}" ]; then
-    echo "ERROR: publish_docs_bundle: PROFILE not set" >&2
-    return 1
-  fi
-  if [ -z "${DOCS_REPO:-}" ]; then
-    echo "ERROR: publish_docs_bundle: profile '$PROFILE' has no docs_repo configured" >&2
-    return 1
-  fi
-  if [ -z "${DOCS_REPO_TOKEN:-}" ]; then
-    echo "ERROR: publish_docs_bundle: DOCS_REPO_TOKEN missing from profile env" >&2
-    return 1
-  fi
-  if [ -z "${DOCS_PROJECT_DIR:-}" ]; then
-    echo "ERROR: publish_docs_bundle: docs_project_dir missing from profile" >&2
-    return 1
-  fi
-
-  local _env_file="$CONFIG_DIR/profiles/$PROFILE/.env"
-  if [ ! -r "$_env_file" ]; then
-    echo "ERROR: publish_docs_bundle: cannot read $_env_file for redaction" >&2
-    return 1
-  fi
-
-  # Ephemeral clone dir (mirrors publish_report:1262 pattern). spawn_cleanup
-  # wipes it on process exit so partial state never leaks.
-  local clone_dir
-  clone_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-publish-XXXXXXXX")
-  _CLEANUP_FILES+=("$clone_dir")
-
-  # Askpass helper (mirrors publish_report:1267 / do_profile_init_docs:1380).
-  local askpass="$clone_dir/.askpass.sh"
-  cat > "$askpass" <<'ASKPASS'
-#!/bin/sh
-case "$1" in
-  Username*) printf 'x-access-token\n' ;;
-  Password*) printf '%s\n' "$GIT_ASKPASS_PAT" ;;
-esac
-ASKPASS
-  chmod 700 "$askpass"
-
-  # Bounded clone with PAT scrub on stderr (mirrors publish_report:1280).
-  local pat="$DOCS_REPO_TOKEN"
-  local clone_err="$clone_dir/clone.err"
-  if ! LC_ALL=C \
-       GIT_ASKPASS="$askpass" \
-       GIT_ASKPASS_PAT="$pat" \
-       GIT_TERMINAL_PROMPT=0 \
-       GIT_HTTP_LOW_SPEED_LIMIT=1 \
-       GIT_HTTP_LOW_SPEED_TIME=30 \
-       timeout 60 \
-       git -c credential.helper= -c credential.helper='' \
-           -c core.autocrlf=false \
-           clone --depth 1 --branch "$DOCS_BRANCH" --quiet \
-                 "$DOCS_REPO" "$clone_dir/repo" 2>"$clone_err"; then
-    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$clone_err" >&2
-    return 1
-  fi
-
-  # Concurrency fix: INDEX.md is append-only, so concurrent publishers both
-  # append their own summary line. A plain rebase in push_with_retry collides
-  # on the "last line" context, producing a merge conflict. Enable git's
-  # builtin "union" merge driver for INDEX.md via clone-local gitattributes
-  # (not committed to the repo) so concurrent rebases auto-merge by keeping
-  # BOTH sets of appended lines. This is exactly what the union driver does:
-  # take every line from every side of the merge.
-  mkdir -p "$clone_dir/repo/.git/info"
-  printf '%s/reports/INDEX.md merge=union\n' "$DOCS_PROJECT_DIR" \
-    >> "$clone_dir/repo/.git/info/attributes"
-
-  # Clone-local identity so push_with_retry's rebase path (which replays our
-  # commit via git-rebase, not a fresh commit with GIT_AUTHOR_* env vars) has
-  # a valid committer identity. Without this, a concurrent-push retry dies
-  # with "empty ident name not allowed" during rebase replay.
-  git -C "$clone_dir/repo" config user.email "claude-secure@localhost"
-  git -C "$clone_dir/repo" config user.name  "claude-secure"
-
-  # DOCS-02: path construction + never-overwrite guard.
-  local year month day
-  year=$(date -u +%Y)
-  month=$(date -u +%m)
-  day=$(date -u +%Y-%m-%d)
-  local rel_report_path="${DOCS_PROJECT_DIR}/reports/${year}/${month}/${day}-${session_id}.md"
-  local abs_report_path="$clone_dir/repo/$rel_report_path"
-  if [ -e "$abs_report_path" ]; then
-    echo "ERROR: report already exists at $rel_report_path -- refusing to overwrite" >&2
-    echo "       (if this is a replay, use a different session-id)" >&2
-    return 1
-  fi
-  if ! mkdir -p "$(dirname "$abs_report_path")"; then
-    echo "ERROR: cannot create report directory" >&2
-    return 1
-  fi
-  if ! cp "$body_path" "$abs_report_path"; then
-    echo "ERROR: cannot copy body to $abs_report_path" >&2
-    return 1
-  fi
-
-  # DOCS-03: append summary line to INDEX.md. The file MUST already exist
-  # from a prior `claude-secure profile init-docs` run (Phase 23).
-  local rel_index_path="${DOCS_PROJECT_DIR}/reports/INDEX.md"
-  local abs_index_path="$clone_dir/repo/$rel_index_path"
-  if [ ! -f "$abs_index_path" ]; then
-    echo "ERROR: INDEX.md not found at $rel_index_path" >&2
-    echo "       Run 'claude-secure profile init-docs --profile $PROFILE' first." >&2
-    return 1
-  fi
-
-  local ts_iso safe_summary
-  ts_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-  # Pipe-escape (table column delimiter) and newline-collapse the summary.
-  safe_summary="${summary_line//|/\\|}"
-  safe_summary="${safe_summary//$'\n'/ }"
-  printf '| %s | %s | %s |\n' "$ts_iso" "$session_id" "$safe_summary" >> "$abs_index_path"
-
-  # RPT-03 redact THEN RPT-04 sanitize. Order matters (24-RESEARCH.md Pitfall 1).
-  local f
-  for f in "$abs_report_path" "$abs_index_path"; do
-    if ! redact_report_file "$f" "$_env_file"; then
-      echo "ERROR: redaction failed for $f" >&2
-      return 1
-    fi
-    if ! sanitize_markdown_file "$f"; then
-      echo "ERROR: sanitization failed for $f" >&2
-      return 1
-    fi
-  done
-
-  # RPT-02: stage both files in one git add.
-  if ! git -C "$clone_dir/repo" -c core.autocrlf=false add "$rel_report_path" "$rel_index_path"; then
-    echo "ERROR: git add failed" >&2
-    return 1
-  fi
-  # NOTE: NO `diff --cached --quiet` gate here (24-RESEARCH.md Pitfall 3).
-  # Phase 24 is not idempotent. The never-overwrite guard + unique session-id
-  # in the INDEX.md row guarantee a non-empty diff for legitimate calls.
-
-  # RPT-02: single atomic commit. PAT scrub on stderr.
-  local commit_msg="report: ${session_id} (${delivery_id})"
-  local commit_err="$clone_dir/commit.err"
-  if ! LC_ALL=C \
-       GIT_AUTHOR_NAME="claude-secure" \
-       GIT_AUTHOR_EMAIL="claude-secure@localhost" \
-       GIT_COMMITTER_NAME="claude-secure" \
-       GIT_COMMITTER_EMAIL="claude-secure@localhost" \
-       git -C "$clone_dir/repo" -c core.autocrlf=false \
-           commit -q -m "$commit_msg" 2>"$commit_err"; then
-    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$commit_err" >&2
-    return 1
-  fi
-
-  # RPT-05: push via Phase 17 3-attempt rebase loop. push_with_retry reads
-  # REPORT_REPO_TOKEN, which Phase 23 resolve_docs_alias back-filled from
-  # DOCS_REPO_TOKEN, so no extra wiring is needed here.
-  if ! push_with_retry "$clone_dir" "$DOCS_BRANCH"; then
-    return 1
-  fi
-
-  # Emit report URL on stdout (mirrors publish_report:1333). For file://
-  # remotes the "blob" URL is still useful as a stable path.
-  local url_base="${DOCS_REPO%.git}"
-  printf '%s/blob/%s/%s\n' "$url_base" "$DOCS_BRANCH" "$rel_report_path"
-  return 0
-}
 
 # Phase 16: best-effort audit writer for early-return spawn_error paths.
 # Called from do_spawn precondition checks before delivery_id/event_type
@@ -2053,8 +1711,8 @@ fetch_docs_context() {
   # a mid-clone failure cannot leak the temp dir (Phase 24 discipline).
   _CLEANUP_FILES+=("$clone_root")
 
-  # Askpass helper -- identical pattern to do_profile_init_docs (line ~1485)
-  # and publish_docs_bundle (line ~1696). The PAT never appears in argv.
+  # Askpass helper -- identical pattern to do_profile_init_docs (line ~1485).
+  # The PAT never appears in argv.
   local askpass="$clone_root/.askpass.sh"
   cat > "$askpass" <<'ASKPASS'
 #!/bin/sh
@@ -2262,10 +1920,6 @@ do_spawn() {
     export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX
   fi
 
-  # Phase 26 D-07: drain any leftover spool from a prior crashed session.
-  # Synchronous, non-fatal — failures are logged but do not abort the new spawn.
-  run_spool_shipper_inline "$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d - || echo "drain-$$")" || true
-
   # Phase 25 CTX-01..CTX-04: sparse shallow clone of the doc repo's
   # projects/<slug>/ subtree, bind-mounted read-only into the claude
   # container at /agent-docs. Skips silently when DOCS_REPO is empty
@@ -2418,11 +2072,6 @@ do_spawn() {
     "$audit_status" \
     "$report_url" \
     "$_audit_err_short" 2>/dev/null || true
-
-  # Phase 26 SPOOL-03: fork-and-disown spool shipper after audit write.
-  # Uses $_audit_session (Claude session_id from line ~2205), not $delivery_id.
-  # ${_audit_session:-unknown} guards against malformed Claude output.
-  run_spool_shipper "${_audit_session:-unknown}"
 
   # Emit envelope to stdout.
   echo "$envelope_json"
@@ -3037,8 +2686,6 @@ case "$CMD" in
     mkdir -p "$LOG_DIR"
     # 777 required: three containers write as different UIDs (claude:1001, node:1000, root:0)
     chmod 777 "$LOG_DIR"
-    # Phase 26 D-07: drain any leftover spool from a prior crashed session.
-    run_spool_shipper_inline "$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d - || echo "drain-$$")" || true
     cleanup_containers
     # Phase 25 CTX-01..CTX-04: populate /agent-docs mount for interactive
     # sessions too. Non-fatal on the interactive path: if fetch fails,
@@ -3053,7 +2700,5 @@ case "$CMD" in
     docker compose exec -it claude claude --dangerously-skip-permissions
     # Tear down containers after session ends — no reason to keep them running.
     docker compose down
-    # Phase 26 SPOOL-03: fork-and-disown spool shipper after interactive exit.
-    run_spool_shipper "$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d - || echo "manual-$$")"
     ;;
 esac
