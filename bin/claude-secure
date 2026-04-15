@@ -2525,18 +2525,11 @@ case "$CMD" in
         awk 'NR==1 { print; next } /^(claude-|cs-)/ { print }'
     fi
     ;;
-  upgrade)
-    echo "Upgrading Claude Code to latest version..."
-    docker compose -f "$APP_DIR/docker-compose.yml" build --no-cache --pull claude
-    echo ""
-    echo "Upgrade complete. Restart with: claude-secure --profile ${PROFILE:-NAME}"
-    ;;
   update)
     echo "Pulling latest changes..."
     sudo git -C "$APP_DIR" pull
-    echo "Rebuilding images..."
-    docker compose -f "$APP_DIR/docker-compose.yml" build
-    # Update CLI wrapper if source changed
+    # Update CLI wrapper if source changed (do this before rebuilding images
+    # so the new binary is in place if the user re-runs after a partial failure)
     CLI_INSTALLED="$(command -v claude-secure)"
     CLI_SOURCE="$APP_DIR/bin/claude-secure"
     if [ -f "$CLI_SOURCE" ] && ! diff -q "$CLI_SOURCE" "$CLI_INSTALLED" >/dev/null 2>&1; then
@@ -2552,8 +2545,51 @@ case "$CMD" in
         echo "Run manually: sudo cp $CLI_SOURCE $CLI_INSTALLED"
       fi
     fi
+    echo "Rebuilding images for all profiles..."
+    shopt -s nullglob
+    _update_count=0
+    for _pdir in "$CONFIG_DIR/profiles"/*/; do
+      _pname=$(basename "$_pdir")
+      echo "  [$_pname] rebuilding..."
+      COMPOSE_PROJECT_NAME="claude-$_pname" \
+        docker compose -f "$APP_DIR/docker-compose.yml" build claude
+      _update_count=$((_update_count + 1))
+    done
+    shopt -u nullglob
+    if [ "$_update_count" -eq 0 ]; then
+      echo "  No profiles found; rebuilding default image..."
+      docker compose -f "$APP_DIR/docker-compose.yml" build claude
+    fi
     echo ""
-    echo "Update complete. Restart with: claude-secure --profile ${PROFILE:-NAME}"
+    echo "Update complete. ${_update_count} profile image(s) rebuilt."
+    ;;
+  upgrade)
+    # Without --profile: upgrade all profiles.
+    # With --profile: upgrade only that profile (COMPOSE_PROJECT_NAME already set).
+    if [ -n "$PROFILE" ]; then
+      echo "Upgrading Claude Code for profile $PROFILE..."
+      docker compose -f "$APP_DIR/docker-compose.yml" build --no-cache --pull claude
+      echo ""
+      echo "Upgrade complete. Restart with: claude-secure --profile $PROFILE"
+    else
+      echo "Upgrading Claude Code for all profiles..."
+      shopt -s nullglob
+      _upgrade_count=0
+      for _pdir in "$CONFIG_DIR/profiles"/*/; do
+        _pname=$(basename "$_pdir")
+        echo "  [$_pname] upgrading..."
+        COMPOSE_PROJECT_NAME="claude-$_pname" \
+          docker compose -f "$APP_DIR/docker-compose.yml" build --no-cache --pull claude
+        _upgrade_count=$((_upgrade_count + 1))
+      done
+      shopt -u nullglob
+      if [ "$_upgrade_count" -eq 0 ]; then
+        echo "  No profiles found; rebuilding default image..."
+        docker compose -f "$APP_DIR/docker-compose.yml" build --no-cache --pull claude
+      fi
+      echo ""
+      echo "Upgrade complete. ${_upgrade_count} profile image(s) upgraded."
+    fi
     ;;
   list)
     list_profiles
@@ -2610,8 +2646,8 @@ case "$CMD" in
     echo "  remove     Remove profile config (stops containers first)"
     echo "  list       List all profiles and their status"
     echo "  logs       Tail log files (logs hook|anthropic|iptables|clear)"
-    echo "  update     Pull latest claude-secure and rebuild all images"
-    echo "  upgrade    Rebuild claude image with latest Claude Code (--no-cache)"
+    echo "  update     Pull latest claude-secure, update CLI, rebuild all profile images"
+    echo "  upgrade    Upgrade Claude Code to latest version (--no-cache --pull)"
     echo "  spawn      Run headless Claude Code session (requires --profile and --event)"
     echo "  reap       Clean up orphaned spawn containers and stale event files"
     echo "  help       Show this help message"
