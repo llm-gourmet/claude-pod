@@ -97,7 +97,8 @@
         "test-phase23.sh",
         "test-phase24.sh",
         "test-phase25.sh",
-        "test-phase26.sh"
+        "test-phase26.sh",
+        "test-update-cmd.sh"
       ]
     },
     {
