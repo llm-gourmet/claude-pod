@@ -2842,10 +2842,18 @@ case "$CMD" in
     docker compose down
     ;;
   status)
-    docker compose ps
-    if docker compose ps --status running --format '{{.Service}}' | grep -q '^claude$'; then
-      echo ""
-      echo "Claude Code version: $(docker compose exec -T claude claude --version 2>/dev/null || echo 'unknown')"
+    if [ -n "$PROFILE" ]; then
+      docker compose ps
+      if docker compose ps --status running --format '{{.Service}}' | grep -q '^claude$'; then
+        echo ""
+        echo "Claude Code version: $(docker compose exec -T claude claude --version 2>/dev/null || echo 'unknown')"
+      fi
+    else
+      # No profile: show all claude-secure containers across all profiles/spawns.
+      # Container names start with the compose project name (claude-<profile>,
+      # claude-superuser, cs-<profile>-<uuid>).
+      docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Command}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}" | \
+        awk 'NR==1 { print; next } /^(claude-|cs-)/ { print }'
     fi
     ;;
   upgrade)
