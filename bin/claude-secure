@@ -358,13 +358,8 @@ create_profile() {
 
 setup_profile_auth() {
   local dir="$1"
-  # Mirror install.sh setup_auth hardening: require TTY, validate non-empty,
-  # reject newline-tainted paste, write the .env in one grouped redirection.
-  if [ ! -t 0 ]; then
-    echo "ERROR: No TTY on stdin — cannot prompt for credentials." >&2
-    echo "ERROR: Run 'claude-secure --profile <name>' from an interactive terminal." >&2
-    return 1
-  fi
+  # Hardened: validate non-empty, reject newline-tainted paste,
+  # write .env in one grouped redirection.
   echo "Choose authentication method:"
   echo "  1) OAuth token [recommended]"
   echo "  2) API key"
