@@ -2527,7 +2527,7 @@ case "$CMD" in
     ;;
   upgrade)
     echo "Upgrading Claude Code to latest version..."
-    docker compose build --no-cache --pull claude
+    docker compose -f "$APP_DIR/docker-compose.yml" build --no-cache --pull claude
     echo ""
     echo "Upgrade complete. Restart with: claude-secure --profile ${PROFILE:-NAME}"
     ;;
@@ -2535,7 +2535,7 @@ case "$CMD" in
     echo "Pulling latest changes..."
     sudo git -C "$APP_DIR" pull
     echo "Rebuilding images..."
-    docker compose build
+    docker compose -f "$APP_DIR/docker-compose.yml" build
     # Update CLI wrapper if source changed
     CLI_INSTALLED="$(command -v claude-secure)"
     CLI_SOURCE="$APP_DIR/bin/claude-secure"
