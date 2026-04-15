@@ -144,9 +144,10 @@ Recent decisions affecting current work:
 | 260412-q2o | Fix install.sh CONFIG_DIR resolves to /root under sudo | 2026-04-12 | 2e1820a | [260412-q2o-fix-install-sh-config-dir-resolves-to-ro](./quick/260412-q2o-fix-install-sh-config-dir-resolves-to-ro/) |
 | 260412-w1y | Update README.md to document v2.0 features | 2026-04-12 | 5a8a9a5 | [260412-w1y-update-readme-md-to-document-v2-0-featur](./quick/260412-w1y-update-readme-md-to-document-v2-0-featur/) |
 | 260415-crq | take care of untracked and not staged changes | 2026-04-15 | 943c890 | [260415-crq-take-care-of-untracked-and-not-staged-ch](./quick/260415-crq-take-care-of-untracked-and-not-staged-ch/) |
+| 260415-dam | Remove unused docs_mode field from profile schema | 2026-04-15 | 42eb568 | [260415-dam-remove-unused-docs-mode-field-from-profi](./quick/260415-dam-remove-unused-docs-mode-field-from-profi/) |
 
 ## Session Continuity
 
-Last activity: 2026-04-15 - Completed quick task 260415-crq: take care of untracked and not staged changes
+Last activity: 2026-04-15 - Completed quick task 260415-dam: remove unused docs_mode field from profile schema
 Stopped at: Completed 27-01-PLAN.md
 Resume file: None
