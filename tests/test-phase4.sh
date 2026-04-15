@@ -77,10 +77,9 @@ report "INST-01c" "check_dependencies passes on host (all deps installed)" $?
 # =========================================================================
 (
   source "$PROJECT_DIR/install.sh"
-  # Call detect_platform directly (not inside $()) so PLATFORM var propagates
-  detect_platform > /dev/null 2>&1
-  # Must set PLATFORM to either "linux" or "wsl2"
-  if [ "$PLATFORM" = "linux" ] || [ "$PLATFORM" = "wsl2" ]; then
+  # detect_platform echoes the platform string (Phase 18 refactor: no longer sets PLATFORM directly)
+  _plat="$(detect_platform 2>/dev/null)"
+  if [ "$_plat" = "linux" ] || [ "$_plat" = "wsl2" ]; then
     exit 0
   fi
   exit 1
