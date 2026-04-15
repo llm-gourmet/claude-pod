@@ -19,11 +19,17 @@ sudo ./install.sh
 sudo ./install.sh --with-webhook
 ```
 
-The installer builds Docker images, installs the `claude-secure` CLI to `/usr/local/bin`, and writes security hooks to `/etc/claude-secure/` (root-owned, not writable by the Claude process).
+The installer builds Docker images (the Claude container has the PreToolUse hook baked into `/etc/claude-secure/hooks/` at image-build time from `claude/hooks/`), installs the `claude-secure` CLI to `/usr/local/bin`, copies the project tree to `~/.claude-secure/app/`, and writes a default profile at `~/.claude-secure/profiles/default/` (containing `.env`, `whitelist.json`, `profile.json`).
 
-On first run it prompts for:
-- Auth: OAuth token (`claude setup-token`) or API key
+On first run it prompts interactively for:
+- Auth choice: OAuth token (recommended — run `claude setup-token` first) or API key
 - Workspace path (default: `~/claude-workspace`)
+
+For non-interactive installs, export `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` and pass `-E` to `sudo` so the variable survives the sudo environment scrub:
+
+```bash
+sudo -E CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" ./install.sh
+```
 
 ---
 
@@ -172,7 +178,7 @@ The whitelist is re-read on every request — no restart needed after edits.
 
 ### 3. PreToolUse hook
 
-Every `Bash`, `WebFetch`, and `WebSearch` tool call passes through a hook script at `/etc/claude-secure/hooks/pre-tool-use.sh` (root-owned, not writable by the Claude process).
+Every `Bash`, `WebFetch`, and `WebSearch` tool call passes through a hook script at `/etc/claude-secure/hooks/pre-tool-use.sh` **inside the Claude container** (baked into the image at build time from `claude/hooks/pre-tool-use.sh`; root-owned, not writable by the Claude process).
 
 The hook:
 1. Extracts the target domain from the tool call payload

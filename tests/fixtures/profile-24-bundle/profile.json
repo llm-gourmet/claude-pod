@@ -3,6 +3,5 @@
   "repo": "owner/docs-bundle",
   "docs_repo": "https://github.com/owner/docs-bundle.git",
   "docs_branch": "main",
-  "docs_project_dir": "projects/docs-bundle",
-  "docs_mode": "report_only"
+  "docs_project_dir": "projects/docs-bundle"
 }

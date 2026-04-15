@@ -3,6 +3,5 @@
   "repo": "owner/ctx-test",
   "docs_repo": "https://github.com/owner/ctx-test.git",
   "docs_branch": "main",
-  "docs_project_dir": "projects/ctx-test",
-  "docs_mode": "report_only"
+  "docs_project_dir": "projects/ctx-test"
 }
