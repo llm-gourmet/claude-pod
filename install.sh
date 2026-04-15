@@ -325,6 +325,7 @@ setup_workspace() {
   ws_path="$(realpath -m "$ws_path")"
 
   mkdir -p "$ws_path"
+  chown "$_invoking_user:$_invoking_user" "$ws_path"
 
   # Write global config (APP_DIR written later by copy_app_files)
   cat > "$CONFIG_DIR/config.sh" <<CONF
@@ -615,6 +616,13 @@ main() {
   install_cli
 
   install_git_hooks
+
+  # Reclaim ownership of CONFIG_DIR for the invoking user (sudo creates as root).
+  # install_cli + install_git_hooks + install_webhook_service deliberately leave
+  # system paths (/usr/local/bin, /etc/systemd, /opt/claude-secure) as root.
+  chown -R "$_invoking_user:$_invoking_user" "$CONFIG_DIR"
+  chmod 777 "$CONFIG_DIR/logs"
+
   install_webhook_service
 
   echo ""
