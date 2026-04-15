@@ -2839,7 +2839,26 @@ CMD="${REMAINING_ARGS[0]:-}"
 
 case "$CMD" in
   stop)
-    docker compose down
+    if [ -n "$PROFILE" ]; then
+      docker compose down
+    else
+      # No --profile given: stop all configured profiles.
+      shopt -s nullglob
+      _stop_count=0
+      _stop_failed=0
+      for _pdir in "$CONFIG_DIR/profiles"/*/; do
+        _pname=$(basename "$_pdir")
+        echo "Stopping profile: $_pname"
+        if ( load_profile_config "$_pname" && docker compose down ); then
+          _stop_count=$((_stop_count + 1))
+        else
+          echo "warning: failed to stop profile $_pname" >&2
+          _stop_failed=$((_stop_failed + 1))
+        fi
+      done
+      shopt -u nullglob
+      echo "Stopped $_stop_count profile(s)${_stop_failed:+, $_stop_failed failed}."
+    fi
     ;;
   status)
     if [ -n "$PROFILE" ]; then
@@ -3031,6 +3050,8 @@ case "$CMD" in
     fi
     docker compose up -d
     docker compose exec -it claude claude --dangerously-skip-permissions
+    # Tear down containers after session ends — no reason to keep them running.
+    docker compose down
     # Phase 26 SPOOL-03: fork-and-disown spool shipper after interactive exit.
     run_spool_shipper "$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d - || echo "manual-$$")"
     ;;

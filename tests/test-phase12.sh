@@ -583,6 +583,144 @@ test_noinstance_01() {
 run_test "NOINSTANCE-01: --instance flag produces error" test_noinstance_01
 
 # =========================================================================
+# STAT-01: status without --profile shows claude-*/cs-* containers only
+# =========================================================================
+test_stat_01() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+
+  # Minimal config so load_superuser_config does not prompt for workspace
+  local cfg="$tmpdir/.claude-secure"
+  mkdir -p "$cfg"
+  cat > "$cfg/config.sh" <<EOF
+APP_DIR="$PROJECT_DIR"
+PLATFORM="linux"
+DEFAULT_WORKSPACE="$tmpdir/ws"
+EOF
+  mkdir -p "$tmpdir/ws"
+
+  # Fake docker: intercepts "docker ps", passes everything else through
+  local fake_bin="$tmpdir/bin"
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/docker" <<'DOCKER'
+#!/bin/bash
+if [ "$1" = "ps" ]; then
+  printf "NAMES\tIMAGE\tCOMMAND\tCREATED AT\tSTATUS\tPORTS\n"
+  printf "claude-myprofile-claude-1\tclaude-myprofile-claude\t\"cmd\"\t2026-01-01 00:00:00 +0000 UTC\tUp 5 minutes\t\n"
+  printf "some-unrelated-container-1\tnginx\t\"cmd\"\t2026-01-01 00:00:00 +0000 UTC\tUp 1 hour\t\n"
+  printf "cs-myprofile-abc12345-claude-1\tclaude-cs-claude\t\"cmd\"\t2026-01-01 00:00:00 +0000 UTC\tUp 3 minutes\t\n"
+else
+  command docker "$@"
+fi
+DOCKER
+  chmod +x "$fake_bin/docker"
+
+  local output
+  output=$(HOME="$tmpdir" CONFIG_DIR="$cfg" PATH="$fake_bin:$PATH" \
+    bash "$PROJECT_DIR/bin/claude-secure" status 2>/dev/null)
+
+  # claude-* and cs-* rows must appear
+  echo "$output" | grep -q "claude-myprofile-claude-1" || return 1
+  echo "$output" | grep -q "cs-myprofile-abc12345-claude-1" || return 1
+  # Unrelated container must NOT appear
+  echo "$output" | grep -q "some-unrelated-container-1" && return 1
+
+  return 0
+}
+run_test "STAT-01: status (no --profile) filters to claude-*/cs-* containers" test_stat_01
+
+# =========================================================================
+# STOP-01: stop without --profile calls docker compose down for every profile
+# =========================================================================
+test_stop_01() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  local cfg="$tmpdir/.claude-secure"
+  mkdir -p "$cfg/profiles"
+
+  create_test_profile "alpha" "$cfg" "$tmpdir/ws-alpha"
+  create_test_profile "beta"  "$cfg" "$tmpdir/ws-beta"
+
+  local fake_bin="$tmpdir/bin"
+  local down_log="$tmpdir/down.log"
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/docker" <<DOCKER
+#!/bin/bash
+if [ "\${1:-}" = "compose" ] && [ "\${2:-}" = "down" ]; then
+  echo "\${COMPOSE_PROJECT_NAME:-<unset>}" >> "$down_log"
+fi
+exit 0
+DOCKER
+  chmod +x "$fake_bin/docker"
+
+  DEFAULT_WORKSPACE="$tmpdir/ws-super" \
+  HOME="$tmpdir" \
+  CONFIG_DIR="$cfg" \
+  PATH="$fake_bin:$PATH" \
+    bash "$PROJECT_DIR/bin/claude-secure" stop 2>/dev/null
+
+  grep -q "^claude-alpha$" "$down_log" || return 1
+  grep -q "^claude-beta$"  "$down_log" || return 1
+  return 0
+}
+run_test "STOP-01: stop (no --profile) calls docker compose down for each profile" test_stop_01
+
+# =========================================================================
+# STOP-02: stop with --profile only stops that profile (regression)
+# =========================================================================
+test_stop_02() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  local cfg="$tmpdir/.claude-secure"
+  mkdir -p "$cfg/profiles"
+
+  create_test_profile "alpha" "$cfg" "$tmpdir/ws-alpha"
+  create_test_profile "beta"  "$cfg" "$tmpdir/ws-beta"
+
+  local fake_bin="$tmpdir/bin"
+  local down_log="$tmpdir/down.log"
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/docker" <<DOCKER
+#!/bin/bash
+if [ "\${1:-}" = "compose" ] && [ "\${2:-}" = "down" ]; then
+  echo "\${COMPOSE_PROJECT_NAME:-<unset>}" >> "$down_log"
+fi
+exit 0
+DOCKER
+  chmod +x "$fake_bin/docker"
+
+  HOME="$tmpdir" \
+  CONFIG_DIR="$cfg" \
+  PATH="$fake_bin:$PATH" \
+    bash "$PROJECT_DIR/bin/claude-secure" --profile alpha stop 2>/dev/null
+
+  # Only alpha must be stopped
+  grep -q "^claude-alpha$" "$down_log" || return 1
+  grep -q "^claude-beta$"  "$down_log" && return 1
+  return 0
+}
+run_test "STOP-02: stop --profile X only stops profile X, not others" test_stop_02
+
+# =========================================================================
+# SESS-01: interactive session auto-stops container after Claude exits
+# =========================================================================
+test_sess_01() {
+  # Static check: docker compose down must follow docker compose exec in source.
+  local src="$PROJECT_DIR/bin/claude-secure"
+  local exec_line down_line
+  exec_line=$(grep -n "docker compose exec -it claude claude" "$src" | head -1 | cut -d: -f1)
+  down_line=$(grep -n "docker compose down" "$src" \
+    | awk -F: -v after="$exec_line" '$1 > after {print $1; exit}')
+  [ -n "$exec_line" ] || return 1
+  [ -n "$down_line" ] || return 1
+  # The down must be within a few lines of the exec (same *)  block)
+  local gap=$(( down_line - exec_line ))
+  [ "$gap" -gt 0 ] && [ "$gap" -le 5 ] || return 1
+  return 0
+}
+run_test "SESS-01: docker compose down follows exec in interactive session block" test_sess_01
+
+# =========================================================================
 # Summary
 # =========================================================================
 echo ""
