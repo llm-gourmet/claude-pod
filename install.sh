@@ -237,27 +237,53 @@ setup_auth() {
   local env_file="$CONFIG_DIR/profiles/default/.env"
   mkdir -p "$CONFIG_DIR/profiles/default"
 
-  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-    echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" > "$env_file"
-    echo "" >> "$env_file"
-    echo "# Add secrets below (must match env_var in whitelist.json)" >> "$env_file"
-    echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$env_file"
+  # Unified env-file writer. Rejects empty or newline-tainted values and writes
+  # the four-line file in a single redirection group so a mid-write abort can
+  # never leave a truncated .env on disk.
+  write_env_file() {
+    local var_name="$1"
+    local value="$2"
+    if [ -z "$value" ]; then
+      log_error "${var_name} was empty. Installation aborted — no .env written."
+      exit 1
+    fi
+    case "$value" in
+      *$'\n'*|*$'\r'*)
+        log_error "${var_name} contains a newline or carriage return (paste buffer leakage?)."
+        log_error "Installation aborted — no .env written."
+        exit 1
+        ;;
+    esac
+    {
+      printf '%s=%s\n' "$var_name" "$value"
+      printf '\n'
+      printf '# Add secrets below (must match env_var in whitelist.json)\n'
+      printf '# Example: GITHUB_TOKEN=ghp_your_token_here\n'
+    } > "$env_file"
     chmod 600 "$env_file"
+  }
+
+  if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    write_env_file "ANTHROPIC_API_KEY" "$ANTHROPIC_API_KEY"
     log_info "Using ANTHROPIC_API_KEY from environment"
     return
   fi
 
   if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-    echo "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}" > "$env_file"
-    echo "" >> "$env_file"
-    echo "# Add secrets below (must match env_var in whitelist.json)" >> "$env_file"
-    echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$env_file"
-    chmod 600 "$env_file"
+    write_env_file "CLAUDE_CODE_OAUTH_TOKEN" "$CLAUDE_CODE_OAUTH_TOKEN"
     log_info "Using CLAUDE_CODE_OAUTH_TOKEN from environment"
     return
   fi
 
-  # Interactive prompt
+  # Interactive prompt — require a real TTY on stdin.
+  if [ ! -t 0 ]; then
+    log_error "No TTY on stdin and neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN is set."
+    log_error "Re-run with the token exported, e.g.:"
+    log_error "  sudo -E CLAUDE_CODE_OAUTH_TOKEN=\"\$CLAUDE_CODE_OAUTH_TOKEN\" bash install.sh"
+    log_error "Or run the installer from an interactive terminal."
+    exit 1
+  fi
+
   echo ""
   echo "Choose authentication method:"
   echo "  1) OAuth token [recommended]"
@@ -269,25 +295,26 @@ setup_auth() {
     2)
       read -rsp "API key: " key
       echo ""
-      echo "ANTHROPIC_API_KEY=${key}" > "$env_file"
-      echo "" >> "$env_file"
-      echo "# Add secrets below (must match env_var in whitelist.json)" >> "$env_file"
-      echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$env_file"
+      if [ -z "$key" ]; then
+        log_error "API key was empty. Installation aborted — no .env written."
+        exit 1
+      fi
+      write_env_file "ANTHROPIC_API_KEY" "$key"
       log_info "API key saved"
       ;;
     *)
       echo "Run 'claude setup-token' first to get your OAuth token."
       read -rsp "OAuth token: " token
       echo ""
-      echo "CLAUDE_CODE_OAUTH_TOKEN=${token}" > "$env_file"
-      echo "" >> "$env_file"
-      echo "# Add secrets below (must match env_var in whitelist.json)" >> "$env_file"
-      echo "# Example: GITHUB_TOKEN=ghp_your_token_here" >> "$env_file"
+      if [ -z "$token" ]; then
+        log_error "OAuth token was empty. Installation aborted — no .env written."
+        log_error "Get your token with: claude setup-token"
+        exit 1
+      fi
+      write_env_file "CLAUDE_CODE_OAUTH_TOKEN" "$token"
       log_info "OAuth token saved"
       ;;
   esac
-
-  chmod 600 "$env_file"
 }
 
 setup_workspace() {
