@@ -583,6 +583,53 @@ test_noinstance_01() {
 run_test "NOINSTANCE-01: --instance flag produces error" test_noinstance_01
 
 # =========================================================================
+# STAT-01: status without --profile shows claude-*/cs-* containers only
+# =========================================================================
+test_stat_01() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+
+  # Minimal config so load_superuser_config does not prompt for workspace
+  local cfg="$tmpdir/.claude-secure"
+  mkdir -p "$cfg"
+  cat > "$cfg/config.sh" <<EOF
+APP_DIR="$PROJECT_DIR"
+PLATFORM="linux"
+DEFAULT_WORKSPACE="$tmpdir/ws"
+EOF
+  mkdir -p "$tmpdir/ws"
+
+  # Fake docker: intercepts "docker ps", passes everything else through
+  local fake_bin="$tmpdir/bin"
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/docker" <<'DOCKER'
+#!/bin/bash
+if [ "$1" = "ps" ]; then
+  printf "NAMES\tIMAGE\tCOMMAND\tCREATED AT\tSTATUS\tPORTS\n"
+  printf "claude-myprofile-claude-1\tclaude-myprofile-claude\t\"cmd\"\t2026-01-01 00:00:00 +0000 UTC\tUp 5 minutes\t\n"
+  printf "some-unrelated-container-1\tnginx\t\"cmd\"\t2026-01-01 00:00:00 +0000 UTC\tUp 1 hour\t\n"
+  printf "cs-myprofile-abc12345-claude-1\tclaude-cs-claude\t\"cmd\"\t2026-01-01 00:00:00 +0000 UTC\tUp 3 minutes\t\n"
+else
+  command docker "$@"
+fi
+DOCKER
+  chmod +x "$fake_bin/docker"
+
+  local output
+  output=$(HOME="$tmpdir" CONFIG_DIR="$cfg" PATH="$fake_bin:$PATH" \
+    bash "$PROJECT_DIR/bin/claude-secure" status 2>/dev/null)
+
+  # claude-* and cs-* rows must appear
+  echo "$output" | grep -q "claude-myprofile-claude-1" || return 1
+  echo "$output" | grep -q "cs-myprofile-abc12345-claude-1" || return 1
+  # Unrelated container must NOT appear
+  echo "$output" | grep -q "some-unrelated-container-1" && return 1
+
+  return 0
+}
+run_test "STAT-01: status (no --profile) filters to claude-*/cs-* containers" test_stat_01
+
+# =========================================================================
 # Summary
 # =========================================================================
 echo ""
