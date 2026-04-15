@@ -1,9 +1,0 @@
-{
-  "session_id": "test-session-26",
-  "transcript_path": "/tmp/test-transcript.jsonl",
-  "cwd": "/workspace",
-  "permission_mode": "default",
-  "hook_event_name": "Stop",
-  "stop_hook_active": false,
-  "last_assistant_message": "I have completed the session tasks."
-}
