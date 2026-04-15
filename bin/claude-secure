@@ -2821,8 +2821,9 @@ else
   #     forever in a non-interactive service context.
   #   - spawn: requires --profile; if called without one do_spawn will print
   #     its own error. Superuser merge is not valid for spawn.
+  #   - status: reads docker ps only; no workspace config needed.
   case "$FIRST_ARG" in
-    list|help|--help|-h|replay|reap|spawn|update|upgrade)
+    list|help|--help|-h|replay|reap|spawn|update|upgrade|status)
       : # skip superuser load
       ;;
     *)
