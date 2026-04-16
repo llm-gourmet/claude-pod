@@ -6,6 +6,11 @@
       "allowed_domains": ["github.com", "api.github.com", "raw.githubusercontent.com"]
     },
     {
+      "placeholder": "PLACEHOLDER_REPORT_REPO",
+      "env_var": "REPORT_REPO_TOKEN",
+      "allowed_domains": ["github.com", "api.github.com", "raw.githubusercontent.com"]
+    },
+    {
       "placeholder": "PLACEHOLDER_STRIPE",
       "env_var": "STRIPE_KEY",
       "allowed_domains": ["stripe.com", "api.stripe.com"]

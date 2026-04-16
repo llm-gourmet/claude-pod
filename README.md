@@ -52,7 +52,7 @@ claude-secure --profile <name> replay <delivery-id>
 
 ### Profiles
 
-A profile is a named workspace with its own secrets, whitelist, and doc repo binding.
+A profile is a named workspace with its own secrets, whitelist, and report repo configuration.
 
 ```bash
 # Create (or enter) a profile — prompts for workspace path and credentials
@@ -62,8 +62,8 @@ claude-secure --profile myproject
 Profile directory layout:
 ```
 ~/.claude-secure/profiles/<name>/
-  profile.json      # workspace, repo, docs_repo, max_turns, etc.
-  .env              # secrets: GITHUB_TOKEN, DOCS_REPO_TOKEN, etc.
+  profile.json      # workspace, repo, report_repo, max_turns, etc.
+  .env              # secrets: GITHUB_TOKEN, REPORT_REPO_TOKEN, etc.
   whitelist.json    # per-profile domain whitelist
 ```
 
@@ -73,9 +73,9 @@ Profile directory layout:
 |-------|-------------|
 | `workspace` | Absolute path to the project workspace |
 | `repo` | `owner/repo` — used for webhook routing |
-| `docs_repo` | HTTPS URL of doc repo (v4.0) |
-| `docs_branch` | Doc repo branch (default: `main`) |
-| `docs_project_dir` | Path inside doc repo for this profile (e.g. `projects/myapp`) |
+| `report_repo` | HTTPS URL of report repo |
+| `report_branch` | Report repo branch (default: `main`) |
+| `report_project_dir` | Subdirectory inside report repo for this profile (e.g. `projects/myapp`) |
 | `max_turns` | Max Claude turns per headless spawn |
 
 ---
@@ -95,8 +95,6 @@ claude-secure upgrade                  # Rebuild Claude image with latest Claude
 claude-secure --profile <name> spawn --event '<json>'    # Headless spawn
 claude-secure --profile <name> replay <delivery-id>      # Replay webhook
 claude-secure reap                     # Clean up orphaned containers and stale events
-
-claude-secure --profile <name> profile init-docs         # Bootstrap doc repo layout
 
 claude-secure help                     # Show all commands
 ```
@@ -192,32 +190,28 @@ The validator shares the claude container's network namespace (`network_mode: se
 
 ---
 
-## Doc Repo (v4.0)
+## Report Repo
 
-Every agent session can read project context from and write reports to a private doc repo. The write token (`DOCS_REPO_TOKEN`) lives in the profile `.env` on the host and is never mounted into the Claude container.
+Claude can commit and push to a private report repo at any point during a session using its Bash tool. The token (`REPORT_REPO_TOKEN`) is available inside the container and redacted by the proxy before any request reaches Anthropic.
 
 ```json
 // profile.json
 {
-  "docs_repo":        "https://github.com/you/claude-docs.git",
-  "docs_branch":      "main",
-  "docs_project_dir": "projects/myapp"
+  "report_repo":        "https://github.com/you/claude-reports.git",
+  "report_branch":      "main",
+  "report_project_dir": "projects/myapp"
 }
 ```
 
 ```bash
 # ~/.claude-secure/profiles/<name>/.env
-DOCS_REPO_TOKEN=github_pat_xxx   # host-only, never reaches the container
+REPORT_REPO_TOKEN=github_pat_xxx
 ```
 
-At spawn time:
-- The doc repo's `projects/<slug>/` subtree is shallow-cloned and bind-mounted read-only at `/agent-docs/` inside the container — agents can read context, not push
-- After Claude exits, a host-side async shipper pushes the session report to `projects/<slug>/reports/YYYY/MM/<date>-<session-id>.md`
-- A Stop hook ensures a report spool is written before Claude exits — shipper picks it up even if the container crashes
+Inside the container, Claude has access to:
+- `REPORT_REPO` — the repo URL
+- `REPORT_BRANCH` — the branch
+- `REPORT_PROJECT_DIR` — the subdirectory to work in
+- `REPORT_REPO_TOKEN` — the PAT for authenticating git pushes
 
-Bootstrap a new doc project layout:
-
-```bash
-claude-secure --profile myapp profile init-docs
-# Creates: todo.md, architecture.md, vision.md, ideas.md, specs/, reports/INDEX.md
-```
+Claude pushes directly via `git` using these env vars. Network access to `github.com` is whitelisted when `REPORT_REPO_TOKEN` is configured.

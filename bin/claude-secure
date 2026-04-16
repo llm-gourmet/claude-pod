@@ -109,68 +109,12 @@ validate_profile() {
     echo "ERROR: Profile '$name' has invalid whitelist.json (not valid JSON)" >&2
     return 1
   fi
-  if ! validate_docs_binding "$name"; then
-    return 1
-  fi
 }
 
-# Phase 23 BIND-01: validate the four doc-repo fields + DOCS_REPO_TOKEN presence.
-# Opt-out semantics: if no doc fields are set, return 0 silently (back-compat).
-# Fail-closed semantics: if ANY field is set, ALL must be valid.
-# Alias: accepts legacy report_repo / report_branch as fallback sources.
-validate_docs_binding() {
-  local name="$1"
-  local pdir="$CONFIG_DIR/profiles/$name"
-  local pj="$pdir/profile.json"
-
-  local repo branch project_dir
-  repo=$(jq -r '.docs_repo // .report_repo // empty' "$pj")
-  branch=$(jq -r '.docs_branch // .report_branch // "main"' "$pj")
-  project_dir=$(jq -r '.docs_project_dir // empty' "$pj")
-
-  # Opt-out: no repo configured means no doc binding at all.
-  if [ -z "$repo" ]; then
-    return 0
-  fi
-
-  # docs_repo must be an HTTPS URL ending in .git with no whitespace
-  if [[ ! "$repo" =~ ^https://[^[:space:]]+\.git$ ]]; then
-    echo "ERROR: profile '$name' docs_repo must be HTTPS URL ending in .git (got: $repo)" >&2
-    return 1
-  fi
-  # docs_branch: DNS-safe chars only (alphanumeric + . _ / -)
-  if [[ ! "$branch" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-    echo "ERROR: profile '$name' docs_branch is malformed: $branch" >&2
-    return 1
-  fi
-  # docs_project_dir: required when docs_repo is set, must be relative, no '..'
-  if [ -z "$project_dir" ]; then
-    echo "ERROR: profile '$name' docs_repo set but docs_project_dir is missing" >&2
-    echo "       Add: jq '.docs_project_dir = \"projects/<slug>\"' > profile.json" >&2
-    return 1
-  fi
-  if [[ "$project_dir" =~ \.\. ]] || [[ "$project_dir" = /* ]]; then
-    echo "ERROR: profile '$name' docs_project_dir must be relative and contain no '..': $project_dir" >&2
-    return 1
-  fi
-
-  # DOCS_REPO_TOKEN (or legacy REPORT_REPO_TOKEN) must be present in .env.
-  # Read via grep, not by sourcing, to avoid polluting caller state.
-  if ! grep -qE '^(DOCS_REPO_TOKEN|REPORT_REPO_TOKEN)=' "$pdir/.env" 2>/dev/null; then
-    echo "ERROR: profile '$name' docs_repo set but DOCS_REPO_TOKEN missing from $pdir/.env" >&2
-    return 1
-  fi
-
-  return 0
-}
-
-# Phase 23 BIND-02: Host-only secret projection.
-# Filters known host-only variables out of the profile .env before handing
-# the file to docker-compose as env_file:. The raw .env is still sourced
-# into host bash by load_profile_config (below), so publish_report,
-# push_with_retry, and do_profile_init_docs can still read the token.
-# Only the CONTAINER view is filtered -- the host process env is untouched.
-_HOST_ONLY_VARS=("DOCS_REPO_TOKEN" "REPORT_REPO_TOKEN")
+# Host-only secret projection: variables listed here are stripped from the
+# .env copy passed to docker-compose (env_file:). Currently empty — all
+# profile secrets reach the container. Kept as an extension point.
+_HOST_ONLY_VARS=()
 
 project_env_for_containers() {
   local src="$1"
@@ -201,96 +145,6 @@ project_env_for_containers() {
   echo "$dst"
 }
 
-# Phase 23 BIND-03: emit a one-line deprecation warning exactly once per
-# profile per shell session. Uses a per-profile sentinel file under $TMPDIR.
-# Gate on `[ -t 2 ]` so JSON-parsing wrappers and CI logs stay silent.
-emit_deprecation_warning() {
-  local profile="$1"
-  local sentinel="${TMPDIR:-/tmp}/cs-deprecation-warned-${profile}"
-  if [ -e "$sentinel" ]; then
-    return 0
-  fi
-  # Always mark as warned first, so a concurrent call cannot double-fire.
-  : > "$sentinel" 2>/dev/null || true
-  _CLEANUP_FILES+=("$sentinel")
-  if [ -t 2 ]; then
-    echo "WARNING: profile '$profile' uses deprecated 'report_repo'/'REPORT_REPO_TOKEN' fields." >&2
-    echo "         Rename to 'docs_repo'/'DOCS_REPO_TOKEN' in profile.json and .env -- see README.md." >&2
-  else
-    # Non-terminal (CI/tests/wrappers): single short line on stderr for grep coverage.
-    echo "WARNING: profile '$profile' uses deprecated report_repo/REPORT_REPO_TOKEN -- rename to docs_repo/DOCS_REPO_TOKEN." >&2
-  fi
-  return 0
-}
-
-# Phase 23 BIND-03: resolve the doc-repo fields, preferring new names over
-# legacy. Exports DOCS_REPO, DOCS_BRANCH, DOCS_PROJECT_DIR,
-# DOCS_REPO_TOKEN in the caller's shell. Back-fills REPORT_REPO_TOKEN from
-# DOCS_REPO_TOKEN if only the new name is set (so Phase 16 push_with_retry
-# and publish_report -- which read REPORT_REPO_TOKEN directly -- keep working).
-# Fires emit_deprecation_warning if any legacy field was the source of truth.
-resolve_docs_alias() {
-  local name="$1"
-  local pdir="$CONFIG_DIR/profiles/$name"
-  local pj="$pdir/profile.json"
-  local deprecated=0
-
-  # Field reads
-  local new_repo legacy_repo
-  new_repo=$(jq -r '.docs_repo // empty' "$pj" 2>/dev/null)
-  legacy_repo=$(jq -r '.report_repo // empty' "$pj" 2>/dev/null)
-  if [ -n "$new_repo" ]; then
-    DOCS_REPO="$new_repo"
-  elif [ -n "$legacy_repo" ]; then
-    DOCS_REPO="$legacy_repo"
-    deprecated=1
-  else
-    DOCS_REPO=""
-  fi
-
-  local new_branch legacy_branch
-  new_branch=$(jq -r '.docs_branch // empty' "$pj" 2>/dev/null)
-  legacy_branch=$(jq -r '.report_branch // empty' "$pj" 2>/dev/null)
-  if [ -n "$new_branch" ]; then
-    DOCS_BRANCH="$new_branch"
-  elif [ -n "$legacy_branch" ]; then
-    DOCS_BRANCH="$legacy_branch"
-    deprecated=1
-  else
-    DOCS_BRANCH="main"
-  fi
-
-  DOCS_PROJECT_DIR=$(jq -r '.docs_project_dir // empty' "$pj" 2>/dev/null)
-
-  # Token alias: prefer DOCS_REPO_TOKEN, fall back to REPORT_REPO_TOKEN.
-  # Both names have already been sourced into the caller's shell (load_profile_config
-  # ran `set -a; source .env; set +a` before calling us).
-  if [ -z "${DOCS_REPO_TOKEN:-}" ] && [ -n "${REPORT_REPO_TOKEN:-}" ]; then
-    DOCS_REPO_TOKEN="$REPORT_REPO_TOKEN"
-    deprecated=1
-  fi
-  # Back-fill legacy name from new name so Phase 16 publish_report /
-  # push_with_retry (which read REPORT_REPO_TOKEN) keeps working under the
-  # new schema even when the user has renamed everything.
-  if [ -z "${REPORT_REPO_TOKEN:-}" ] && [ -n "${DOCS_REPO_TOKEN:-}" ]; then
-    REPORT_REPO_TOKEN="$DOCS_REPO_TOKEN"
-  fi
-  # Same back-fill for REPORT_REPO so publish_report's `repo_url="${REPORT_REPO:-}"` still resolves.
-  if [ -z "${REPORT_REPO:-}" ] && [ -n "${DOCS_REPO:-}" ]; then
-    REPORT_REPO="$DOCS_REPO"
-  fi
-  if [ -z "${REPORT_BRANCH:-}" ] && [ -n "${DOCS_BRANCH:-}" ]; then
-    REPORT_BRANCH="$DOCS_BRANCH"
-  fi
-
-  export DOCS_REPO DOCS_BRANCH DOCS_PROJECT_DIR DOCS_REPO_TOKEN
-  export REPORT_REPO REPORT_BRANCH REPORT_REPO_TOKEN
-
-  if [ "$deprecated" = "1" ]; then
-    emit_deprecation_warning "$name"
-  fi
-  return 0
-}
 
 create_profile() {
   local name="$1"
@@ -458,16 +312,21 @@ load_profile_config() {
   export COMPOSE_PROJECT_NAME="claude-${name}"
   export COMPOSE_FILE="$APP_DIR/docker-compose.yml"
   export WORKSPACE_PATH
-  # Phase 23 BIND-02: project raw .env to a filtered copy that omits
-  # host-only variables (DOCS_REPO_TOKEN, REPORT_REPO_TOKEN). docker-compose
-  # reads env_file: from this path; the raw .env is still sourced into host
-  # bash below for publish_report / init-docs consumption.
+  # Filter REPORT_REPO_TOKEN out of the .env passed to docker-compose (env_file:).
+  # The raw .env is still sourced into host bash below for publish_report.
   if [ -f "$pdir/.env" ]; then
     SECRETS_FILE=$(project_env_for_containers "$pdir/.env")
     export SECRETS_FILE
   else
     export SECRETS_FILE="$pdir/.env"
   fi
+  # REPORT_* vars for publish_report: read directly from profile.json.
+  # REPORT_REPO_TOKEN is sourced from .env below.
+  REPORT_REPO=$(jq -r '.report_repo // empty' "$pdir/profile.json" 2>/dev/null || true)
+  REPORT_BRANCH=$(jq -r '.report_branch // "main"' "$pdir/profile.json" 2>/dev/null || echo "main")
+  REPORT_PATH_PREFIX=$(jq -r '.report_path_prefix // "reports"' "$pdir/profile.json" 2>/dev/null || echo "reports")
+  REPORT_PROJECT_DIR=$(jq -r '.report_project_dir // empty' "$pdir/profile.json" 2>/dev/null || true)
+  export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX REPORT_PROJECT_DIR
   export WHITELIST_PATH="$pdir/whitelist.json"
   export LOG_DIR="$CONFIG_DIR/logs"
   export LOG_PREFIX="${name}-"
@@ -481,8 +340,6 @@ load_profile_config() {
     source "$pdir/.env"
     set +a
   fi
-  # Phase 23 BIND-03: resolve new/legacy field aliases and export DOCS_* vars.
-  resolve_docs_alias "$name"
 }
 
 load_superuser_config() {
@@ -1473,178 +1330,6 @@ ASKPASS
   return 0
 }
 
-# Phase 23 DOCS-01: bootstrap projects/<slug>/ layout in the doc repo.
-# Reuses the Phase 16 publish_report clone pattern and push_with_retry
-# non-ff handler. Idempotent: second run adds zero commits.
-#
-# Args:
-#   $1 = profile name
-# Returns:
-#   0 on success (including no-op when layout already exists)
-#   1 on any failure (validation, clone, commit, push)
-do_profile_init_docs() {
-  local profile="$1"
-
-  if ! validate_profile_name "$profile"; then
-    return 1
-  fi
-  # load_profile_config was already called by the top-level profile
-  # resolution block at line ~1793; DOCS_* vars are in the environment.
-  # Call again defensively for tests that invoke do_profile_init_docs directly.
-  # Note: validate_profile is intentionally NOT called here -- the CLI dispatch
-  # block already calls it before reaching this function, and calling it again
-  # would block tests that patch docs_repo to file:// URLs for local git testing.
-  load_profile_config "$profile"
-
-  if [ -z "${DOCS_REPO:-}" ]; then
-    echo "ERROR: profile '$profile' has no docs_repo configured (set .docs_repo in profile.json)" >&2
-    return 1
-  fi
-  if [ -z "${DOCS_REPO_TOKEN:-}" ]; then
-    echo "ERROR: profile '$profile' has no DOCS_REPO_TOKEN in .env" >&2
-    return 1
-  fi
-  if [ -z "${DOCS_PROJECT_DIR:-}" ]; then
-    echo "ERROR: profile '$profile' has no docs_project_dir (set .docs_project_dir in profile.json, e.g. \"projects/$profile\")" >&2
-    return 1
-  fi
-
-  local clone_dir
-  clone_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-init-docs-XXXXXXXX")
-  _CLEANUP_FILES+=("$clone_dir")
-
-  # Askpass helper -- same pattern as publish_report (line 1072-1082).
-  local askpass="$clone_dir/.askpass.sh"
-  cat > "$askpass" <<'ASKPASS'
-#!/bin/sh
-case "$1" in
-  Username*) printf 'x-access-token\n' ;;
-  Password*) printf '%s\n' "$GIT_ASKPASS_PAT" ;;
-esac
-ASKPASS
-  chmod 700 "$askpass"
-
-  # Clone with Phase 16 bounded-clone flags + PAT scrub on stderr.
-  # Falls back to git-init for empty repos that have no branches yet.
-  local pat="$DOCS_REPO_TOKEN"
-  local clone_err="$clone_dir/clone.err"
-  local _git_env
-  _git_env=(
-    LC_ALL=C
-    GIT_ASKPASS="$askpass"
-    GIT_ASKPASS_PAT="$pat"
-    GIT_TERMINAL_PROMPT=0
-    GIT_HTTP_LOW_SPEED_LIMIT=1
-    GIT_HTTP_LOW_SPEED_TIME=30
-  )
-  if ! env "${_git_env[@]}" \
-       timeout 60 \
-       git -c credential.helper= -c credential.helper='' \
-           -c core.autocrlf=false \
-           clone --depth 1 --branch "$DOCS_BRANCH" --quiet \
-                 "$DOCS_REPO" "$clone_dir/repo" 2>"$clone_err"; then
-    # Branch not found: the repo may exist on a different default branch,
-    # or may be completely empty. Try cloning without --branch first.
-    if grep -qiE "remote branch .* not found|not found in upstream" "$clone_err" 2>/dev/null; then
-      local clone_err2="$clone_dir/clone2.err"
-      if env "${_git_env[@]}" \
-           timeout 60 \
-           git -c credential.helper= -c credential.helper='' \
-               -c core.autocrlf=false \
-               clone --depth 1 --quiet \
-                     "$DOCS_REPO" "$clone_dir/repo" 2>"$clone_err2"; then
-        # Repo exists on a different default branch. Use it as-is; DOCS_BRANCH
-        # will be the push target so the commit lands on the existing branch.
-        local actual_branch
-        actual_branch=$(git -C "$clone_dir/repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-        DOCS_BRANCH="${actual_branch:-$DOCS_BRANCH}"
-      else
-        # Truly empty repo — bootstrap with git init.
-        git init -q "$clone_dir/repo"
-        git -C "$clone_dir/repo" symbolic-ref HEAD "refs/heads/$DOCS_BRANCH"
-        env "${_git_env[@]}" \
-          git -C "$clone_dir/repo" \
-              -c credential.helper= -c credential.helper='' \
-              remote add origin "$DOCS_REPO"
-      fi
-    else
-      sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$clone_err" >&2
-      return 1
-    fi
-  fi
-
-  # Create project layout. mkdir -p is idempotent; stub writer never overwrites.
-  local proj="$clone_dir/repo/$DOCS_PROJECT_DIR"
-  mkdir -p "$proj/specs" "$proj/reports"
-
-  # Stub writer: only creates the file if absent. Keeps init-docs idempotent.
-  _write_stub() {
-    local path="$1" content="$2"
-    if [ -f "$path" ]; then
-      return 0
-    fi
-    printf '%s' "$content" > "$path"
-  }
-
-  _write_stub "$proj/todo.md" "# Todo -- $profile
-
-- [ ] (add items)
-"
-  _write_stub "$proj/architecture.md" "# Architecture -- $profile
-
-Describe the system's structure here.
-"
-  _write_stub "$proj/vision.md" "# Vision -- $profile
-
-Describe the project goal here.
-"
-  _write_stub "$proj/ideas.md" "# Ideas -- $profile
-
-Append-only findings.
-"
-  _write_stub "$proj/reports/INDEX.md" "# Report Index -- $profile
-
-| Date | Session | Summary |
-|------|---------|---------|
-"
-  _write_stub "$proj/specs/.gitkeep" ""
-
-  # Stage the project subdir. git add is idempotent on unchanged files.
-  if ! git -C "$clone_dir/repo" -c core.autocrlf=false add "$DOCS_PROJECT_DIR/"; then
-    echo "ERROR: git add failed for $DOCS_PROJECT_DIR" >&2
-    return 1
-  fi
-
-  # Idempotency gate: if the working tree matches HEAD after staging,
-  # nothing to do. Exit 0 without creating a commit.
-  if git -C "$clone_dir/repo" diff --cached --quiet; then
-    echo "Doc layout already initialized at $DOCS_PROJECT_DIR -- nothing to do."
-    return 0
-  fi
-
-  # Atomic commit (single commit per Phase 23 success criterion 4).
-  local commit_msg="docs($profile): initialize $DOCS_PROJECT_DIR layout"
-  local commit_err="$clone_dir/commit.err"
-  if ! LC_ALL=C \
-       GIT_AUTHOR_NAME="claude-secure" \
-       GIT_AUTHOR_EMAIL="claude-secure@localhost" \
-       GIT_COMMITTER_NAME="claude-secure" \
-       GIT_COMMITTER_EMAIL="claude-secure@localhost" \
-       git -C "$clone_dir/repo" -c core.autocrlf=false \
-           commit -q -m "$commit_msg" 2>"$commit_err"; then
-    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$commit_err" >&2
-    return 1
-  fi
-
-  # Push via the Phase 16 non-ff retry engine. push_with_retry reads
-  # REPORT_REPO_TOKEN (back-filled from DOCS_REPO_TOKEN by resolve_docs_alias).
-  if ! push_with_retry "$clone_dir" "$DOCS_BRANCH"; then
-    return 1
-  fi
-
-  echo "Initialized $DOCS_PROJECT_DIR in $DOCS_REPO ($DOCS_BRANCH)"
-  return 0
-}
 
 
 # Phase 16: best-effort audit writer for early-return spawn_error paths.
@@ -1658,140 +1343,6 @@ _spawn_error_audit() {
   LOG_DIR="${LOG_DIR:-$CONFIG_DIR/logs}" \
     write_audit_entry "$_ts" "$_did" "" "unknown" "${PROFILE:-unknown}" \
       "" "" "" "" "" "" "spawn_error" "" "${err_msg:0:200}" 2>/dev/null || true
-}
-
-# Phase 25 CTX-01..CTX-04: sparse shallow partial clone of the doc repo's
-# projects/<slug>/ subtree, bind-mounted read-only into the claude container
-# at /agent-docs. HOST-SIDE ONLY -- the PAT is consumed only by the host git
-# invocation; the container only sees a read-only filesystem at /agent-docs/.
-#
-# Skips silently when DOCS_REPO is empty (CTX-03).
-# Fails closed on clone/sparse-checkout errors -- a misconfiguration should
-# surface loudly, not degrade silently (see 25-RESEARCH.md Open Question 1).
-# The mount source is the project SUBDIRECTORY, not the clone root -- this
-# structurally excludes .git/ from the bind mount (CTX-04).
-#
-# Exports: AGENT_DOCS_HOST_PATH (absolute, realpath-normalized) on success;
-#          empty string on the CTX-03 no-docs skip path; unset on error.
-# Returns: 0 on success or silent skip; 1 on any clone/sparse-checkout error.
-fetch_docs_context() {
-  # CTX-03: opt-out -- silent skip when no docs repo is configured.
-  if [ -z "${DOCS_REPO:-}" ]; then
-    echo "info: fetch_docs_context: skipped (no docs_repo configured)" >&2
-    AGENT_DOCS_HOST_PATH=""
-    export AGENT_DOCS_HOST_PATH
-    return 0
-  fi
-
-  # Phase 28 fix (pre-push test regression): if DOCS_PROJECT_DIR is empty,
-  # this is a legacy Phase 16 profile that uses report_repo for the result
-  # channel only. Phase 23's resolve_docs_alias back-filled DOCS_REPO from
-  # report_repo, but there is no docs_project_dir so the profile never opted
-  # into agent docs fetching. Treat as "no docs configured" and skip silently
-  # rather than fail-closed. Opting into docs requires an explicit
-  # docs_project_dir in profile.json.
-  if [ -z "${DOCS_PROJECT_DIR:-}" ]; then
-    echo "info: fetch_docs_context: skipped (no docs_project_dir; legacy report_repo profile)" >&2
-    AGENT_DOCS_HOST_PATH=""
-    export AGENT_DOCS_HOST_PATH
-    return 0
-  fi
-
-  # Defensive: Phase 23 validate_docs_binding already enforces these when
-  # docs_repo is set, but fetch_docs_context runs on the do_spawn path which
-  # may skip full validation. Re-check to fail fast with a clear error.
-  if [ -z "${DOCS_BRANCH:-}" ] || [ -z "${DOCS_REPO_TOKEN:-}" ]; then
-    echo "ERROR: fetch_docs_context: docs_repo + docs_project_dir set but DOCS_BRANCH / DOCS_REPO_TOKEN missing" >&2
-    return 1
-  fi
-
-  local clone_root
-  clone_root=$(mktemp -d "${TMPDIR:-/tmp}/cs-agent-docs-XXXXXXXX")
-  # Register cleanup IMMEDIATELY after mktemp -- before any git call -- so
-  # a mid-clone failure cannot leak the temp dir (Phase 24 discipline).
-  _CLEANUP_FILES+=("$clone_root")
-
-  # Askpass helper -- identical pattern to do_profile_init_docs (line ~1485).
-  # The PAT never appears in argv.
-  local askpass="$clone_root/.askpass.sh"
-  cat > "$askpass" <<'ASKPASS'
-#!/bin/sh
-case "$1" in
-  Username*) printf 'x-access-token\n' ;;
-  Password*) printf '%s\n' "$GIT_ASKPASS_PAT" ;;
-esac
-ASKPASS
-  chmod 700 "$askpass"
-
-  local pat="$DOCS_REPO_TOKEN"
-  local clone_err="$clone_root/clone.err"
-  local _git_env
-  _git_env=(
-    LC_ALL=C
-    GIT_ASKPASS="$askpass"
-    GIT_ASKPASS_PAT="$pat"
-    GIT_TERMINAL_PROMPT=0
-    GIT_HTTP_LOW_SPEED_LIMIT=1
-    GIT_HTTP_LOW_SPEED_TIME=30
-  )
-
-  # CTX-01: sparse + shallow + partial clone. --filter=blob:none defers
-  # blob fetch until checkout; --sparse initializes an empty sparse-checkout
-  # so `set` can narrow to one subdirectory. Both flags require git 2.25+.
-  # NOTE: git silently ignores --depth and --filter when cloning from a
-  # local file:// URL (25-RESEARCH.md Pitfall 3) -- harmless for tests.
-  if ! env "${_git_env[@]}" \
-       timeout 60 \
-       git -c credential.helper= -c credential.helper='' \
-           -c core.autocrlf=false \
-           clone --depth=1 --filter=blob:none --sparse \
-                 --branch "$DOCS_BRANCH" --quiet \
-                 "$DOCS_REPO" "$clone_root/repo" 2>"$clone_err"; then
-    # CTX-04 / security: scrub PAT from stderr before surfacing.
-    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$clone_err" >&2
-    echo "ERROR: fetch_docs_context: clone failed (see scrubbed stderr above)" >&2
-    return 1
-  fi
-
-  # Narrow the working tree to the project subdir. Cone mode (default since
-  # git 2.27) is faster on large repos and matches the single-prefix case.
-  local sparse_err="$clone_root/sparse.err"
-  if ! git -C "$clone_root/repo" sparse-checkout set "$DOCS_PROJECT_DIR" 2>"$sparse_err"; then
-    sed "s|${pat}|<REDACTED:DOCS_REPO_TOKEN>|g" "$sparse_err" >&2
-    echo "ERROR: fetch_docs_context: sparse-checkout set failed for $DOCS_PROJECT_DIR" >&2
-    return 1
-  fi
-
-  # CTX-04: the bind-mount source is the SUBDIRECTORY, not the clone root.
-  # .git/ lives at $clone_root/repo/.git/ -- completely outside the mount
-  # source. Verified empirically on git 2.43.0 (see 25-RESEARCH.md Example 1).
-  local mount_src="$clone_root/repo/$DOCS_PROJECT_DIR"
-  if [ ! -d "$mount_src" ]; then
-    echo "ERROR: fetch_docs_context: project subdir missing after sparse-checkout: $DOCS_PROJECT_DIR" >&2
-    echo "       Did you run 'claude-secure profile init-docs --profile $PROFILE'?" >&2
-    return 1
-  fi
-
-  # Open Question 3: fail fast on empty subtree (typo'd docs_project_dir
-  # after sparse-checkout gives an empty dir with no error).
-  if [ -z "$(ls -A "$mount_src" 2>/dev/null)" ]; then
-    echo "ERROR: fetch_docs_context: project subdir is empty after sparse-checkout: $DOCS_PROJECT_DIR" >&2
-    echo "       Run 'claude-secure profile init-docs --profile $PROFILE' to bootstrap the project layout." >&2
-    return 1
-  fi
-
-  # Open Question 5: normalize through realpath to collapse macOS /tmp ->
-  # /private/tmp symlinks that could confuse Docker Desktop bind mounts.
-  # GNU realpath is guaranteed by Phase 18 PATH bootstrap on macOS.
-  local resolved
-  if resolved=$(realpath "$mount_src" 2>/dev/null) && [ -n "$resolved" ]; then
-    mount_src="$resolved"
-  fi
-
-  AGENT_DOCS_HOST_PATH="$mount_src"
-  export AGENT_DOCS_HOST_PATH
-  echo "info: fetch_docs_context: mounted $DOCS_PROJECT_DIR (host: $mount_src) read-only at /agent-docs" >&2
-  return 0
 }
 
 do_spawn() {
@@ -1903,34 +1454,17 @@ do_spawn() {
   audit_branch=$(echo "$EVENT_JSON" | jq -r '.pull_request.head.ref // (.ref // empty | sub("^refs/heads/"; ""))')
   [ "$audit_branch" = "null" ] && audit_branch=""
 
-  # Phase 16 / D-12 (patched in Phase 28 for OPS-01 forward compat):
-  # Read report_repo fields from profile.json and export as env vars so publish_report
-  # can consume them via REPORT_REPO / REPORT_BRANCH / REPORT_PATH_PREFIX.
-  # REPORT_REPO_TOKEN comes from profile.env (loaded earlier via load_profile_config
-  # -> resolve_docs_alias, which also back-fills REPORT_REPO from DOCS_REPO when only
-  # the new Phase 23 field names are set). The fallback ordering below (docs_* first,
-  # report_* legacy second) matches validate_docs_binding:127 so Phase 23-migrated
-  # profiles never silently skip report publishing. DO NOT add a .docs_path_prefix
-  # alias here -- no such Phase 23 field exists and inventing one is out of scope.
+  # Read report_repo fields from profile.json for publish_report.
+  # REPORT_REPO_TOKEN is sourced from .env via load_profile_config.
+  # REPORT_REPO/REPORT_BRANCH/REPORT_PATH_PREFIX are set by load_profile_config
+  # but re-export here to ensure they are available in the spawn subshell.
   local _profile_json="$CONFIG_DIR/profiles/$PROFILE/profile.json"
   if [ -f "$_profile_json" ]; then
-    REPORT_REPO=$(jq -r '.docs_repo // .report_repo // empty' "$_profile_json")
-    REPORT_BRANCH=$(jq -r '.docs_branch // .report_branch // "main"' "$_profile_json")
+    REPORT_REPO=$(jq -r '.report_repo // empty' "$_profile_json")
+    REPORT_BRANCH=$(jq -r '.report_branch // "main"' "$_profile_json")
     REPORT_PATH_PREFIX=$(jq -r '.report_path_prefix // "reports"' "$_profile_json")
-    export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX
-  fi
-
-  # Phase 25 CTX-01..CTX-04: sparse shallow clone of the doc repo's
-  # projects/<slug>/ subtree, bind-mounted read-only into the claude
-  # container at /agent-docs. Skips silently when DOCS_REPO is empty
-  # (CTX-03). Exports AGENT_DOCS_HOST_PATH for docker-compose.yml to
-  # consume on the `docker compose up -d --wait` call below.
-  # Fail-closed: a clone/sparse-checkout failure aborts the spawn so
-  # misconfigurations (expired PAT, renamed branch, typo'd project dir)
-  # surface loudly rather than silently running without context.
-  if ! fetch_docs_context; then
-    _spawn_error_audit "spawn: fetch_docs_context failed"
-    return 1
+    REPORT_PROJECT_DIR=$(jq -r '.report_project_dir // empty' "$_profile_json")
+    export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX REPORT_PROJECT_DIR
   fi
 
   # Resolve and render prompt template (per D-13 through D-17)
@@ -2688,27 +2222,12 @@ case "$CMD" in
     do_reap "${REMAINING_ARGS[@]:1}"
     ;;
   profile)
-    # Phase 23 DOCS-01: profile subcommand dispatch.
-    # Uses the existing REMAINING_ARGS array set by parse_log_flags.
     PROFILE_SUB="${REMAINING_ARGS[1]:-}"
     case "$PROFILE_SUB" in
-      init-docs)
-        if [ -z "${PROFILE:-}" ]; then
-          echo "ERROR: --profile is required for 'profile init-docs'" >&2
-          exit 1
-        fi
-        do_profile_init_docs "$PROFILE"
-        exit $?
-        ;;
       ""|--help|-h|help)
         echo "Usage: claude-secure --profile NAME profile <subcommand>"
         echo ""
-        echo "Profile subcommands:"
-        echo "  init-docs    Bootstrap the per-project doc repo layout (DOCS-01)"
-        echo ""
-        echo "Required profile fields for init-docs:"
-        echo "  profile.json: docs_repo, docs_branch, docs_project_dir"
-        echo "  .env:         DOCS_REPO_TOKEN (host-only, never mounted into container)"
+        echo "No profile subcommands are currently available."
         exit 0
         ;;
       *)
@@ -2723,15 +2242,6 @@ case "$CMD" in
     # 777 required: three containers write as different UIDs (claude:1001, node:1000, root:0)
     chmod 777 "$LOG_DIR"
     cleanup_containers
-    # Phase 25 CTX-01..CTX-04: populate /agent-docs mount for interactive
-    # sessions too. Non-fatal on the interactive path: if fetch fails,
-    # print a warning and continue so interactive users are not blocked by
-    # a transient doc-repo misconfiguration while iterating on profile.json.
-    if ! fetch_docs_context; then
-      echo "warning: fetch_docs_context failed on interactive path; continuing without /agent-docs mount" >&2
-      AGENT_DOCS_HOST_PATH=""
-      export AGENT_DOCS_HOST_PATH
-    fi
     docker compose up -d
     docker compose exec -it claude claude --dangerously-skip-permissions
     # Tear down containers after session ends — no reason to keep them running.
