@@ -217,41 +217,25 @@ test_no_force_push_grep() {
 }
 
 test_readme_documents_phase16() {
-  # Wave 2 static invariant: README.md documents the operator onboarding
-  # flow for the doc repo result channel. Phase 23 (v4.0) renamed the schema
-  # from report_repo/REPORT_REPO_TOKEN to docs_repo/DOCS_REPO_TOKEN; this test
-  # accepts either naming so it survives the rename without churn. The
-  # semantic invariant -- that the README documents (a) the doc-repo field,
-  # (b) the host-only PAT, and (c) that the PAT never leaks to the container
-  # -- is preserved.
+  # Wave 2 static invariant: README.md documents the report repo configuration.
   local readme="$PROJECT_DIR/README.md"
   [ -f "$readme" ] || { echo "README.md missing" >&2; return 1; }
 
-  # Doc repo field must be documented under either name.
-  if ! grep -qE '(docs_repo|report_repo)' "$readme"; then
-    echo "README.md missing doc-repo field marker (docs_repo or report_repo)" >&2
+  # report_repo field must be documented.
+  if ! grep -q 'report_repo' "$readme"; then
+    echo "README.md missing report_repo field marker" >&2
     return 1
   fi
 
-  # Host-only PAT must be documented under either name.
-  if ! grep -qE '(DOCS_REPO_TOKEN|REPORT_REPO_TOKEN)' "$readme"; then
-    echo "README.md missing doc-repo PAT marker (DOCS_REPO_TOKEN or REPORT_REPO_TOKEN)" >&2
+  # REPORT_REPO_TOKEN must be documented (at least 2 references: env var + description).
+  if ! grep -q 'REPORT_REPO_TOKEN' "$readme"; then
+    echo "README.md missing REPORT_REPO_TOKEN marker" >&2
     return 1
   fi
-
-  # At least 2 references to the PAT across either name (env var + security note).
   local tok_count
-  tok_count=$(grep -cE '(DOCS_REPO_TOKEN|REPORT_REPO_TOKEN)' "$readme")
+  tok_count=$(grep -c 'REPORT_REPO_TOKEN' "$readme")
   if [ "$tok_count" -lt 2 ]; then
-    echo "Expected >=2 PAT references in README.md, got $tok_count" >&2
-    return 1
-  fi
-
-  # Security property: the PAT must be documented as host-only (not in container).
-  # v4.0 phrasing: "never mounted into the Claude container".
-  # Legacy phrasing: "force-push" security note + "host-only" token discussion.
-  if ! grep -qiE '(never.*container|host[- ]only|force[- ]push)' "$readme"; then
-    echo "Expected host-only / never-in-container / force-push security note in README.md" >&2
+    echo "Expected >=2 REPORT_REPO_TOKEN references in README.md, got $tok_count" >&2
     return 1
   fi
 
@@ -304,6 +288,76 @@ test_installer_ships_report_templates() {
     return 1
   }
 
+  return 0
+}
+
+# =========================================================================
+# REPORT TOKEN / VARS TESTS (new functionality)
+# =========================================================================
+
+test_report_token_in_secrets_file() {
+  # REPORT_REPO_TOKEN must NOT be filtered from SECRETS_FILE (no longer host-only).
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf '$tmpdir'" RETURN
+
+  local pdir="$tmpdir/profiles/myproj"
+  mkdir -p "$pdir" "$tmpdir/ws"
+  cat > "$pdir/profile.json" <<EOF
+{"workspace":"$tmpdir/ws"}
+EOF
+  printf 'ANTHROPIC_API_KEY=test\nREPORT_REPO_TOKEN=ghp_secret123\n' > "$pdir/.env"
+  echo '{"secrets":[]}' > "$pdir/whitelist.json"
+
+  local secrets_file
+  secrets_file=$(
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export APP_DIR="$PROJECT_DIR"
+    export CONFIG_DIR="$tmpdir"
+    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    load_profile_config "myproj"
+    echo "$SECRETS_FILE"
+  )
+
+  [ -f "$secrets_file" ] || { echo "SECRETS_FILE not set or missing" >&2; return 1; }
+  grep -q 'REPORT_REPO_TOKEN=ghp_secret123' "$secrets_file" \
+    || { echo "REPORT_REPO_TOKEN missing from SECRETS_FILE" >&2; return 1; }
+  return 0
+}
+
+test_whitelist_has_report_repo_token() {
+  # config/whitelist.json must have a REPORT_REPO_TOKEN entry with correct fields.
+  local wl="$PROJECT_DIR/config/whitelist.json"
+  [ -f "$wl" ] || { echo "config/whitelist.json missing" >&2; return 1; }
+
+  local env_var placeholder
+  env_var=$(jq -r '[.secrets[] | select(.env_var=="REPORT_REPO_TOKEN")] | .[0].env_var' "$wl")
+  placeholder=$(jq -r '[.secrets[] | select(.env_var=="REPORT_REPO_TOKEN")] | .[0].placeholder' "$wl")
+
+  [ "$env_var" = "REPORT_REPO_TOKEN" ] \
+    || { echo "REPORT_REPO_TOKEN entry missing from whitelist.json" >&2; return 1; }
+  [ "$placeholder" = "PLACEHOLDER_REPORT_REPO" ] \
+    || { echo "placeholder wrong: $placeholder" >&2; return 1; }
+
+  # allowed_domains must include github.com
+  local has_github
+  has_github=$(jq -r '[.secrets[] | select(.env_var=="REPORT_REPO_TOKEN")] | .[0].allowed_domains | contains(["github.com"])' "$wl")
+  [ "$has_github" = "true" ] \
+    || { echo "github.com not in allowed_domains for REPORT_REPO_TOKEN" >&2; return 1; }
+  return 0
+}
+
+test_report_vars_in_docker_compose() {
+  # docker-compose.yml must inject REPORT_REPO, REPORT_BRANCH, REPORT_PROJECT_DIR
+  # into the claude service environment.
+  local dc="$PROJECT_DIR/docker-compose.yml"
+  grep -q 'REPORT_REPO=' "$dc" \
+    || { echo "REPORT_REPO not in docker-compose.yml environment" >&2; return 1; }
+  grep -q 'REPORT_BRANCH=' "$dc" \
+    || { echo "REPORT_BRANCH not in docker-compose.yml environment" >&2; return 1; }
+  grep -q 'REPORT_PROJECT_DIR=' "$dc" \
+    || { echo "REPORT_PROJECT_DIR not in docker-compose.yml environment" >&2; return 1; }
   return 0
 }
 
@@ -761,11 +815,8 @@ test_no_report_repo_skips_push() {
 }
 
 test_docs_repo_field_alias_publishes() {
-  # Phase 28 OPS-01 regression: a Phase 23-migrated profile (docs_repo only,
-  # no report_repo key) MUST publish a report through do_spawn -> publish_report.
-  # Reproduces the bug where bin/claude-secure:2077-2079 clobbers REPORT_REPO
-  # with an empty string from `jq -r '.report_repo // empty'` after
-  # resolve_docs_alias already back-filled it from DOCS_REPO.
+  # Regression: a profile with report_repo in profile.json MUST publish a
+  # report through do_spawn -> publish_report.
   local tid="docs_alias"
   local tdir="$TEST_TMPDIR/$tid"
   local home_dir="$tdir/home"
@@ -778,53 +829,25 @@ test_docs_repo_field_alias_publishes() {
   local repo_url
   repo_url=$(setup_bare_repo)
 
-  # Seed projects/test-alias/ subdir so fetch_docs_context's sparse checkout
-  # finds a non-empty project dir. Without this, fetch_docs_context aborts
-  # do_spawn before publish_report ever runs, masking the OPS-01 bug.
-  local seed_clone="$tdir/docs-seed"
-  git clone --quiet "$repo_url" "$seed_clone" >/dev/null 2>&1 || {
-    echo "FAIL: could not clone bare repo to seed projects/test-alias" >&2
-    return 1
-  }
-  (
-    cd "$seed_clone" || exit 1
-    git config user.email "seed@test.local"
-    git config user.name "seed"
-    mkdir -p projects/test-alias
-    printf '# test-alias project docs\n' > projects/test-alias/README.md
-    git add projects/test-alias/README.md
-    git commit --quiet -m "seed projects/test-alias" >/dev/null 2>&1
-    git push --quiet origin main >/dev/null 2>&1
-  ) || {
-    echo "FAIL: could not seed projects/test-alias into bare repo" >&2
-    return 1
-  }
-  rm -rf "$seed_clone"
-
-  # Write profile.json with ONLY the Phase 23 canonical docs_* fields.
-  # No .report_repo, no .report_branch -- this is the exact post-migration shape.
+  # Write profile.json with report_repo fields.
   jq -n \
     --arg name "test-profile" \
     --arg repo "test-org/test-repo" \
     --arg secret "test-secret-abc123" \
     --arg workspace "$tdir/workspace" \
-    --arg docs_repo "$repo_url" \
-    --arg docs_branch "main" \
-    --arg docs_project_dir "projects/test-alias" \
+    --arg report_repo "$repo_url" \
+    --arg report_branch "main" \
     '{
       name: $name,
       repo: $repo,
       webhook_secret: $secret,
       workspace: $workspace,
-      docs_repo: $docs_repo,
-      docs_branch: $docs_branch,
-      docs_project_dir: $docs_project_dir,
+      report_repo: $report_repo,
+      report_branch: $report_branch,
       report_path_prefix: "reports"
     }' > "$profile_dir/profile.json"
 
-  # Seed DOCS_REPO_TOKEN (not REPORT_REPO_TOKEN) -- resolve_docs_alias back-fills
-  # REPORT_REPO_TOKEN from DOCS_REPO_TOKEN automatically.
-  printf 'DOCS_REPO_TOKEN=ghp_TESTFAKE123\n' > "$profile_dir/.env"
+  printf 'REPORT_REPO_TOKEN=ghp_TESTFAKE123\n' > "$profile_dir/.env"
 
   # Stub whitelist so defensive validate_profile paths are satisfied.
   printf '{"domains":["api.anthropic.com"]}\n' > "$profile_dir/whitelist.json"
@@ -1316,6 +1339,12 @@ main() {
   run_test "no force-push in bin"               test_no_force_push_grep
   run_test "installer ships report templates"   test_installer_ships_report_templates
   run_test "README documents Phase 16"          test_readme_documents_phase16
+  echo ""
+
+  echo "--- Report token / vars ---"
+  run_test "REPORT_REPO_TOKEN in SECRETS_FILE"  test_report_token_in_secrets_file
+  run_test "whitelist has REPORT_REPO_TOKEN"    test_whitelist_has_report_repo_token
+  run_test "report vars in docker-compose"      test_report_vars_in_docker_compose
   echo ""
 
   echo "--- OPS-01: Report push ---"

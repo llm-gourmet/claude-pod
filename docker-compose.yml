@@ -25,15 +25,13 @@ services:
       - NO_PROXY=localhost,127.0.0.1,proxy
       - LOG_HOOK=${LOG_HOOK:-0}
       - LOG_PREFIX=${LOG_PREFIX:-}
+      - REPORT_REPO=${REPORT_REPO:-}
+      - REPORT_BRANCH=${REPORT_BRANCH:-main}
+      - REPORT_PROJECT_DIR=${REPORT_PROJECT_DIR:-}
     volumes:
       - workspace:/workspace
       - ${WHITELIST_PATH:-./config/whitelist.json}:/etc/claude-secure/whitelist.json:ro
       - ${LOG_DIR:-./logs}:/var/log/claude-secure
-      # Phase 25 CTX-01..CTX-04: read-only bind mount of the doc repo's
-      # projects/<slug>/ subtree. fetch_docs_context (Plan 02) exports
-      # AGENT_DOCS_HOST_PATH before `docker compose up`. Falls back to
-      # /dev/null when no docs_repo is configured (CTX-03 silent skip).
-      - ${AGENT_DOCS_HOST_PATH:-/dev/null}:/agent-docs:ro
     networks:
       - claude-internal
     cap_drop:

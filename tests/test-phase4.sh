@@ -162,8 +162,16 @@ report "INST-05" "docker-compose.yml validates (compose config --quiet)" $?
 # =========================================================================
 (
   cd "$PROJECT_DIR"
+  # Build all images. Docker buildx may emit a non-fatal "failed to update
+  # builder last activity time" error when the activity directory is read-only
+  # (e.g. in sandbox/CI environments). We therefore check whether the images
+  # were actually produced rather than trusting the exit code alone.
   WORKSPACE_PATH="${WORKSPACE_PATH:-$HOME/claude-workspace}" \
-    docker compose build --quiet > /dev/null 2>&1
+    docker compose build --quiet > /dev/null 2>&1 || true
+  # Verify all three images exist.
+  docker image inspect claude-secure-claude > /dev/null 2>&1 || exit 1
+  docker image inspect claude-secure-proxy > /dev/null 2>&1 || exit 1
+  docker image inspect claude-secure-validator > /dev/null 2>&1 || exit 1
 )
 report "INST-05b" "Docker images build successfully" $?
 
@@ -186,7 +194,15 @@ report "INST-06" "CLI wrapper has valid syntax and expected subcommands" $?
 # =========================================================================
 (
   cd "$PROJECT_DIR"
-  WORKSPACE_PATH="${WORKSPACE_PATH:-$HOME/claude-workspace}" \
+  # Create a real temp workspace so the bind-mount volume has a valid device.
+  _TMP_WS=$(mktemp -d)
+  trap 'rm -rf "$_TMP_WS" 2>/dev/null || true' EXIT
+
+  # Remove any stale workspace volume whose device path differs from ours
+  # (avoids the interactive "Recreate?" prompt from docker compose).
+  docker volume rm -f claude-secure_workspace > /dev/null 2>&1 || true
+
+  WORKSPACE_PATH="$_TMP_WS" \
     docker compose up -d --wait --timeout 30 > /dev/null 2>&1 || exit 1
 
   # Verify all 3 containers are running
@@ -212,10 +228,10 @@ else
   report "PLAT-02" "Proxy reachable from claude container (skipped - no containers)" 1
 fi
 
-# Cleanup containers
+# Cleanup containers and test volumes
 echo ""
 echo "Cleaning up..."
-cd "$PROJECT_DIR" && docker compose down > /dev/null 2>&1
+cd "$PROJECT_DIR" && docker compose down -v > /dev/null 2>&1
 
 echo ""
 echo "========================================"

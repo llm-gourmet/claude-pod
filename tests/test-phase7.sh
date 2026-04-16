@@ -41,9 +41,9 @@ TEMP_WORKSPACE=$(mktemp -d)
 
 cleanup() {
   cd "$PROJECT_DIR"
-  docker compose down >/dev/null 2>&1 || true
+  docker compose down -v >/dev/null 2>&1 || true
   rm -f "$TEMP_ENV_FULL" "$TEMP_ENV_MINIMAL"
-  rm -rf "$TEMP_WORKSPACE"
+  rm -rf "$TEMP_WORKSPACE" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -65,7 +65,12 @@ export ANTHROPIC_API_KEY=sk-ant-test-phase7
 export WORKSPACE_PATH="$TEMP_WORKSPACE"
 
 echo "Building and starting containers..."
-docker compose build --quiet proxy >/dev/null 2>&1 || { echo "FATAL: proxy build failed"; exit 1; }
+# Build proxy image. Ignore the non-fatal buildx activity-file error that
+# occurs in sandbox/CI environments (read-only ~/.docker/buildx/activity/).
+docker compose build --quiet proxy >/dev/null 2>&1 || true
+docker image inspect claude-secure-proxy >/dev/null 2>&1 || { echo "FATAL: proxy build failed"; exit 1; }
+# Remove stale workspace volume to avoid interactive "Recreate?" prompt.
+docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
 docker compose up -d >/dev/null 2>&1 || { echo "FATAL: docker compose up failed"; exit 1; }
 
 # Wait for proxy container to be ready
@@ -138,13 +143,14 @@ report "ENV-04" "Proxy has secrets and whitelist for redaction" $?
 # =========================================================================
 # ENV-05: System works with minimal .env (auth only, no secrets)
 # =========================================================================
-docker compose down >/dev/null 2>&1
+docker compose down -v >/dev/null 2>&1
 
 # Create minimal .env with only auth
 echo "ANTHROPIC_API_KEY=sk-ant-test-minimal" > "$TEMP_ENV_MINIMAL"
 export SECRETS_FILE="$TEMP_ENV_MINIMAL"
 export ANTHROPIC_API_KEY=sk-ant-test-minimal
 
+docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
 docker compose up -d >/dev/null 2>&1
 # Wait for proxy to be ready
 READY=false

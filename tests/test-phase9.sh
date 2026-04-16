@@ -37,29 +37,17 @@ echo "========================================"
 echo ""
 
 # =========================================================================
-# MULTI-01: --instance flag is required
-# Running without --instance should exit non-zero with error message
+# MULTI-01: spawn requires --profile
+# Running 'spawn' without --profile should exit non-zero with error message
 # =========================================================================
-test_instance_required() {
-  local tmpdir
-  tmpdir=$(mktemp -d)
-  trap "rm -rf '$tmpdir'" RETURN
-
-  # Create minimal installation structure so the script passes the install check
-  mkdir -p "$tmpdir/.claude-secure/instances/default"
-  echo 'APP_DIR="/tmp/fake"' > "$tmpdir/.claude-secure/config.sh"
-  echo 'PLATFORM="linux"' >> "$tmpdir/.claude-secure/config.sh"
-  echo 'WORKSPACE_PATH="/tmp/ws"' > "$tmpdir/.claude-secure/instances/default/config.sh"
-  echo 'ANTHROPIC_API_KEY=test' > "$tmpdir/.claude-secure/instances/default/.env"
-
-  # Run without --instance, expect failure
+test_profile_required_for_spawn() {
   local output
-  output=$(HOME="$tmpdir" bash "$PROJECT_DIR/bin/claude-secure" 2>&1) && return 1
-  # Verify error message mentions --instance
-  echo "$output" | grep -qi "instance.*required\|instance NAME" || return 1
+  output=$(bash "$PROJECT_DIR/bin/claude-secure" spawn 2>&1) && return 1
+  # Verify error message mentions --profile
+  echo "$output" | grep -qi "profile" || return 1
   return 0
 }
-run_test "MULTI-01: --instance flag required" test_instance_required
+run_test "MULTI-01: --profile required for spawn" test_profile_required_for_spawn
 
 # =========================================================================
 # MULTI-02: DNS-safe instance name validation
@@ -93,58 +81,62 @@ run_test "MULTI-02: DNS-safe instance name validation" test_dns_validation
 # MULTI-03: Migration from single-instance layout
 # Old layout: CONFIG_DIR/{config.sh, .env} -> new: CONFIG_DIR/instances/default/
 # =========================================================================
-test_migration() {
+test_load_profile_config_reads_report_fields() {
   local tmpdir
   tmpdir=$(mktemp -d)
   trap "rm -rf '$tmpdir'" RETURN
 
   local cfg="$tmpdir/.claude-secure"
-  mkdir -p "$cfg"
+  local pdir="$cfg/profiles/myproj"
+  mkdir -p "$pdir" "$tmpdir/workspace"
 
-  # Create old single-instance layout
-  cat > "$cfg/config.sh" <<'EOF'
-WORKSPACE_PATH="/home/user/workspace"
-PLATFORM="linux"
-APP_DIR="/opt/claude-secure"
+  cat > "$pdir/profile.json" <<EOF
+{
+  "workspace": "$tmpdir/workspace",
+  "report_repo": "https://github.com/user/reports.git",
+  "report_branch": "docs",
+  "report_project_dir": "projects/myproj"
+}
 EOF
-  cat > "$cfg/.env" <<'EOF'
-ANTHROPIC_API_KEY=sk-test-key-12345
-GITHUB_TOKEN=ghp_test
-EOF
+  printf 'ANTHROPIC_API_KEY=test\nREPORT_REPO_TOKEN=ghp_fake\n' > "$pdir/.env"
+  echo '{"secrets":[]}' > "$pdir/whitelist.json"
 
-  # Need a whitelist template at the APP_DIR path
-  local fake_app="$tmpdir/app"
-  mkdir -p "$fake_app/config"
-  echo '{"secrets":[]}' > "$fake_app/config/whitelist.json"
+  local repo branch pdir_var
+  # Source the script and call load_profile_config
+  repo=$(
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export APP_DIR="$PROJECT_DIR"
+    export CONFIG_DIR="$cfg"
+    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    load_profile_config "myproj"
+    echo "$REPORT_REPO"
+  )
+  branch=$(
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export APP_DIR="$PROJECT_DIR"
+    export CONFIG_DIR="$cfg"
+    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    load_profile_config "myproj"
+    echo "$REPORT_BRANCH"
+  )
+  pdir_var=$(
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export APP_DIR="$PROJECT_DIR"
+    export CONFIG_DIR="$cfg"
+    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    load_profile_config "myproj"
+    echo "$REPORT_PROJECT_DIR"
+  )
 
-  # Update config.sh to point to our fake app
-  cat > "$cfg/config.sh" <<EOF
-WORKSPACE_PATH="/home/user/workspace"
-PLATFORM="linux"
-APP_DIR="$fake_app"
-EOF
-
-  # Run the CLI which triggers migrate_if_needed
-  # We just need to trigger migration - run with 'help' to avoid Docker calls
-  HOME="$tmpdir" bash "$PROJECT_DIR/bin/claude-secure" list 2>/dev/null || true
-
-  # Verify migration results
-  [ -d "$cfg/instances/default" ] || return 1
-  [ -f "$cfg/instances/default/.env" ] || return 1
-  grep -q 'ANTHROPIC_API_KEY=sk-test-key-12345' "$cfg/instances/default/.env" || return 1
-  [ -f "$cfg/instances/default/config.sh" ] || return 1
-  grep -q 'WORKSPACE_PATH=' "$cfg/instances/default/config.sh" || return 1
-  # Global config should NOT have WORKSPACE_PATH anymore
-  ! grep -q '^WORKSPACE_PATH=' "$cfg/config.sh" || return 1
-  # Global config should still have APP_DIR and PLATFORM
-  grep -q 'APP_DIR=' "$cfg/config.sh" || return 1
-  grep -q 'PLATFORM=' "$cfg/config.sh" || return 1
-  # Root-level .env should be gone (moved)
-  [ ! -f "$cfg/.env" ] || return 1
-
+  [ "$repo"   = "https://github.com/user/reports.git" ] || { echo "REPORT_REPO wrong: $repo" >&2; return 1; }
+  [ "$branch" = "docs" ]                                 || { echo "REPORT_BRANCH wrong: $branch" >&2; return 1; }
+  [ "$pdir_var" = "projects/myproj" ]                    || { echo "REPORT_PROJECT_DIR wrong: $pdir_var" >&2; return 1; }
   return 0
 }
-run_test "MULTI-03: Migration from single-instance to multi-instance" test_migration
+run_test "MULTI-03: load_profile_config exports REPORT_REPO/BRANCH/PROJECT_DIR" test_load_profile_config_reads_report_fields
 
 # =========================================================================
 # MULTI-04: COMPOSE_PROJECT_NAME isolation
@@ -252,27 +244,27 @@ test_list_command() {
   trap "rm -rf '$tmpdir'" RETURN
 
   local cfg="$tmpdir/.claude-secure"
-  mkdir -p "$cfg/instances/foo" "$cfg/instances/bar"
+  mkdir -p "$cfg/profiles/foo" "$cfg/profiles/bar" \
+           "$tmpdir/ws-foo" "$tmpdir/ws-bar"
 
-  echo 'APP_DIR="/tmp/fake"' > "$cfg/config.sh"
-  echo 'PLATFORM="linux"' >> "$cfg/config.sh"
+  cat > "$cfg/profiles/foo/profile.json" \
+    <<< '{"workspace":"'"$tmpdir/ws-foo"'","repo":"org/foo"}'
+  printf 'ANTHROPIC_API_KEY=test\n' > "$cfg/profiles/foo/.env"
+  echo '{"secrets":[]}' > "$cfg/profiles/foo/whitelist.json"
 
-  echo 'WORKSPACE_PATH="/home/user/project-foo"' > "$cfg/instances/foo/config.sh"
-  echo 'ANTHROPIC_API_KEY=test' > "$cfg/instances/foo/.env"
-  echo 'WORKSPACE_PATH="/home/user/project-bar"' > "$cfg/instances/bar/config.sh"
-  echo 'ANTHROPIC_API_KEY=test' > "$cfg/instances/bar/.env"
+  cat > "$cfg/profiles/bar/profile.json" \
+    <<< '{"workspace":"'"$tmpdir/ws-bar"'","repo":"org/bar"}'
+  printf 'ANTHROPIC_API_KEY=test\n' > "$cfg/profiles/bar/.env"
+  echo '{"secrets":[]}' > "$cfg/profiles/bar/whitelist.json"
 
-  # Run list command
   local output
   output=$(HOME="$tmpdir" bash "$PROJECT_DIR/bin/claude-secure" list 2>/dev/null) || true
 
-  # Verify output contains both instance names
-  echo "$output" | grep -q 'foo' || return 1
-  echo "$output" | grep -q 'bar' || return 1
-
+  echo "$output" | grep -q 'foo' || { echo "foo not in list output" >&2; return 1; }
+  echo "$output" | grep -q 'bar' || { echo "bar not in list output" >&2; return 1; }
   return 0
 }
-run_test "MULTI-07: list command shows all instances" test_list_command
+run_test "MULTI-07: list command shows all profiles" test_list_command
 
 # =========================================================================
 # MULTI-08: Instance auto-creation directory structure
@@ -321,41 +313,105 @@ run_test "MULTI-08: Instance auto-creation directory structure" test_auto_creati
 # MULTI-09: Global config.sh contains only APP_DIR and PLATFORM
 # After installation, global config.sh should NOT have WORKSPACE_PATH
 # =========================================================================
-test_global_config_scope() {
-  # Source install.sh to get setup_workspace function
+test_profile_config_scope() {
+  # Profile workspace comes from profile.json, not a global config.
+  # Verify that load_profile_config reads workspace from the profile's own
+  # profile.json, not from a shared global file.
   local tmpdir
   tmpdir=$(mktemp -d)
   trap "rm -rf '$tmpdir'" RETURN
 
   local cfg="$tmpdir/.claude-secure"
-  mkdir -p "$cfg"
+  local pdir="$cfg/profiles/scoped"
+  mkdir -p "$pdir" "$tmpdir/ws"
 
-  # The installer's setup_workspace writes WORKSPACE_PATH to config.sh
-  # but after migration/multi-instance, global config.sh should only have APP_DIR and PLATFORM.
-  # Verify by checking the actual bin/claude-secure expects:
-  # - Global config.sh is sourced first (only APP_DIR, PLATFORM)
-  # - Instance config.sh provides WORKSPACE_PATH
-
-  # Simulate a properly configured global config
-  cat > "$cfg/config.sh" <<'EOF'
-PLATFORM="linux"
-APP_DIR="/opt/claude-secure/app"
+  cat > "$pdir/profile.json" <<EOF
+{"workspace":"$tmpdir/ws","repo":"org/scoped"}
 EOF
+  printf 'ANTHROPIC_API_KEY=test\n' > "$pdir/.env"
+  echo '{"secrets":[]}' > "$pdir/whitelist.json"
 
-  # Verify global config does NOT contain WORKSPACE_PATH
-  ! grep -q '^WORKSPACE_PATH=' "$cfg/config.sh" || return 1
-  # Verify it contains APP_DIR and PLATFORM
-  grep -q 'APP_DIR=' "$cfg/config.sh" || return 1
-  grep -q 'PLATFORM=' "$cfg/config.sh" || return 1
+  local ws
+  ws=$(
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export APP_DIR="$PROJECT_DIR"
+    export CONFIG_DIR="$cfg"
+    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    load_profile_config "scoped"
+    echo "$WORKSPACE_PATH"
+  )
 
-  # Also verify in the CLI: it sources global config first for APP_DIR/PLATFORM
-  grep -q 'source.*config\.sh' "$PROJECT_DIR/bin/claude-secure" || return 1
-  # And instance config is loaded separately
-  grep -q 'INSTANCE_DIR' "$PROJECT_DIR/bin/claude-secure" || return 1
+  [ "$ws" = "$tmpdir/ws" ] || { echo "WORKSPACE_PATH wrong: $ws" >&2; return 1; }
+
+  # CLI must reference CONFIG_DIR/profiles for profile resolution
+  grep -q 'profiles' "$PROJECT_DIR/bin/claude-secure" || return 1
+  return 0
+}
+run_test "MULTI-09: Profile config scope (workspace from profile.json)" test_profile_config_scope
+
+# =========================================================================
+# MULTI-10: system_prompt field in profile.json
+# load_profile_config must export CLAUDE_SECURE_SYSTEM_PROMPT from profile.json
+# bin/claude-secure must pass --system-prompt to claude when the field is set
+# =========================================================================
+test_system_prompt_field() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf '$tmpdir'" RETURN
+
+  local cfg="$tmpdir/.claude-secure"
+  local pdir="$cfg/profiles/sysprompt"
+  mkdir -p "$pdir" "$tmpdir/ws"
+
+  cat > "$pdir/profile.json" <<EOF
+{
+  "workspace": "$tmpdir/ws",
+  "repo": "org/sysprompt",
+  "system_prompt": "You are a helpful assistant with access to REPORT_REPO_TOKEN."
+}
+EOF
+  printf 'ANTHROPIC_API_KEY=test\n' > "$pdir/.env"
+  echo '{"secrets":[]}' > "$pdir/whitelist.json"
+
+  # Verify load_profile_config exports CLAUDE_SECURE_SYSTEM_PROMPT
+  local got_prompt
+  got_prompt=$(
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export APP_DIR="$PROJECT_DIR"
+    export CONFIG_DIR="$cfg"
+    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    load_profile_config "sysprompt"
+    echo "$CLAUDE_SECURE_SYSTEM_PROMPT"
+  )
+
+  [ "$got_prompt" = "You are a helpful assistant with access to REPORT_REPO_TOKEN." ] \
+    || { echo "CLAUDE_SECURE_SYSTEM_PROMPT wrong: $got_prompt" >&2; return 1; }
+
+  # Verify bin/claude-secure passes --system-prompt to claude when set
+  grep -q -- '--system-prompt' "$PROJECT_DIR/bin/claude-secure" || return 1
+  grep -q 'CLAUDE_SECURE_SYSTEM_PROMPT' "$PROJECT_DIR/bin/claude-secure" || return 1
+
+  # Verify empty system_prompt leaves CLAUDE_SECURE_SYSTEM_PROMPT unset/empty
+  cat > "$pdir/profile.json" <<EOF
+{"workspace":"$tmpdir/ws","repo":"org/sysprompt"}
+EOF
+  local empty_prompt
+  empty_prompt=$(
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export APP_DIR="$PROJECT_DIR"
+    export CONFIG_DIR="$cfg"
+    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    load_profile_config "sysprompt"
+    echo "${CLAUDE_SECURE_SYSTEM_PROMPT:-}"
+  )
+  [ -z "$empty_prompt" ] || { echo "Expected empty CLAUDE_SECURE_SYSTEM_PROMPT, got: $empty_prompt" >&2; return 1; }
 
   return 0
 }
-run_test "MULTI-09: Global config scope (APP_DIR and PLATFORM only)" test_global_config_scope
+run_test "MULTI-10: system_prompt field exported as CLAUDE_SECURE_SYSTEM_PROMPT" test_system_prompt_field
 
 # =========================================================================
 # Summary

@@ -34,7 +34,11 @@ echo ""
 
 # Ensure containers are running (they may or may not be up from Plan 01)
 echo "Ensuring containers are running..."
-docker compose up -d --wait --timeout 30 || { echo "FATAL: containers failed to start"; exit 1; }
+_TMP_WS_P1=$(mktemp -d)
+trap 'docker compose down -v >/dev/null 2>&1; rm -rf "$_TMP_WS_P1" 2>/dev/null || true' EXIT
+docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
+WORKSPACE_PATH="$_TMP_WS_P1" \
+  docker compose up -d --wait --timeout 30 || { echo "FATAL: containers failed to start"; exit 1; }
 echo ""
 
 echo "Running tests..."
@@ -106,8 +110,8 @@ echo "========================================"
 echo "  Results: $PASS passed, $FAIL failed (of $TOTAL)"
 echo "========================================"
 
-# Clean up
-docker compose down > /dev/null 2>&1
+# Clean up (also done by EXIT trap)
+docker compose down -v > /dev/null 2>&1 || true
 
 if [ "$FAIL" -gt 0 ]; then
   exit 1

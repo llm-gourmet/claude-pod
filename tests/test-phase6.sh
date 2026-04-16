@@ -35,13 +35,15 @@ report() {
 # Create temp log directories for isolation
 TEST_LOG_DIR=$(mktemp -d)
 TEST_LOG_DIR_DISABLED=$(mktemp -d)
+TEST_WORKSPACE=$(mktemp -d)
 chmod 777 "$TEST_LOG_DIR" "$TEST_LOG_DIR_DISABLED"
 
 cleanup() {
   cd "$PROJECT_DIR"
   LOG_HOOK=0 LOG_ANTHROPIC=0 LOG_IPTABLES=0 LOG_DIR="$TEST_LOG_DIR" \
-    docker compose down 2>/dev/null || true
+    docker compose down -v 2>/dev/null || true
   rm -rf "$TEST_LOG_DIR" "$TEST_LOG_DIR_DISABLED" 2>/dev/null || true
+  rm -rf "$TEST_WORKSPACE" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -56,7 +58,8 @@ echo "Starting services with logging enabled..."
 cd "$PROJECT_DIR"
 export LOG_DIR="$TEST_LOG_DIR"
 export LOG_HOOK=1 LOG_ANTHROPIC=1 LOG_IPTABLES=1
-export WORKSPACE_PATH="${WORKSPACE_PATH:-$HOME/claude-workspace}"
+export WORKSPACE_PATH="$TEST_WORKSPACE"
+docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
 docker compose up -d 2>/dev/null
 sleep 5  # Wait for services to initialize and validator to write startup logs
 
@@ -144,7 +147,7 @@ report "LOG-05" "Log entries have ts, svc, level, msg fields" $?
 cd "$PROJECT_DIR"
 echo ""
 echo "Restarting services with logging disabled..."
-docker compose down 2>/dev/null || true
+docker compose down -v 2>/dev/null || true
 
 # =========================================================================
 # LOG-06: No logs when flags are 0
@@ -153,7 +156,8 @@ docker compose down 2>/dev/null || true
   cd "$PROJECT_DIR"
   export LOG_DIR="$TEST_LOG_DIR_DISABLED"
   export LOG_HOOK=0 LOG_ANTHROPIC=0 LOG_IPTABLES=0
-  export WORKSPACE_PATH="${WORKSPACE_PATH:-$HOME/claude-workspace}"
+  export WORKSPACE_PATH="$TEST_WORKSPACE"
+  docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
   docker compose up -d 2>/dev/null
   sleep 5
   # Trigger a proxy request to give services a chance to log
@@ -167,7 +171,7 @@ docker compose down 2>/dev/null || true
       FOUND_LOGS=true
     fi
   done
-  docker compose down 2>/dev/null || true
+  docker compose down -v 2>/dev/null || true
   if [ "$FOUND_LOGS" = "false" ]; then
     exit 0
   fi

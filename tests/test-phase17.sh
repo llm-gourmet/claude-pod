@@ -369,7 +369,9 @@ test_reap_whole_cycle_failure_exits_nonzero() {
   export LOG_DIR="$TEST_TMPDIR/logs" LOG_PREFIX=""
   mkdir -p "$LOG_DIR"
   local rc=0
-  do_reap >/dev/null 2>&1 || rc=$?
+  # Run in explicit subshell so the EXIT trap inside do_reap fires on subshell
+  # exit, cleaning up the lockdir before the next test runs.
+  ( do_reap ) >/dev/null 2>&1 || rc=$?
   unset MOCK_DOCKER_PS_OUTPUT MOCK_DOCKER_INSPECT_CREATED REAPER_ORPHAN_AGE_SECS MOCK_DOCKER_COMPOSE_FAIL INSTANCE_PREFIX
   [ "$rc" -ne 0 ] || { echo "expected nonzero exit from whole-cycle failure, got $rc" >&2; return 1; }
   return 0
