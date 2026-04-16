@@ -326,7 +326,8 @@ load_profile_config() {
   REPORT_BRANCH=$(jq -r '.report_branch // "main"' "$pdir/profile.json" 2>/dev/null || echo "main")
   REPORT_PATH_PREFIX=$(jq -r '.report_path_prefix // "reports"' "$pdir/profile.json" 2>/dev/null || echo "reports")
   REPORT_PROJECT_DIR=$(jq -r '.report_project_dir // empty' "$pdir/profile.json" 2>/dev/null || true)
-  export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX REPORT_PROJECT_DIR
+  CLAUDE_SECURE_SYSTEM_PROMPT=$(jq -r '.system_prompt // empty' "$pdir/profile.json" 2>/dev/null || true)
+  export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX REPORT_PROJECT_DIR CLAUDE_SECURE_SYSTEM_PROMPT
   export WHITELIST_PATH="$pdir/whitelist.json"
   export LOG_DIR="$CONFIG_DIR/logs"
   export LOG_PREFIX="${name}-"
@@ -1464,7 +1465,8 @@ do_spawn() {
     REPORT_BRANCH=$(jq -r '.report_branch // "main"' "$_profile_json")
     REPORT_PATH_PREFIX=$(jq -r '.report_path_prefix // "reports"' "$_profile_json")
     REPORT_PROJECT_DIR=$(jq -r '.report_project_dir // empty' "$_profile_json")
-    export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX REPORT_PROJECT_DIR
+    CLAUDE_SECURE_SYSTEM_PROMPT=$(jq -r '.system_prompt // empty' "$_profile_json" 2>/dev/null || true)
+    export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX REPORT_PROJECT_DIR CLAUDE_SECURE_SYSTEM_PROMPT
   fi
 
   # Resolve and render prompt template (per D-13 through D-17)
@@ -1497,6 +1499,9 @@ do_spawn() {
   local claude_args=("$rendered_prompt" "--output-format" "json" "--dangerously-skip-permissions")
   if [ -n "${MAX_TURNS:-}" ]; then
     claude_args+=("--max-turns" "$MAX_TURNS")
+  fi
+  if [ -n "${CLAUDE_SECURE_SYSTEM_PROMPT:-}" ]; then
+    claude_args+=("--system-prompt" "$CLAUDE_SECURE_SYSTEM_PROMPT")
   fi
 
   # Execute headless Claude Code (per D-06, D-09)
@@ -2243,7 +2248,11 @@ case "$CMD" in
     chmod 777 "$LOG_DIR"
     cleanup_containers
     docker compose up -d
-    docker compose exec -it claude claude --dangerously-skip-permissions
+    local _interactive_args=(--dangerously-skip-permissions)
+    if [ -n "${CLAUDE_SECURE_SYSTEM_PROMPT:-}" ]; then
+      _interactive_args+=(--system-prompt "$CLAUDE_SECURE_SYSTEM_PROMPT")
+    fi
+    docker compose exec -it claude claude "${_interactive_args[@]}"
     # Tear down containers after session ends — no reason to keep them running.
     docker compose down
     ;;

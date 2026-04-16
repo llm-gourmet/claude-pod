@@ -76,6 +76,7 @@ Profile directory layout:
 | `report_repo` | HTTPS URL of report repo |
 | `report_branch` | Report repo branch (default: `main`) |
 | `report_project_dir` | Subdirectory inside report repo for this profile (e.g. `projects/myapp`) |
+| `system_prompt` | System prompt injected via `--system-prompt` for every session (interactive and headless) |
 | `max_turns` | Max Claude turns per headless spawn |
 
 ---

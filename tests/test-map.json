@@ -68,6 +68,7 @@
       ],
       "tests": [
         "test-phase6.sh",
+        "test-phase9.sh",
         "test-phase12.sh",
         "test-phase13.sh",
         "test-phase14.sh",
@@ -223,6 +224,14 @@
       ],
       "tests": [
         "test-phase25.sh"
+      ]
+    },
+    {
+      "paths": [
+        "tests/test-phase9.sh"
+      ],
+      "tests": [
+        "test-phase9.sh"
       ]
     }
   ],

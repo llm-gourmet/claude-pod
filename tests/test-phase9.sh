@@ -351,6 +351,69 @@ EOF
 run_test "MULTI-09: Profile config scope (workspace from profile.json)" test_profile_config_scope
 
 # =========================================================================
+# MULTI-10: system_prompt field in profile.json
+# load_profile_config must export CLAUDE_SECURE_SYSTEM_PROMPT from profile.json
+# bin/claude-secure must pass --system-prompt to claude when the field is set
+# =========================================================================
+test_system_prompt_field() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf '$tmpdir'" RETURN
+
+  local cfg="$tmpdir/.claude-secure"
+  local pdir="$cfg/profiles/sysprompt"
+  mkdir -p "$pdir" "$tmpdir/ws"
+
+  cat > "$pdir/profile.json" <<EOF
+{
+  "workspace": "$tmpdir/ws",
+  "repo": "org/sysprompt",
+  "system_prompt": "You are a helpful assistant with access to REPORT_REPO_TOKEN."
+}
+EOF
+  printf 'ANTHROPIC_API_KEY=test\n' > "$pdir/.env"
+  echo '{"secrets":[]}' > "$pdir/whitelist.json"
+
+  # Verify load_profile_config exports CLAUDE_SECURE_SYSTEM_PROMPT
+  local got_prompt
+  got_prompt=$(
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export APP_DIR="$PROJECT_DIR"
+    export CONFIG_DIR="$cfg"
+    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    load_profile_config "sysprompt"
+    echo "$CLAUDE_SECURE_SYSTEM_PROMPT"
+  )
+
+  [ "$got_prompt" = "You are a helpful assistant with access to REPORT_REPO_TOKEN." ] \
+    || { echo "CLAUDE_SECURE_SYSTEM_PROMPT wrong: $got_prompt" >&2; return 1; }
+
+  # Verify bin/claude-secure passes --system-prompt to claude when set
+  grep -q -- '--system-prompt' "$PROJECT_DIR/bin/claude-secure" || return 1
+  grep -q 'CLAUDE_SECURE_SYSTEM_PROMPT' "$PROJECT_DIR/bin/claude-secure" || return 1
+
+  # Verify empty system_prompt leaves CLAUDE_SECURE_SYSTEM_PROMPT unset/empty
+  cat > "$pdir/profile.json" <<EOF
+{"workspace":"$tmpdir/ws","repo":"org/sysprompt"}
+EOF
+  local empty_prompt
+  empty_prompt=$(
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export APP_DIR="$PROJECT_DIR"
+    export CONFIG_DIR="$cfg"
+    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    load_profile_config "sysprompt"
+    echo "${CLAUDE_SECURE_SYSTEM_PROMPT:-}"
+  )
+  [ -z "$empty_prompt" ] || { echo "Expected empty CLAUDE_SECURE_SYSTEM_PROMPT, got: $empty_prompt" >&2; return 1; }
+
+  return 0
+}
+run_test "MULTI-10: system_prompt field exported as CLAUDE_SECURE_SYSTEM_PROMPT" test_system_prompt_field
+
+# =========================================================================
 # Summary
 # =========================================================================
 echo ""
