@@ -55,9 +55,10 @@ cleanup() {
   ' 2>/dev/null || true
   # Remove log file
   docker compose exec -T proxy rm -f /tmp/upstream-requests.log 2>/dev/null || true
-  # Bring down with override
-  docker compose -f docker-compose.yml -f "$OVERRIDE_FILE" down > /dev/null 2>&1
+  # Bring down with override (remove volumes to avoid stale workspace)
+  docker compose -f docker-compose.yml -f "$OVERRIDE_FILE" down -v > /dev/null 2>&1
   rm -f "$OVERRIDE_FILE"
+  rm -rf "${_TMP_WS_P3:-}" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -88,7 +89,11 @@ services:
 YAML
 
 echo "Building and starting containers with test overrides..."
-docker compose -f docker-compose.yml -f "$OVERRIDE_FILE" build --quiet proxy || { echo "FATAL: proxy build failed"; exit 1; }
+_TMP_WS_P3=$(mktemp -d)
+export WORKSPACE_PATH="$_TMP_WS_P3"
+docker compose -f docker-compose.yml -f "$OVERRIDE_FILE" build --quiet proxy >/dev/null 2>&1 || true
+docker image inspect claude-secure-proxy >/dev/null 2>&1 || { echo "FATAL: proxy build failed"; exit 1; }
+docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
 docker compose -f docker-compose.yml -f "$OVERRIDE_FILE" up -d || { echo "FATAL: docker compose up failed"; exit 1; }
 
 # Wait for proxy container to be ready

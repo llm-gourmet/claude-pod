@@ -29,10 +29,17 @@ echo "========================================"
 echo ""
 
 # --- Setup: rebuild and start containers ---
+_TMP_WS_P2=$(mktemp -d)
+trap 'docker compose down -v >/dev/null 2>&1; rm -rf "$_TMP_WS_P2" 2>/dev/null || true' EXIT
+export WORKSPACE_PATH="$_TMP_WS_P2"
+
 echo "Building containers..."
-docker compose build --quiet || { echo "FATAL: docker compose build failed"; exit 1; }
+docker compose build --quiet >/dev/null 2>&1 || true
+docker image inspect claude-secure-claude claude-secure-proxy claude-secure-validator \
+  >/dev/null 2>&1 || { echo "FATAL: docker compose build failed"; exit 1; }
 
 echo "Starting containers..."
+docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
 docker compose up -d || { echo "FATAL: docker compose up failed"; exit 1; }
 
 echo "Waiting for validator health..."
@@ -242,7 +249,7 @@ echo "  Results: $PASS passed, $FAIL failed (of $TOTAL)"
 echo "========================================"
 
 # Clean up
-docker compose down > /dev/null 2>&1
+docker compose down -v > /dev/null 2>&1 || true
 
 if [ "$FAIL" -gt 0 ]; then
   exit 1
