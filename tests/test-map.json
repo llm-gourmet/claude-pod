@@ -251,7 +251,10 @@
       "test_result_text_truncation",
       "test_result_text_no_recursive_substitution",
       "test_crlf_and_null_stripped",
-      "test_clone_timeout_bounded"
+      "test_clone_timeout_bounded",
+      "test_report_token_in_secrets_file",
+      "test_whitelist_has_report_repo_token",
+      "test_report_vars_in_docker_compose"
     ]
   },
   "OPS-02": {

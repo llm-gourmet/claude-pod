@@ -292,6 +292,76 @@ test_installer_ships_report_templates() {
 }
 
 # =========================================================================
+# REPORT TOKEN / VARS TESTS (new functionality)
+# =========================================================================
+
+test_report_token_in_secrets_file() {
+  # REPORT_REPO_TOKEN must NOT be filtered from SECRETS_FILE (no longer host-only).
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf '$tmpdir'" RETURN
+
+  local pdir="$tmpdir/profiles/myproj"
+  mkdir -p "$pdir" "$tmpdir/ws"
+  cat > "$pdir/profile.json" <<EOF
+{"workspace":"$tmpdir/ws"}
+EOF
+  printf 'ANTHROPIC_API_KEY=test\nREPORT_REPO_TOKEN=ghp_secret123\n' > "$pdir/.env"
+  echo '{"secrets":[]}' > "$pdir/whitelist.json"
+
+  local secrets_file
+  secrets_file=$(
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export APP_DIR="$PROJECT_DIR"
+    export CONFIG_DIR="$tmpdir"
+    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    load_profile_config "myproj"
+    echo "$SECRETS_FILE"
+  )
+
+  [ -f "$secrets_file" ] || { echo "SECRETS_FILE not set or missing" >&2; return 1; }
+  grep -q 'REPORT_REPO_TOKEN=ghp_secret123' "$secrets_file" \
+    || { echo "REPORT_REPO_TOKEN missing from SECRETS_FILE" >&2; return 1; }
+  return 0
+}
+
+test_whitelist_has_report_repo_token() {
+  # config/whitelist.json must have a REPORT_REPO_TOKEN entry with correct fields.
+  local wl="$PROJECT_DIR/config/whitelist.json"
+  [ -f "$wl" ] || { echo "config/whitelist.json missing" >&2; return 1; }
+
+  local env_var placeholder
+  env_var=$(jq -r '[.secrets[] | select(.env_var=="REPORT_REPO_TOKEN")] | .[0].env_var' "$wl")
+  placeholder=$(jq -r '[.secrets[] | select(.env_var=="REPORT_REPO_TOKEN")] | .[0].placeholder' "$wl")
+
+  [ "$env_var" = "REPORT_REPO_TOKEN" ] \
+    || { echo "REPORT_REPO_TOKEN entry missing from whitelist.json" >&2; return 1; }
+  [ "$placeholder" = "PLACEHOLDER_REPORT_REPO" ] \
+    || { echo "placeholder wrong: $placeholder" >&2; return 1; }
+
+  # allowed_domains must include github.com
+  local has_github
+  has_github=$(jq -r '[.secrets[] | select(.env_var=="REPORT_REPO_TOKEN")] | .[0].allowed_domains | contains(["github.com"])' "$wl")
+  [ "$has_github" = "true" ] \
+    || { echo "github.com not in allowed_domains for REPORT_REPO_TOKEN" >&2; return 1; }
+  return 0
+}
+
+test_report_vars_in_docker_compose() {
+  # docker-compose.yml must inject REPORT_REPO, REPORT_BRANCH, REPORT_PROJECT_DIR
+  # into the claude service environment.
+  local dc="$PROJECT_DIR/docker-compose.yml"
+  grep -q 'REPORT_REPO=' "$dc" \
+    || { echo "REPORT_REPO not in docker-compose.yml environment" >&2; return 1; }
+  grep -q 'REPORT_BRANCH=' "$dc" \
+    || { echo "REPORT_BRANCH not in docker-compose.yml environment" >&2; return 1; }
+  grep -q 'REPORT_PROJECT_DIR=' "$dc" \
+    || { echo "REPORT_PROJECT_DIR not in docker-compose.yml environment" >&2; return 1; }
+  return 0
+}
+
+# =========================================================================
 # Helper: run do_spawn end-to-end in a subshell with fake claude stdout.
 #
 # Usage:
@@ -1269,6 +1339,12 @@ main() {
   run_test "no force-push in bin"               test_no_force_push_grep
   run_test "installer ships report templates"   test_installer_ships_report_templates
   run_test "README documents Phase 16"          test_readme_documents_phase16
+  echo ""
+
+  echo "--- Report token / vars ---"
+  run_test "REPORT_REPO_TOKEN in SECRETS_FILE"  test_report_token_in_secrets_file
+  run_test "whitelist has REPORT_REPO_TOKEN"    test_whitelist_has_report_repo_token
+  run_test "report vars in docker-compose"      test_report_vars_in_docker_compose
   echo ""
 
   echo "--- OPS-01: Report push ---"
