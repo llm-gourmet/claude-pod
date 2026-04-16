@@ -25,6 +25,7 @@ if command -v claude_secure_bootstrap_path >/dev/null 2>&1; then
 fi
 
 _invoking_user="${SUDO_USER:-$USER}"
+_invoking_group="$(id -gn "$_invoking_user" 2>/dev/null || echo "$_invoking_user")"
 # getent is Linux-only; fall back to dscl (macOS) then eval tilde expansion
 if command -v getent >/dev/null 2>&1; then
   _invoking_home="$(getent passwd "$_invoking_user" | cut -d: -f6)"
@@ -332,7 +333,7 @@ setup_workspace() {
   ws_path="$(realpath -m "$ws_path")"
 
   mkdir -p "$ws_path"
-  chown "$_invoking_user:$_invoking_user" "$ws_path"
+  chown "$_invoking_user:$_invoking_group" "$ws_path"
 
   # Write global config (APP_DIR written later by copy_app_files)
   cat > "$CONFIG_DIR/config.sh" <<CONF
@@ -633,7 +634,7 @@ main() {
   # Reclaim ownership of CONFIG_DIR for the invoking user (sudo creates as root).
   # install_cli + install_git_hooks + install_webhook_service deliberately leave
   # system paths (/usr/local/bin, /etc/systemd, /opt/claude-secure) as root.
-  chown -R "$_invoking_user:$_invoking_user" "$CONFIG_DIR"
+  chown -R "$_invoking_user:$_invoking_group" "$CONFIG_DIR"
   chmod 777 "$CONFIG_DIR/logs"
 
   install_webhook_service
