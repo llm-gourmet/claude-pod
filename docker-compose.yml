@@ -47,7 +47,7 @@ services:
     env_file:
       - ${SECRETS_FILE:-/dev/null}
     environment:
-      - REAL_ANTHROPIC_BASE_URL=https://api.anthropic.com
+      - REAL_ANTHROPIC_BASE_URL=${REAL_ANTHROPIC_BASE_URL:-https://api.anthropic.com}
       - WHITELIST_PATH=/etc/claude-secure/whitelist.json
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}

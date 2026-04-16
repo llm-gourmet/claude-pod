@@ -219,7 +219,7 @@ setup_profile_auth() {
   echo "  2) API key"
   read -rp "Choice [1]: " auth_choice
   auth_choice="${auth_choice:-1}"
-  local var_name value
+  local var_name value base_url=""
   case "$auth_choice" in
     2)
       read -rsp "API key: " value; echo ""
@@ -228,6 +228,9 @@ setup_profile_auth() {
         return 1
       fi
       var_name="ANTHROPIC_API_KEY"
+      echo "  Base URL (optional — leave empty for default Anthropic endpoint)"
+      echo "  e.g. https://yourcompany.com/anthropic/v1"
+      read -rp "Base URL [https://api.anthropic.com]: " base_url
       ;;
     *)
       echo "Run 'claude setup-token' first to get your OAuth token."
@@ -249,6 +252,9 @@ setup_profile_auth() {
   esac
   {
     printf '%s=%s\n' "$var_name" "$value"
+    if [ -n "$base_url" ]; then
+      printf 'REAL_ANTHROPIC_BASE_URL=%s\n' "$base_url"
+    fi
     printf '\n'
     printf '# Add secrets below (must match env_var in whitelist.json)\n'
     printf '# Example: GITHUB_TOKEN=ghp_your_token_here\n'

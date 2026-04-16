@@ -151,8 +151,26 @@ check_docker_desktop_version() {
   log_info "Docker Desktop ${dd_version} satisfies >= ${min_version}"
 }
 
+detect_package_manager() {
+  if command -v apt-get >/dev/null 2>&1; then echo "apt-get"
+  elif command -v dnf >/dev/null 2>&1; then echo "dnf"
+  elif command -v pacman >/dev/null 2>&1; then echo "pacman"
+  else echo ""
+  fi
+}
+
+# Map logical command name to the package name for the given package manager.
+pm_package_name() {
+  local cmd="$1" pm="$2"
+  case "$cmd" in
+    uuidgen) case "$pm" in apt-get) echo "uuid-runtime" ;; *) echo "util-linux" ;; esac ;;
+    *) echo "$cmd" ;;
+  esac
+}
+
 check_dependencies() {
-  local missing=()
+  local auto_installable=()  # commands that can be auto-installed
+  local manual_only=()       # must be installed manually
 
   # PLAT-03 + PLAT-04: on macOS, install brew deps BEFORE auditing apt-style packages
   local _plat
@@ -161,18 +179,19 @@ check_dependencies() {
     macos_bootstrap_deps
   fi
 
-  command -v docker >/dev/null 2>&1 || missing+=("docker (https://docs.docker.com/engine/install/)")
-  command -v curl >/dev/null 2>&1 || missing+=("curl (apt install curl)")
-  command -v jq >/dev/null 2>&1 || missing+=("jq (apt install jq)")
-  command -v uuidgen >/dev/null 2>&1 || missing+=("uuidgen (apt install uuid-runtime)")
+  local _pm
+  _pm="$(detect_package_manager)"
+
+  # docker and docker-compose are always manual
+  command -v docker >/dev/null 2>&1 || manual_only+=("docker (https://docs.docker.com/engine/install/)")
 
   # Docker Compose v2 check (plugin, not standalone)
   if command -v docker >/dev/null 2>&1; then
     if ! docker compose version >/dev/null 2>&1; then
       if command -v docker-compose >/dev/null 2>&1; then
-        missing+=("docker compose v2 (you have v1 which is deprecated -- upgrade Docker)")
+        manual_only+=("docker compose v2 (you have v1 which is deprecated -- upgrade Docker)")
       else
-        missing+=("docker compose (install Docker Compose plugin)")
+        manual_only+=("docker compose (install Docker Compose plugin)")
       fi
     fi
   fi
@@ -182,9 +201,62 @@ check_dependencies() {
     check_docker_desktop_version
   fi
 
-  if [ ${#missing[@]} -gt 0 ]; then
+  # Simple packages: auto-installable when a PM is available
+  for _cmd in curl jq uuidgen python3; do
+    if ! command -v "$_cmd" >/dev/null 2>&1; then
+      if [ -n "$_pm" ]; then
+        auto_installable+=("$_cmd")
+      else
+        manual_only+=("$_cmd (install manually)")
+      fi
+    fi
+  done
+
+  # Offer auto-install for installable packages
+  if [ ${#auto_installable[@]} -gt 0 ]; then
+    echo ""
+    echo "Missing packages that can be installed automatically:"
+    for _cmd in "${auto_installable[@]}"; do
+      echo "  - $(pm_package_name "$_cmd" "$_pm") (provides: $_cmd)"
+    done
+    read -rp "Install missing packages with ${_pm}? [y/N]: " _ans
+    if [[ "$_ans" =~ ^[Yy]$ ]]; then
+      local _pkgs=()
+      for _cmd in "${auto_installable[@]}"; do
+        _pkgs+=("$(pm_package_name "$_cmd" "$_pm")")
+      done
+      case "$_pm" in
+        apt-get) apt-get update -qq && apt-get install -y "${_pkgs[@]}" ;;
+        dnf)     dnf install -y "${_pkgs[@]}" ;;
+        pacman)  pacman -Sy --noconfirm "${_pkgs[@]}" ;;
+      esac
+
+      # Re-verify each installed command
+      for _cmd in "${auto_installable[@]}"; do
+        if ! command -v "$_cmd" >/dev/null 2>&1; then
+          log_error "Failed to install '$_cmd'. Please install it manually and re-run."
+          exit 1
+        fi
+      done
+
+      # python3 version check after install
+      if printf '%s\n' "${auto_installable[@]}" | grep -q '^python3$'; then
+        local _py_ver
+        _py_ver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+        if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)'; then
+          log_error "Python 3.11+ required (found $_py_ver)."
+          log_error "On Ubuntu/Debian: sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt-get install python3.11"
+          exit 1
+        fi
+      fi
+    else
+      manual_only+=("${auto_installable[@]}")
+    fi
+  fi
+
+  if [ ${#manual_only[@]} -gt 0 ]; then
     log_error "Missing required dependencies:"
-    for dep in "${missing[@]}"; do
+    for dep in "${manual_only[@]}"; do
       echo "  - $dep"
     done
     exit 1
@@ -238,11 +310,14 @@ setup_auth() {
   mkdir -p "$CONFIG_DIR/profiles/default"
 
   # Unified env-file writer. Rejects empty or newline-tainted values and writes
-  # the four-line file in a single redirection group so a mid-write abort can
-  # never leave a truncated .env on disk.
+  # the file in a single redirection group so a mid-write abort can never leave
+  # a truncated .env on disk. Optional args $3/$4: extra var name/value pair
+  # (written only when value is non-empty, e.g. REAL_ANTHROPIC_BASE_URL).
   write_env_file() {
     local var_name="$1"
     local value="$2"
+    local extra_name="${3:-}"
+    local extra_value="${4:-}"
     if [ -z "$value" ]; then
       log_error "${var_name} was empty. Installation aborted — no .env written."
       exit 1
@@ -256,6 +331,9 @@ setup_auth() {
     esac
     {
       printf '%s=%s\n' "$var_name" "$value"
+      if [ -n "$extra_name" ] && [ -n "$extra_value" ]; then
+        printf '%s=%s\n' "$extra_name" "$extra_value"
+      fi
       printf '\n'
       printf '# Add secrets below (must match env_var in whitelist.json)\n'
       printf '# Example: GITHUB_TOKEN=ghp_your_token_here\n'
@@ -299,7 +377,10 @@ setup_auth() {
         log_error "API key was empty. Installation aborted — no .env written."
         exit 1
       fi
-      write_env_file "ANTHROPIC_API_KEY" "$key"
+      echo "  Base URL (optional — leave empty for default Anthropic endpoint)"
+      echo "  e.g. https://yourcompany.com/anthropic/v1"
+      read -rp "Base URL [https://api.anthropic.com]: " base_url
+      write_env_file "ANTHROPIC_API_KEY" "$key" "REAL_ANTHROPIC_BASE_URL" "$base_url"
       log_info "API key saved"
       ;;
     *)
@@ -426,15 +507,31 @@ install_webhook_service() {
 
   log_info "Installing webhook listener..."
 
-  # 1. Python 3.11+ check
+  # 1. Python 3.11+ check — offer auto-install if missing
   if ! command -v python3 >/dev/null 2>&1; then
-    log_error "python3 is required for the webhook listener. Install with: apt install python3"
-    return 1
+    local _wh_pm
+    _wh_pm="$(detect_package_manager)"
+    if [ -n "$_wh_pm" ]; then
+      echo "python3 is required for the webhook listener."
+      read -rp "Install python3 with ${_wh_pm}? [y/N]: " _ans
+      if [[ "$_ans" =~ ^[Yy]$ ]]; then
+        case "$_wh_pm" in
+          apt-get) apt-get update -qq && apt-get install -y python3 ;;
+          dnf)     dnf install -y python3 ;;
+          pacman)  pacman -Sy --noconfirm python3 ;;
+        esac
+      fi
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+      log_error "python3 is required for the webhook listener. Install with: apt install python3"
+      return 1
+    fi
   fi
   local py_ver
   py_ver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
   if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)'; then
     log_error "Python 3.11+ required for the webhook listener (found $py_ver)."
+    log_error "On Ubuntu/Debian: sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt-get install python3.11"
     return 1
   fi
 
