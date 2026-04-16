@@ -262,6 +262,32 @@ run_test "UPD-04: upgrade skips superuser load (no prompt, no permission error)"
 echo ""
 
 # =========================================================================
+# UPD-05: Static – no 'local' keyword used outside a function body
+# =========================================================================
+echo "--- UPD-05: no top-level 'local' declarations ---"
+
+test_upd05_no_toplevel_local() {
+  # awk tracks whether we are inside a function body (between 'name() {' and
+  # the matching '}' at column 0).  Any 'local ' found outside a function
+  # is printed; a non-empty result means the test fails.
+  local violations
+  violations=$(awk '
+    /^[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*\(\)/ { in_func = 1 }
+    /^}[[:space:]]*$/ { in_func = 0 }
+    /[[:space:]]local [[:space:]]/ && !in_func { print NR": "$0 }
+  ' "$CLI")
+  if [ -n "$violations" ]; then
+    echo "  top-level 'local' found in $CLI:" >&2
+    echo "$violations" >&2
+    return 1
+  fi
+}
+run_test "UPD-05: no 'local' used outside a function in bin/claude-secure" \
+  test_upd05_no_toplevel_local
+
+echo ""
+
+# =========================================================================
 # Summary
 # =========================================================================
 echo "========================================"

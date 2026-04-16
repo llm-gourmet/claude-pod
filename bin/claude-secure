@@ -2248,7 +2248,7 @@ case "$CMD" in
     chmod 777 "$LOG_DIR"
     cleanup_containers
     docker compose up -d
-    local _interactive_args=(--dangerously-skip-permissions)
+    _interactive_args=(--dangerously-skip-permissions)
     if [ -n "${CLAUDE_SECURE_SYSTEM_PROMPT:-}" ]; then
       _interactive_args+=(--system-prompt "$CLAUDE_SECURE_SYSTEM_PROMPT")
     fi
