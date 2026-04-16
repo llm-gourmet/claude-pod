@@ -25,7 +25,14 @@ if command -v claude_secure_bootstrap_path >/dev/null 2>&1; then
 fi
 
 _invoking_user="${SUDO_USER:-$USER}"
-_invoking_home="$(getent passwd "$_invoking_user" | cut -d: -f6)"
+# getent is Linux-only; fall back to dscl (macOS) then eval tilde expansion
+if command -v getent >/dev/null 2>&1; then
+  _invoking_home="$(getent passwd "$_invoking_user" | cut -d: -f6)"
+elif command -v dscl >/dev/null 2>&1; then
+  _invoking_home="$(dscl . -read "/Users/$_invoking_user" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+else
+  eval "_invoking_home=~$_invoking_user"
+fi
 if [ -z "$_invoking_home" ]; then
   echo "ERROR: Could not resolve home directory for user '$_invoking_user'" >&2
   exit 1
@@ -472,7 +479,13 @@ install_webhook_service() {
   # 4. Resolve invoking user's home (D-24 + home-directory gotcha)
   local invoking_user invoking_home
   invoking_user="${SUDO_USER:-$USER}"
-  invoking_home=$(getent passwd "$invoking_user" | cut -d: -f6 || true)
+  if command -v getent >/dev/null 2>&1; then
+    invoking_home=$(getent passwd "$invoking_user" | cut -d: -f6 || true)
+  elif command -v dscl >/dev/null 2>&1; then
+    invoking_home=$(dscl . -read "/Users/$invoking_user" NFSHomeDirectory 2>/dev/null | awk '{print $2}' || true)
+  else
+    eval "invoking_home=~$invoking_user"
+  fi
   if [ -z "$invoking_home" ]; then
     log_error "Could not resolve home directory for user '$invoking_user'"
     return 1
