@@ -176,7 +176,7 @@ else
       done
     else
       while IFS= read -r test_name; do
-        [ -n "$test_name" ] && SELECTED_TESTS+=("$test_name")
+        [ -n "$test_name" ] && [ -f "$TEST_DIR/$test_name" ] && SELECTED_TESTS+=("$test_name")
       done <<< "$MATCHED_TESTS"
     fi
   fi

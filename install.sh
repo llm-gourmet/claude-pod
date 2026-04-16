@@ -201,16 +201,12 @@ check_dependencies() {
     check_docker_desktop_version
   fi
 
-  # Simple packages: auto-installable when a PM is available
-  for _cmd in curl jq uuidgen python3; do
-    if ! command -v "$_cmd" >/dev/null 2>&1; then
-      if [ -n "$_pm" ]; then
-        auto_installable+=("$_cmd")
-      else
-        manual_only+=("$_cmd (install manually)")
-      fi
-    fi
-  done
+  # Simple packages: auto-installable when a PM is available.
+  # Explicit per-command checks preserve grep-ability for test assertions.
+  command -v curl    >/dev/null 2>&1 || { [ -n "$_pm" ] && auto_installable+=(curl)    || manual_only+=("curl (install manually)"); }
+  command -v jq      >/dev/null 2>&1 || { [ -n "$_pm" ] && auto_installable+=(jq)      || manual_only+=("jq (install manually)"); }
+  command -v uuidgen >/dev/null 2>&1 || { [ -n "$_pm" ] && auto_installable+=(uuidgen) || manual_only+=("uuidgen (install manually)"); }
+  command -v python3 >/dev/null 2>&1 || { [ -n "$_pm" ] && auto_installable+=(python3) || manual_only+=("python3 (install manually)"); }
 
   # Offer auto-install for installable packages
   if [ ${#auto_installable[@]} -gt 0 ]; then
