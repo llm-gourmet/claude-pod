@@ -650,6 +650,7 @@ install_webhook_service() {
       -e "s|__REPLACED_BY_INSTALLER__PROFILES__|${invoking_home}/.claude-secure/profiles|" \
       -e "s|__REPLACED_BY_INSTALLER__EVENTS__|${invoking_home}/.claude-secure/events|" \
       -e "s|__REPLACED_BY_INSTALLER__LOGS__|${invoking_home}/.claude-secure/logs|" \
+      -e "s|__REPLACED_BY_INSTALLER__CONFIG_DIR__|${invoking_home}/.claude-secure|" \
       "$app_dir/webhook/config.example.json" | sudo tee /etc/claude-secure/webhook.json > /dev/null
     sudo chmod 644 /etc/claude-secure/webhook.json
     log_info "Installed default config at /etc/claude-secure/webhook.json"
@@ -658,10 +659,14 @@ install_webhook_service() {
   fi
 
   # 7. Install systemd unit file
+  # Patch ExecStart to use the actual app_dir so `claude-secure update` (git pull
+  # in app_dir) is immediately reflected without copying to /opt/claude-secure/.
   sudo cp "$app_dir/webhook/claude-secure-webhook.service" /etc/systemd/system/claude-secure-webhook.service
+  sudo sed -i "s|/opt/claude-secure/webhook/listener.py|${app_dir}/webhook/listener.py|g" \
+    /etc/systemd/system/claude-secure-webhook.service
   sudo chmod 644 /etc/systemd/system/claude-secure-webhook.service
   sudo systemctl daemon-reload 2>/dev/null || log_warn "systemctl daemon-reload failed (likely WSL2-no-systemd)"
-  log_info "Installed systemd unit /etc/systemd/system/claude-secure-webhook.service"
+  log_info "Installed systemd unit /etc/systemd/system/claude-secure-webhook.service (ExecStart: ${app_dir}/webhook/listener.py)"
 
   # 8. Enable + start (unless WSL2 gated)
   if [ "$wsl2_no_systemd" -eq 1 ]; then

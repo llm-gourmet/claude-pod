@@ -6,6 +6,7 @@
   "events_dir": "__REPLACED_BY_INSTALLER__EVENTS__",
   "logs_dir": "__REPLACED_BY_INSTALLER__LOGS__",
   "claude_secure_bin": "/usr/local/bin/claude-secure",
+  "config_dir": "__REPLACED_BY_INSTALLER__CONFIG_DIR__",
   "_phase16_profile_schema": [
     "Phase 16 adds three OPTIONAL fields to profile.json for report publishing:",
     "  report_repo:        full HTTPS URL of the docs repo (e.g. https://github.com/user/docs.git)",
