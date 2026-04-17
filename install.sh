@@ -245,11 +245,15 @@ check_dependencies() {
 
       # python3 version check after install
       if printf '%s\n' "${auto_installable[@]}" | grep -q '^python3$'; then
+        # On apt-get, also install python3.11 for a better runtime (non-fatal)
+        if [ "$_pm" = "apt-get" ]; then
+          apt-get install -y python3.11 >/dev/null 2>&1 || true
+        fi
         local _py_ver
         _py_ver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-        if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)'; then
-          log_error "Python 3.11+ required (found $_py_ver)."
-          log_error "On Ubuntu/Debian: sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt-get install python3.11"
+        if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)'; then
+          log_error "Python 3.10+ required (found $_py_ver)."
+          log_error "On Ubuntu/Debian: sudo apt-get install python3.11"
           exit 1
         fi
       fi
@@ -511,7 +515,7 @@ install_webhook_service() {
 
   log_info "Installing webhook listener..."
 
-  # 1. Python 3.11+ check — offer auto-install if missing
+  # 1. Python 3.10+ check — offer auto-install if missing
   if ! command -v python3 >/dev/null 2>&1; then
     local _wh_pm
     _wh_pm="$(detect_package_manager)"
@@ -520,7 +524,7 @@ install_webhook_service() {
       read -rp "Install python3 with ${_wh_pm}? [y/N]: " _ans
       if [[ "$_ans" =~ ^[Yy]$ ]]; then
         case "$_wh_pm" in
-          apt-get) apt-get update -qq && apt-get install -y python3 ;;
+          apt-get) apt-get update -qq && apt-get install -y python3 && apt-get install -y python3.11 >/dev/null 2>&1 || true ;;
           dnf)     dnf install -y python3 ;;
           pacman)  pacman -Sy --noconfirm python3 ;;
         esac
@@ -533,9 +537,9 @@ install_webhook_service() {
   fi
   local py_ver
   py_ver=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-  if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,11) else 1)'; then
-    log_error "Python 3.11+ required for the webhook listener (found $py_ver)."
-    log_error "On Ubuntu/Debian: sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt-get install python3.11"
+  if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)'; then
+    log_error "Python 3.10+ required for the webhook listener (found $py_ver)."
+    log_error "On Ubuntu/Debian: sudo apt-get install python3.11"
     return 1
   fi
 
