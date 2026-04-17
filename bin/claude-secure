@@ -831,6 +831,10 @@ render_template() {
   v_file=$(_extract_to_tempfile "$event_json" '.compare' "")
   rendered=$(_substitute_token_from_file "$rendered" "COMPARE_URL" "$v_file")
 
+  # `tojson` converts the array to compact single-line JSON; `-r` strips the outer quotes.
+  v_file=$(_extract_to_tempfile "$event_json" '.commits // [] | tojson' "[]")
+  rendered=$(_substitute_token_from_file "$rendered" "COMMITS_JSON" "$v_file")
+
   # --- Workflow run (Pitfall 6: prefer top-level .workflow.name) -----------
 
   v_file=$(_extract_to_tempfile "$event_json" '.workflow.name // .workflow_run.name' "")
