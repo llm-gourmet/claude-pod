@@ -1,0 +1,19 @@
+# Caddyfile für claude-secure Webhook-Listener
+# Kopieren nach /etc/caddy/Caddyfile (oder als Block einfügen)
+#
+# Option A: Mit Domain (automatisches HTTPS via Let's Encrypt)
+# yourdomain.com {
+#     handle /webhook {
+#         reverse_proxy localhost:9000
+#     }
+#     handle /health-check {
+#         reverse_proxy localhost:9000/health
+#     }
+# }
+#
+# Option B: Ohne Domain (HTTP auf Port 80, für ersten Test)
+:80 {
+    handle /webhook {
+        reverse_proxy localhost:9000
+    }
+}
