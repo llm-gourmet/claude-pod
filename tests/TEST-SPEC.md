@@ -141,10 +141,10 @@ Override: `RUN_ALL_TESTS=1 git push` or skip with `git push --no-verify`.
 | LOG-06 | No logs created when logging disabled | Restart with LOG_*=0, verify no log files |
 | LOG-07 | logs subcommand exists in CLI | Grep bin/claude-secure for `logs)` and `tail -f` |
 
-## Phase 7: Env-File Strategy (5 tests)
+## Phase 7: Env-File Strategy (10 tests)
 
 **File:** `tests/test-phase7.sh`
-**Covers:** Dynamic secret loading via env_file, secret propagation, minimal config operation.
+**Covers:** Dynamic secret loading via env_file, secret propagation, minimal config operation, API key + base URL delivery.
 
 | ID | Test | How |
 |----|------|-----|
@@ -153,6 +153,11 @@ Override: `RUN_ALL_TESTS=1 git push` or skip with `git push --no-verify`.
 | ENV-03 | Claude container has secret env vars for tooling | `env` inside claude shows TEST_SECRET_ALPHA and GITHUB_TOKEN |
 | ENV-04 | Proxy has secrets and whitelist for redaction | `printenv` + `jq` verify proxy has both token and config |
 | ENV-05 | System starts with auth-only .env | Restart with minimal .env, proxy runs, secret vars absent |
+| ENV-06 | ANTHROPIC_API_KEY from env_file reaches claude container | `printenv` inside claude returns the test key (not "dummy") |
+| ENV-07 | ANTHROPIC_API_KEY from env_file reaches proxy | `printenv` inside proxy returns the test key |
+| ENV-08 | REAL_ANTHROPIC_BASE_URL from env_file reaches proxy | `printenv` inside proxy returns the custom URL |
+| ENV-09 | CLAUDE_CODE_OAUTH_TOKEN absent when not in env_file | `env` inside claude shows no CLAUDE_CODE_OAUTH_TOKEN when not set in .env |
+| ENV-10 | project_env_for_containers remaps ANTHROPIC_BASE_URL → REAL_ANTHROPIC_BASE_URL | Source remap logic, verify output env file has REAL_ANTHROPIC_BASE_URL and not ANTHROPIC_BASE_URL |
 
 ## Phase 9: Multi-Instance Support (9 tests)
 

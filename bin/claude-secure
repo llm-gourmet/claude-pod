@@ -140,7 +140,18 @@ project_env_for_containers() {
 
   # grep -v removes matching lines. LC_ALL=C for deterministic ERE matching
   # across glibc/BSD. `|| true` because grep returns 1 if zero lines survive.
-  LC_ALL=C grep -Ev "$pattern" "$src" > "$dst" || true
+  # Also strip ANTHROPIC_BASE_URL: it is always overridden by docker-compose
+  # (hardcoded to http://proxy:8080) so it must never reach the container via
+  # env_file — and users often write it when they mean REAL_ANTHROPIC_BASE_URL.
+  LC_ALL=C grep -Ev "$pattern" "$src" | LC_ALL=C grep -v '^ANTHROPIC_BASE_URL=' > "$dst" || true
+
+  # Transparent remap: if ANTHROPIC_BASE_URL was present but REAL_ANTHROPIC_BASE_URL
+  # was not, promote it so the proxy gets the correct upstream URL via env_file.
+  if LC_ALL=C grep -q '^ANTHROPIC_BASE_URL=' "$src" && ! LC_ALL=C grep -q '^REAL_ANTHROPIC_BASE_URL=' "$src"; then
+    local mapped_url
+    mapped_url=$(LC_ALL=C grep '^ANTHROPIC_BASE_URL=' "$src" | head -1 | cut -d= -f2-)
+    [ -n "$mapped_url" ] && printf 'REAL_ANTHROPIC_BASE_URL=%s\n' "$mapped_url" >> "$dst"
+  fi
 
   echo "$dst"
 }
@@ -346,6 +357,12 @@ load_profile_config() {
     # shellcheck source=/dev/null
     source "$pdir/.env"
     set +a
+    # Transparent remap: if the user wrote ANTHROPIC_BASE_URL in .env (common
+    # mistake) and REAL_ANTHROPIC_BASE_URL is not set, promote it so that
+    # docker-compose variable substitution in the proxy service works correctly.
+    if [ -z "${REAL_ANTHROPIC_BASE_URL:-}" ] && [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
+      export REAL_ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL"
+    fi
   fi
 }
 

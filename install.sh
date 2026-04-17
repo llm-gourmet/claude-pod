@@ -337,6 +337,15 @@ setup_auth() {
         exit 1
         ;;
     esac
+    if [ -n "$extra_value" ]; then
+      case "$extra_value" in
+        *$'\n'*|*$'\r'*)
+          log_error "${extra_name} contains a newline or carriage return (paste buffer leakage?)."
+          log_error "Installation aborted — no .env written."
+          exit 1
+          ;;
+      esac
+    fi
     {
       printf '%s=%s\n' "$var_name" "$value"
       if [ -n "$extra_name" ] && [ -n "$extra_value" ]; then
@@ -350,7 +359,7 @@ setup_auth() {
   }
 
   if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-    write_env_file "ANTHROPIC_API_KEY" "$ANTHROPIC_API_KEY"
+    write_env_file "ANTHROPIC_API_KEY" "$ANTHROPIC_API_KEY" "REAL_ANTHROPIC_BASE_URL" "${REAL_ANTHROPIC_BASE_URL:-}"
     log_info "Using ANTHROPIC_API_KEY from environment"
     return
   fi
