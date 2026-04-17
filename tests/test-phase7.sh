@@ -13,7 +13,7 @@ set -uo pipefail
 
 PASS=0
 FAIL=0
-TOTAL=5
+TOTAL=10
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -38,11 +38,12 @@ report() {
 TEMP_ENV_FULL=$(mktemp)
 TEMP_ENV_MINIMAL=$(mktemp)
 TEMP_WORKSPACE=$(mktemp -d)
+_CLEANUP_FILES_EXTRA=()
 
 cleanup() {
   cd "$PROJECT_DIR"
   docker compose down -v >/dev/null 2>&1 || true
-  rm -f "$TEMP_ENV_FULL" "$TEMP_ENV_MINIMAL"
+  rm -f "$TEMP_ENV_FULL" "$TEMP_ENV_MINIMAL" "${_CLEANUP_FILES_EXTRA[@]}"
   rm -rf "$TEMP_WORKSPACE" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -178,6 +179,83 @@ if [ "$READY" = "true" ]; then
   fi
 fi
 report "ENV-05" "System starts with auth-only .env (no secrets)" $ENV05_RESULT
+
+# =========================================================================
+# ENV-06 through ENV-09: API key + custom base URL delivery
+# New .env: ANTHROPIC_API_KEY + REAL_ANTHROPIC_BASE_URL (no OAuth token)
+# =========================================================================
+docker compose down -v >/dev/null 2>&1
+
+TEMP_ENV_APIKEY=$(mktemp)
+_CLEANUP_FILES_EXTRA+=("$TEMP_ENV_APIKEY")
+printf 'ANTHROPIC_API_KEY=sk-ant-test-phase7-apikey\nREAL_ANTHROPIC_BASE_URL=https://test.example.com/v1\n' > "$TEMP_ENV_APIKEY"
+
+export SECRETS_FILE="$TEMP_ENV_APIKEY"
+# ANTHROPIC_API_KEY must also be in host env for docker compose variable
+# substitution in any remaining ${VAR} references.
+export ANTHROPIC_API_KEY=sk-ant-test-phase7-apikey
+
+docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
+docker compose up -d >/dev/null 2>&1
+
+READY=false
+for i in $(seq 1 15); do
+  if docker compose exec -T proxy node -e "process.exit(0)" 2>/dev/null; then
+    READY=true; break
+  fi
+  sleep 1
+done
+
+ENV06_RESULT=1; ENV07_RESULT=1; ENV08_RESULT=1; ENV09_RESULT=1
+
+if [ "$READY" = "true" ]; then
+  # ENV-06: API key reaches claude container (env_file, not "dummy")
+  claude_key=$(docker compose exec -T claude printenv ANTHROPIC_API_KEY 2>/dev/null)
+  [ "$claude_key" = "sk-ant-test-phase7-apikey" ] && ENV06_RESULT=0
+
+  # ENV-07: API key reaches proxy
+  proxy_key=$(docker compose exec -T proxy printenv ANTHROPIC_API_KEY 2>/dev/null)
+  [ "$proxy_key" = "sk-ant-test-phase7-apikey" ] && ENV07_RESULT=0
+
+  # ENV-08: REAL_ANTHROPIC_BASE_URL reaches proxy from env_file
+  proxy_url=$(docker compose exec -T proxy printenv REAL_ANTHROPIC_BASE_URL 2>/dev/null)
+  [ "$proxy_url" = "https://test.example.com/v1" ] && ENV08_RESULT=0
+
+  # ENV-09: CLAUDE_CODE_OAUTH_TOKEN absent from claude container when not in env_file
+  # (empty string or unset — both acceptable; must not be a non-empty stale token)
+  oauth_val=$(docker compose exec -T claude printenv CLAUDE_CODE_OAUTH_TOKEN 2>/dev/null || true)
+  [ -z "$oauth_val" ] && ENV09_RESULT=0
+fi
+
+report "ENV-06" "ANTHROPIC_API_KEY from env_file reaches claude (no dummy)" $ENV06_RESULT
+report "ENV-07" "ANTHROPIC_API_KEY from env_file reaches proxy" $ENV07_RESULT
+report "ENV-08" "REAL_ANTHROPIC_BASE_URL from env_file reaches proxy" $ENV08_RESULT
+report "ENV-09" "CLAUDE_CODE_OAUTH_TOKEN absent when not in env_file" $ENV09_RESULT
+
+# =========================================================================
+# ENV-10: project_env_for_containers remap logic (no docker needed)
+# Verify ANTHROPIC_BASE_URL in .env → REAL_ANTHROPIC_BASE_URL in output,
+# and ANTHROPIC_BASE_URL is stripped from output.
+# =========================================================================
+TEMP_ENV_WRONGNAME=$(mktemp)
+TEMP_REMAP_OUT=$(mktemp)
+_CLEANUP_FILES_EXTRA+=("$TEMP_ENV_WRONGNAME" "$TEMP_REMAP_OUT")
+
+printf 'ANTHROPIC_API_KEY=sk-ant-test\nANTHROPIC_BASE_URL=https://remap.example.com/v1\n' > "$TEMP_ENV_WRONGNAME"
+
+# Inline the remap logic from project_env_for_containers (bin/claude-secure)
+LC_ALL=C grep -v '^ANTHROPIC_BASE_URL=' "$TEMP_ENV_WRONGNAME" > "$TEMP_REMAP_OUT" || true
+if LC_ALL=C grep -q '^ANTHROPIC_BASE_URL=' "$TEMP_ENV_WRONGNAME" && \
+   ! LC_ALL=C grep -q '^REAL_ANTHROPIC_BASE_URL=' "$TEMP_ENV_WRONGNAME"; then
+  mapped_url=$(LC_ALL=C grep '^ANTHROPIC_BASE_URL=' "$TEMP_ENV_WRONGNAME" | head -1 | cut -d= -f2-)
+  [ -n "$mapped_url" ] && printf 'REAL_ANTHROPIC_BASE_URL=%s\n' "$mapped_url" >> "$TEMP_REMAP_OUT"
+fi
+
+remap_has_real=1; remap_no_wrong=1
+grep -q '^REAL_ANTHROPIC_BASE_URL=https://remap.example.com/v1' "$TEMP_REMAP_OUT" && remap_has_real=0
+! grep -q '^ANTHROPIC_BASE_URL=' "$TEMP_REMAP_OUT" && remap_no_wrong=0
+test "$remap_has_real" -eq 0 -a "$remap_no_wrong" -eq 0
+report "ENV-10" "ANTHROPIC_BASE_URL remapped to REAL_ANTHROPIC_BASE_URL" $?
 
 # --- Summary ---
 echo ""

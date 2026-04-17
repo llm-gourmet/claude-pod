@@ -9,12 +9,13 @@ services:
     # Short form (mem_limit) is honored by `docker compose up`; deploy.resources
     # is Swarm-only and silently ignored, so do NOT switch to that form.
     mem_limit: 1g
+    # Auth vars (ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN) are delivered
+    # exclusively via env_file — no environment overrides so the real key
+    # is never shadowed by a dummy fallback.
     env_file:
       - ${SECRETS_FILE:-/dev/null}
     environment:
       - ANTHROPIC_BASE_URL=http://proxy:8080
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-dummy}
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - DISABLE_TELEMETRY=1
       - DISABLE_AUTOUPDATER=1
       - DISABLE_ERROR_REPORTING=1
@@ -47,10 +48,15 @@ services:
     env_file:
       - ${SECRETS_FILE:-/dev/null}
     environment:
-      - REAL_ANTHROPIC_BASE_URL=${REAL_ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+      # Two-variable design: ANTHROPIC_BASE_URL (in the claude service above) always
+      # points to this proxy so all traffic is intercepted. REAL_ANTHROPIC_BASE_URL
+      # is what the proxy forwards to — the actual Anthropic endpoint (or a custom
+      # compatible gateway when the user configures one during install).
+      # Auth vars (ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, REAL_ANTHROPIC_BASE_URL)
+      # are delivered via env_file only — no environment overrides so host-env absence
+      # never shadows the real values with empty strings. proxy.js defaults
+      # REAL_ANTHROPIC_BASE_URL to https://api.anthropic.com when not set.
       - WHITELIST_PATH=/etc/claude-secure/whitelist.json
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
       - LOG_ANTHROPIC=${LOG_ANTHROPIC:-0}
       - LOG_ANTHROPIC_BODIES=${LOG_ANTHROPIC_BODIES:-0}
       - LOG_PREFIX=${LOG_PREFIX:-}

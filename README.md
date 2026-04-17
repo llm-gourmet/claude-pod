@@ -31,6 +31,42 @@ For non-interactive installs, export `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API
 sudo -E CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" ./install.sh
 ```
 
+**API key with a custom base URL** (corporate gateway or Azure OpenAI-compatible endpoint):
+
+```bash
+sudo -E ANTHROPIC_API_KEY="$KEY" REAL_ANTHROPIC_BASE_URL="https://yourcompany.com/anthropic/v1" ./install.sh
+```
+
+The interactive installer also prompts for the base URL when you choose auth method 2 (API key).
+
+---
+
+## Auth variables
+
+Two variables control where traffic goes:
+
+| Variable | Set in | Purpose |
+|----------|--------|---------|
+| `ANTHROPIC_API_KEY` | profile `.env` | API key sent upstream by the proxy |
+| `CLAUDE_CODE_OAUTH_TOKEN` | profile `.env` | OAuth token (preferred over API key) |
+| `REAL_ANTHROPIC_BASE_URL` | profile `.env` | Proxy upstream — defaults to `https://api.anthropic.com` |
+| `ANTHROPIC_BASE_URL` | docker-compose (internal) | Always `http://proxy:8080` — do **not** put this in `.env` |
+
+> **Naming note:** `ANTHROPIC_BASE_URL` in the Claude container always points at the proxy (hardcoded). The proxy uses `REAL_ANTHROPIC_BASE_URL` to reach the actual Anthropic endpoint. If you accidentally write `ANTHROPIC_BASE_URL` in your `.env`, claude-secure auto-remaps it to `REAL_ANTHROPIC_BASE_URL` at startup so the proxy gets the correct value.
+
+Auth variables are loaded exclusively from the profile `.env` via Docker Compose `env_file`. They are **not** listed in the `environment` block, so no host-side default can accidentally shadow a real value.
+
+Example `.env` for API key + corporate gateway:
+
+```bash
+# ~/.claude-secure/profiles/<name>/.env
+ANTHROPIC_API_KEY=sk-your-api-key
+REAL_ANTHROPIC_BASE_URL=https://yourcompany.com/anthropic/v1
+
+# project secrets (redacted by proxy before reaching LLM context)
+GITHUB_TOKEN=ghp_xxx
+```
+
 ---
 
 ## CLI
