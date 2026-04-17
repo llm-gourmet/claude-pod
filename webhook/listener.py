@@ -150,6 +150,10 @@ class Config:
         self.claude_secure_bin = data.get(
             "claude_secure_bin", "/usr/local/bin/claude-secure"
         )
+        # Optional: explicit CONFIG_DIR for claude-secure spawn. Needed when
+        # the listener runs as a different user (e.g. root via systemd) whose
+        # $HOME differs from the user who installed claude-secure.
+        self.config_dir = data.get("config_dir") or ""
 
 
 def load_config(path: pathlib.Path) -> Config:
@@ -309,6 +313,14 @@ def _spawn_worker(profile_name: str, event_path: pathlib.Path, delivery_id: str)
         log_path = spawns_dir / f"{delivery_id}.log"
         with open(log_path, "wb") as log_fp:
             # close_fds=True is the Python 3.7+ default on POSIX (Gotcha 6).
+            # If config_dir is set in webhook.json, inject CONFIG_DIR so spawn
+            # finds the right config when running as a different user (e.g.
+            # root via systemd whose $HOME != the installing user's home).
+            popen_kwargs: dict = {"stdout": log_fp, "stderr": subprocess.STDOUT}
+            if _config.config_dir:
+                spawn_env = os.environ.copy()
+                spawn_env["CONFIG_DIR"] = _config.config_dir
+                popen_kwargs["env"] = spawn_env
             proc = subprocess.Popen(
                 [
                     _config.claude_secure_bin,
@@ -318,8 +330,7 @@ def _spawn_worker(profile_name: str, event_path: pathlib.Path, delivery_id: str)
                     "--event-file",
                     str(event_path),
                 ],
-                stdout=log_fp,
-                stderr=subprocess.STDOUT,
+                **popen_kwargs,
             )
             log_event(
                 event="spawned",
