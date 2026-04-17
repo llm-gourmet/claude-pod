@@ -11,6 +11,6 @@
 
 ## 3. Verify and document the auth flow
 
-- [ ] 3.1 Run a local test: start a fresh container with `ANTHROPIC_API_KEY=<real_key>` in `.env` (no `environment` override), confirm Claude Code does not prompt for OAuth login in headless mode (`docker compose exec -T claude claude -p "hello"`)
+- [x] 3.1 Run a local test: start a fresh container with `ANTHROPIC_API_KEY=<real_key>` in `.env` (no `environment` override), confirm Claude Code does not prompt for OAuth login in headless mode (`docker compose exec -T claude claude -p "hello"`)
 - [ ] 3.2 Run a local test: OAuth user path — start with `CLAUDE_CODE_OAUTH_TOKEN=<token>` only, confirm no `ANTHROPIC_API_KEY=dummy` appears in container env (`docker compose exec claude env | grep API_KEY`)
 - [x] 3.3 Add a comment block above the proxy service's `REAL_ANTHROPIC_BASE_URL` line in `docker-compose.yml` clarifying the two-variable design: `ANTHROPIC_BASE_URL` (claude container) always points to the proxy; `REAL_ANTHROPIC_BASE_URL` (proxy container) is the actual upstream Anthropic endpoint

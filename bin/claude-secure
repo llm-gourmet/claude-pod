@@ -2124,6 +2124,7 @@ case "$CMD" in
     fi
     echo ""
     echo "Update complete. ${_update_count} profile image(s) rebuilt."
+    exit 0
     ;;
   upgrade)
     # Without --profile: upgrade all profiles.
