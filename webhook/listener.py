@@ -309,6 +309,11 @@ def _spawn_worker(profile_name: str, event_path: pathlib.Path, delivery_id: str)
         log_path = spawns_dir / f"{delivery_id}.log"
         with open(log_path, "wb") as log_fp:
             # close_fds=True is the Python 3.7+ default on POSIX (Gotcha 6).
+            # Pass CONFIG_DIR derived from profiles_dir so the spawn works
+            # regardless of which user $HOME the process runs under (e.g. root
+            # when invoked from systemd).
+            spawn_env = os.environ.copy()
+            spawn_env["CONFIG_DIR"] = str(_config.profiles_dir.parent)
             proc = subprocess.Popen(
                 [
                     _config.claude_secure_bin,
@@ -320,6 +325,7 @@ def _spawn_worker(profile_name: str, event_path: pathlib.Path, delivery_id: str)
                 ],
                 stdout=log_fp,
                 stderr=subprocess.STDOUT,
+                env=spawn_env,
             )
             log_event(
                 event="spawned",
