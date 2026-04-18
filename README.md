@@ -99,7 +99,7 @@ Profile directory layout:
 ```
 ~/.claude-secure/profiles/<name>/
   profile.json      # workspace, repo, report_repo, max_turns, etc.
-  .env              # secrets: GITHUB_TOKEN, REPORT_REPO_TOKEN, etc.
+  .env              # secrets: GITHUB_TOKEN, etc.
   whitelist.json    # per-profile domain whitelist
 ```
 
@@ -109,9 +109,6 @@ Profile directory layout:
 |-------|-------------|
 | `workspace` | Absolute path to the project workspace |
 | `repo` | `owner/repo` — used for webhook routing |
-| `report_repo` | HTTPS URL of report repo |
-| `report_branch` | Report repo branch (default: `main`) |
-| `report_project_dir` | Subdirectory inside report repo for this profile (e.g. `projects/myapp`) |
 | `system_prompt` | System prompt injected via `--system-prompt` for every session (interactive and headless) |
 | `max_turns` | Max Claude turns per headless spawn |
 
@@ -255,30 +252,3 @@ decisions/       ideas/          done/
 
 Each file is seeded from `scripts/templates/`. Config stored in `~/.claude-secure/docs-bootstrap.env` (mode 600) — the token never touches Claude or Docker.
 
----
-
-## Report Repo
-
-Claude can commit and push to a private report repo at any point during a session using its Bash tool. The token (`REPORT_REPO_TOKEN`) is available inside the container and redacted by the proxy before any request reaches Anthropic.
-
-```json
-// profile.json
-{
-  "report_repo":        "https://github.com/you/claude-reports.git",
-  "report_branch":      "main",
-  "report_project_dir": "projects/myapp"
-}
-```
-
-```bash
-# ~/.claude-secure/profiles/<name>/.env
-REPORT_REPO_TOKEN=github_pat_xxx
-```
-
-Inside the container, Claude has access to:
-- `REPORT_REPO` — the repo URL
-- `REPORT_BRANCH` — the branch
-- `REPORT_PROJECT_DIR` — the subdirectory to work in
-- `REPORT_REPO_TOKEN` — the PAT for authenticating git pushes
-
-Claude pushes directly via `git` using these env vars. Network access to `github.com` is whitelisted when `REPORT_REPO_TOKEN` is configured.
