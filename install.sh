@@ -509,6 +509,23 @@ install_cli() {
       log_warn "$_invoking_home/.local/bin is not in PATH. Add it to your shell profile."
     fi
   fi
+
+  # Install bootstrap-docs templates and script to share directory.
+  local share_dir="/usr/local/share/claude-secure"
+  local templates_src="$CONFIG_DIR/app/scripts/templates"
+  local script_src="$CONFIG_DIR/app/scripts/new-project.sh"
+  if [ -d "$templates_src" ]; then
+    if [ -w /usr/local/share ] || command -v sudo >/dev/null 2>&1; then
+      local install_cmd=""
+      [ -w /usr/local/share ] && install_cmd="" || install_cmd="sudo"
+      $install_cmd mkdir -p "$share_dir/scripts/templates"
+      $install_cmd cp -r "$templates_src/." "$share_dir/scripts/templates/"
+      [ -f "$script_src" ] && $install_cmd cp "$script_src" "$share_dir/scripts/new-project.sh"
+      log_info "Installed bootstrap-docs templates to $share_dir/scripts/templates/"
+    else
+      log_warn "Cannot install bootstrap-docs templates to $share_dir (no write access, no sudo)"
+    fi
+  fi
 }
 
 install_webhook_service() {
