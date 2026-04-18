@@ -2002,7 +2002,20 @@ cmd_webhook_listener() {
     esac
   done
 
-  [ -n "$set_token" ] && _webhook_listener_set_config_key WEBHOOK_GITHUB_TOKEN "$set_token" && echo "Set WEBHOOK_GITHUB_TOKEN=<redacted>"
+  if [ -n "$set_token" ]; then
+    _webhook_listener_set_config_key WEBHOOK_GITHUB_TOKEN "$set_token"
+    # Also write github_token into the listener's config.json so listener.py picks it up.
+    local wjson="${WEBHOOK_CONFIG:-/etc/claude-secure/webhook.json}"
+    if [ -w "$wjson" ]; then
+      jq --arg t "$set_token" '.github_token = $t' "$wjson" > "${wjson}.tmp" && mv "${wjson}.tmp" "$wjson"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo jq --arg t "$set_token" '.github_token = $t' "$wjson" | sudo tee "${wjson}.tmp" >/dev/null \
+        && sudo mv "${wjson}.tmp" "$wjson"
+    else
+      echo "WARNING: could not write to $wjson (no sudo). Set github_token manually." >&2
+    fi
+    echo "Set WEBHOOK_GITHUB_TOKEN=<redacted>"
+  fi
   [ -n "$set_bind" ]  && _webhook_listener_set_config_key WEBHOOK_BIND  "$set_bind"  && echo "Set WEBHOOK_BIND=$set_bind"
   [ -n "$set_port" ]  && _webhook_listener_set_config_key WEBHOOK_PORT  "$set_port"  && echo "Set WEBHOOK_PORT=$set_port"
   if [ -n "$set_token" ] || [ -n "$set_bind" ] || [ -n "$set_port" ]; then
