@@ -228,6 +228,63 @@ The validator shares the claude container's network namespace (`network_mode: se
 
 ---
 
+## Webhook Listener
+
+A single listener process on the VPS handles all repos. There is no second listener — GitHub webhooks from every repo hit port 9000, and the listener routes each event by matching `repository.full_name` in the payload against each profile's `repo` field. Every profile gets its own `webhook_secret`; HMAC is verified per-profile before dispatch.
+
+### Status
+
+```bash
+claude-secure webhook-listener status
+```
+
+```
+Webhook Listener Status
+  Bind:     127.0.0.1:9000
+  Systemd:  active
+  Health:   ok
+```
+
+### Configuration
+
+```bash
+claude-secure webhook-listener --set-bind <addr>          # Bind address (default: 127.0.0.1)
+claude-secure webhook-listener --set-port <port>          # Port (default: 9000)
+```
+
+#### GitHub token (one-time, global)
+
+The listener uses a single GitHub PAT to fetch commit diffs for TODO detection. This token is **shared across all repos** — one PAT with `repo` read scope is enough.
+
+```bash
+claude-secure webhook-listener --set-token <github-pat>
+```
+
+Persisted to `~/.claude-secure/webhook-listener.env` (mode 600) and written into `webhook.json` so `listener.py` picks it up without a restart. Replace only when rotating the PAT.
+
+### Adding a second repo
+
+Each repo gets its own profile with its own `webhook_secret`. The global token and listener port stay unchanged.
+
+1. Create a profile with `repo` set to the new `owner/repo`:
+   ```bash
+   claude-secure --profile myproject2
+   # enter owner/repo when prompted
+   ```
+2. Add `webhook_secret` to the profile:
+   ```bash
+   # ~/.claude-secure/profiles/myproject2/profile.json
+   # add: "webhook_secret": "<secret>"
+   ```
+3. Register a GitHub webhook on the repo:
+   - **URL:** `https://<vps>:9000/`
+   - **Secret:** same value as `webhook_secret` above
+   - **Content type:** `application/json`
+
+No new listener, no new port — the existing systemd service routes events by matching `repository.full_name` against each profile's `repo` field.
+
+---
+
 ## Bootstrap Docs
 
 Scaffold a standard project documentation structure into a remote git repo — no Docker, no Claude involved, runs directly on the host.
