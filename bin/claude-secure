@@ -1942,6 +1942,201 @@ do_reap() {
 }
 
 # =========================================================================
+# bootstrap-docs: scaffold project documentation in a remote git repo
+# =========================================================================
+
+# Write or update a single KEY=VALUE line in docs-bootstrap.env.
+# Creates the file with mode 600 if it doesn't exist.
+_bootstrap_docs_set_config_key() {
+  local key="$1" value="$2"
+  local env_file="$CONFIG_DIR/docs-bootstrap.env"
+  if [ ! -f "$env_file" ]; then
+    touch "$env_file"
+    chmod 600 "$env_file"
+  fi
+  # Remove existing line for this key, then append updated value.
+  local tmp
+  tmp=$(mktemp)
+  grep -v "^${key}=" "$env_file" > "$tmp" 2>/dev/null || true
+  printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  mv "$tmp" "$env_file"
+  chmod 600 "$env_file"
+}
+
+# Load docs-bootstrap.env and verify DOCS_BOOTSTRAP_REPO is set.
+# Exports DOCS_BOOTSTRAP_REPO, DOCS_BOOTSTRAP_TOKEN, DOCS_BOOTSTRAP_BRANCH.
+_bootstrap_docs_load_config() {
+  local env_file="$CONFIG_DIR/docs-bootstrap.env"
+  if [ -f "$env_file" ]; then
+    # shellcheck source=/dev/null
+    set -a; source "$env_file"; set +a
+  fi
+  if [ -z "${DOCS_BOOTSTRAP_REPO:-}" ]; then
+    echo "Error: docs repo not configured. Run: claude-secure bootstrap-docs --set-repo <url>" >&2
+    return 1
+  fi
+  DOCS_BOOTSTRAP_BRANCH="${DOCS_BOOTSTRAP_BRANCH:-main}"
+}
+
+# Resolve the templates directory (dev-layout or installed-layout).
+_bootstrap_docs_find_templates() {
+  local self_dir
+  self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local dev_templates="$self_dir/../scripts/templates"
+  local installed_templates="/usr/local/share/claude-secure/scripts/templates"
+  if [ -d "$dev_templates" ]; then
+    echo "$dev_templates"
+  elif [ -d "$installed_templates" ]; then
+    echo "$installed_templates"
+  else
+    echo "Error: bootstrap templates not found. Re-run install.sh to restore them." >&2
+    return 1
+  fi
+}
+
+# Scaffold the standard project folder structure at $1 inside the repo at $2.
+_bootstrap_docs_scaffold() {
+  local target_path="$1" repo_dir="$2" templates_dir="$3"
+  local project_dir="$repo_dir/$target_path"
+
+  mkdir -p "$project_dir/decisions" "$project_dir/ideas" "$project_dir/done"
+
+  cp "$templates_dir/VISION.md"      "$project_dir/VISION.md"
+  cp "$templates_dir/GOALS.md"       "$project_dir/GOALS.md"
+  cp "$templates_dir/AGREEMENTS.md"  "$project_dir/AGREEMENTS.md"
+  cp "$templates_dir/TODOS.md"       "$project_dir/TODOS.md"
+  cp "$templates_dir/TASKS.md"       "$project_dir/TASKS.md"
+  cp "$templates_dir/decisions/_template.md" "$project_dir/decisions/_template.md"
+  cp "$templates_dir/ideas/_template.md"     "$project_dir/ideas/_template.md"
+  cp "$templates_dir/done/_template.md"      "$project_dir/done/_template.md"
+}
+
+cmd_bootstrap_docs() {
+  local path_arg=""
+  local set_repo="" set_token="" set_branch=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --set-repo)   set_repo="$2";   shift 2 ;;
+      --set-token)  set_token="$2";  shift 2 ;;
+      --set-branch) set_branch="$2"; shift 2 ;;
+      --help|-h)
+        echo "Usage: claude-secure bootstrap-docs <path>"
+        echo "       claude-secure bootstrap-docs --set-repo <url>"
+        echo "       claude-secure bootstrap-docs --set-token <token>"
+        echo "       claude-secure bootstrap-docs --set-branch <branch>"
+        echo ""
+        echo "Scaffold project documentation at <path> in the configured docs repo."
+        echo "<path> is relative to the repo root, e.g. projects/JAD or custom/myproject"
+        return 0
+        ;;
+      -*) echo "Error: unknown flag '$1'" >&2; return 1 ;;
+      *)  path_arg="$1"; shift ;;
+    esac
+  done
+
+  # Config setters
+  [ -n "$set_repo" ]   && _bootstrap_docs_set_config_key DOCS_BOOTSTRAP_REPO   "$set_repo"   && echo "Set DOCS_BOOTSTRAP_REPO=$set_repo"
+  [ -n "$set_token" ]  && _bootstrap_docs_set_config_key DOCS_BOOTSTRAP_TOKEN  "$set_token"  && echo "Set DOCS_BOOTSTRAP_TOKEN=<redacted>"
+  [ -n "$set_branch" ] && _bootstrap_docs_set_config_key DOCS_BOOTSTRAP_BRANCH "$set_branch" && echo "Set DOCS_BOOTSTRAP_BRANCH=$set_branch"
+  if [ -n "$set_repo" ] || [ -n "$set_token" ] || [ -n "$set_branch" ]; then
+    return 0
+  fi
+
+  if [ -z "$path_arg" ]; then
+    echo "Usage: claude-secure bootstrap-docs <path>" >&2
+    echo "Run 'claude-secure bootstrap-docs --help' for more information." >&2
+    return 1
+  fi
+
+  _bootstrap_docs_load_config || return 1
+
+  local templates_dir
+  templates_dir=$(_bootstrap_docs_find_templates) || return 1
+
+  local repo_url="${DOCS_BOOTSTRAP_REPO}"
+  local branch="${DOCS_BOOTSTRAP_BRANCH}"
+  local pat="${DOCS_BOOTSTRAP_TOKEN:-}"
+
+  local clone_dir
+  clone_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-bootstrap-XXXXXXXX")
+  _CLEANUP_FILES+=("$clone_dir")
+
+  # Ephemeral ASKPASS helper (Pattern A — same as publish_report).
+  local askpass="$clone_dir/.askpass.sh"
+  cat > "$askpass" <<'ASKPASS'
+#!/bin/sh
+case "$1" in
+  Username*) printf 'x-access-token\n' ;;
+  Password*) printf '%s\n' "$GIT_ASKPASS_PAT" ;;
+esac
+ASKPASS
+  chmod 700 "$askpass"
+
+  echo "Cloning $repo_url (branch: $branch)..."
+  local clone_err="$clone_dir/clone.err"
+  if ! LC_ALL=C \
+       GIT_ASKPASS="$askpass" \
+       GIT_ASKPASS_PAT="$pat" \
+       GIT_TERMINAL_PROMPT=0 \
+       GIT_HTTP_LOW_SPEED_LIMIT=1 \
+       GIT_HTTP_LOW_SPEED_TIME=30 \
+       timeout 60 \
+       git -c credential.helper= -c credential.helper='' \
+           -c core.autocrlf=false \
+           clone --depth 1 --branch "$branch" --quiet "$repo_url" "$clone_dir/repo" \
+           2>"$clone_err"; then
+    sed "s|${pat}|<REDACTED:DOCS_BOOTSTRAP_TOKEN>|g" "$clone_err" >&2
+    echo "Error: clone failed" >&2
+    return 1
+  fi
+
+  local repo_dir="$clone_dir/repo"
+
+  if [ -d "$repo_dir/$path_arg" ] || [ -f "$repo_dir/$path_arg" ]; then
+    echo "Error: $path_arg already exists in remote repo" >&2
+    return 1
+  fi
+
+  echo "Scaffolding $path_arg..."
+  _bootstrap_docs_scaffold "$path_arg" "$repo_dir" "$templates_dir"
+
+  if ! LC_ALL=C \
+       GIT_AUTHOR_NAME="claude-secure" \
+       GIT_AUTHOR_EMAIL="claude-secure@localhost" \
+       GIT_COMMITTER_NAME="claude-secure" \
+       GIT_COMMITTER_EMAIL="claude-secure@localhost" \
+       git -C "$repo_dir" -c core.autocrlf=false add "$path_arg"; then
+    echo "Error: git add failed" >&2
+    return 1
+  fi
+
+  if ! LC_ALL=C \
+       GIT_AUTHOR_NAME="claude-secure" \
+       GIT_AUTHOR_EMAIL="claude-secure@localhost" \
+       GIT_COMMITTER_NAME="claude-secure" \
+       GIT_COMMITTER_EMAIL="claude-secure@localhost" \
+       git -C "$repo_dir" -c core.autocrlf=false commit -q -m "bootstrap: $path_arg"; then
+    echo "Error: git commit failed" >&2
+    return 1
+  fi
+
+  local push_err="$clone_dir/push.err"
+  if ! LC_ALL=C \
+       GIT_ASKPASS="$askpass" \
+       GIT_ASKPASS_PAT="$pat" \
+       GIT_TERMINAL_PROMPT=0 \
+       git -C "$repo_dir" -c credential.helper= -c credential.helper='' \
+           push origin "$branch" 2>"$push_err"; then
+    sed "s|${pat}|<REDACTED:DOCS_BOOTSTRAP_TOKEN>|g" "$push_err" >&2
+    echo "Error: push failed" >&2
+    return 1
+  fi
+
+  echo "Done. $path_arg bootstrapped in $repo_url"
+}
+
+# =========================================================================
 # Source-only guard: if sourced by tests, stop here
 # =========================================================================
 if [ "$__CLAUDE_SECURE_SOURCE_ONLY" = "1" ]; then
@@ -2038,7 +2233,7 @@ else
   #     its own error. Superuser merge is not valid for spawn.
   #   - status: reads docker ps only; no workspace config needed.
   case "$FIRST_ARG" in
-    list|help|--help|-h|replay|reap|spawn|update|upgrade|status)
+    list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs)
       : # skip superuser load
       ;;
     *)
@@ -2217,7 +2412,8 @@ case "$CMD" in
     echo "  upgrade    Upgrade Claude Code to latest version (--no-cache --pull)"
     echo "  spawn      Run headless Claude Code session (requires --profile and --event)"
     echo "  reap       Clean up orphaned spawn containers and stale event files"
-    echo "  help       Show this help message"
+    echo "  bootstrap-docs <path>  Scaffold project docs at <path> in configured remote repo"
+  echo "  help       Show this help message"
     echo ""
     echo "Modes:"
     echo "  --profile NAME   Run scoped to a specific profile"
@@ -2243,6 +2439,9 @@ case "$CMD" in
     echo ""
     echo "Profile names must be DNS-safe (lowercase alphanumeric and hyphens)."
     echo "New profiles are auto-created on first use."
+    ;;
+  bootstrap-docs)
+    cmd_bootstrap_docs "${REMAINING_ARGS[@]:1}"
     ;;
   spawn)
     do_spawn

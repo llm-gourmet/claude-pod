@@ -76,7 +76,16 @@
         "test-phase16.sh",
         "test-phase23.sh",
         "test-phase25.sh",
-        "test-update-cmd.sh"
+        "test-update-cmd.sh",
+        "test-bootstrap-docs.sh"
+      ]
+    },
+    {
+      "paths": [
+        "scripts/"
+      ],
+      "tests": [
+        "test-bootstrap-docs.sh"
       ]
     },
     {

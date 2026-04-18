@@ -133,6 +133,10 @@ claude-secure --profile <name> spawn --event '<json>'    # Headless spawn
 claude-secure --profile <name> replay <delivery-id>      # Replay webhook
 claude-secure reap                     # Clean up orphaned containers and stale events
 
+claude-secure bootstrap-docs --set-repo <url>   # Configure docs repo (once)
+claude-secure bootstrap-docs --set-token <pat>  # Configure auth token
+claude-secure bootstrap-docs <path>             # Scaffold project docs in remote repo
+
 claude-secure help                     # Show all commands
 ```
 
@@ -224,6 +228,32 @@ The hook:
 ### 4. Network enforcement (validator + iptables)
 
 The validator shares the claude container's network namespace (`network_mode: service:claude`). When the hook registers a call-ID, the validator adds a time-limited iptables rule permitting that specific outbound connection. Any connection attempt without a registered call-ID is rejected at the packet level — even if the hook is somehow bypassed.
+
+---
+
+## Bootstrap Docs
+
+Scaffold a standard project documentation structure into a remote git repo — no Docker, no Claude involved, runs directly on the host.
+
+```bash
+# One-time config
+claude-secure bootstrap-docs --set-repo https://github.com/you/vault.git
+claude-secure bootstrap-docs --set-token ghp_...
+claude-secure bootstrap-docs --set-branch main   # default: main
+
+# Scaffold a new project (path is relative to repo root)
+claude-secure bootstrap-docs projects/JAD
+claude-secure bootstrap-docs custom/my-project
+```
+
+Creates under `<path>/`:
+```
+VISION.md        GOALS.md        AGREEMENTS.md
+TODOS.md         TASKS.md
+decisions/       ideas/          done/
+```
+
+Each file is seeded from `scripts/templates/`. Config stored in `~/.claude-secure/docs-bootstrap.env` (mode 600) — the token never touches Claude or Docker.
 
 ---
 

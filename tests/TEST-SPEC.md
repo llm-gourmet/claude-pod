@@ -1,6 +1,6 @@
 # Test Specification
 
-64 integration tests across 7 suites covering all security layers of claude-secure.
+72 integration tests across 8 suites covering all security layers and CLI commands of claude-secure.
 
 ## Infrastructure
 
@@ -28,7 +28,8 @@ Runs automatically on `git push`. Selects relevant suites based on changed files
 | `validator/` | test-phase1, test-phase2 |
 | `config/whitelist.json` | test-phase1, test-phase3 |
 | `install.sh` | test-phase4 |
-| `bin/claude-secure` | test-phase9 |
+| `bin/claude-secure` | test-phase9, test-bootstrap-docs |
+| `scripts/` | test-bootstrap-docs |
 | `git-hooks/` | test-phase2 |
 | `tests/test-phase*.sh` | self (matching suite) |
 
@@ -176,3 +177,20 @@ Override: `RUN_ALL_TESTS=1 git push` or skip with `git push --no-verify`.
 | MULTI-07 | list command shows all instances | Create foo/bar instances, `claude-secure list` shows both |
 | MULTI-08 | Instance auto-creation directory structure | Verify created instance has config.sh, .env (600), whitelist.json |
 | MULTI-09 | Global config scope (APP_DIR and PLATFORM only) | Verify global config excludes WORKSPACE_PATH, CLI loads both configs |
+
+## Bootstrap-Docs: Project Documentation Scaffold (8 tests)
+
+**File:** `tests/test-bootstrap-docs.sh`
+**Covers:** `claude-secure bootstrap-docs` subcommand — config management, error handling, git workflow, cleanup.
+**Note:** No Docker, no real credentials. Uses local bare repos as git remote.
+
+| ID | Test | How |
+|----|------|-----|
+| BOOT-01 | `--set-repo` writes env file with mode 600 | Source CLI, call `--set-repo`, assert file content + `stat` mode = 600 |
+| BOOT-02 | `--set-token` and `--set-branch` write correct values | Call both setters, grep env file |
+| BOOT-03 | Updating one key preserves other keys | Set repo + token, update only branch, verify repo + token unchanged |
+| BOOT-04 | No repo configured exits 1 with message | Call with no env file, assert exit code ≠ 0 and message contains "docs repo not configured" |
+| BOOT-05 | No path argument exits non-zero | Call without path arg, assert non-zero exit |
+| BOOT-06 | Path already exists exits 1 with message | Pre-create path in bare repo, call command, assert exit ≠ 0 and "already exists" in output |
+| BOOT-07 | End-to-end scaffold creates all files in remote repo | Run against local bare repo, clone result, verify all 8 expected files exist |
+| BOOT-08 | No tmpdir remains after execution | Count `cs-bootstrap-*` dirs before/after, assert count unchanged |
