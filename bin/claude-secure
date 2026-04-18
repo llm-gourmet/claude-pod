@@ -517,32 +517,12 @@ build_error_envelope() {
 # UTF-8-safe payload extraction, and awk-based token substitution.
 # =========================================================================
 
-# Phase 15 D-15 + Phase 16 D-08: resolve the default templates directory.
-# Parameterized by subdir so one function serves both prompt templates
-# (subdir="templates", default for backward compat) and report templates
-# (subdir="report-templates"). Priority chain per subdir:
-#   1. $WEBHOOK_TEMPLATES_DIR          (when subdir == "templates")
-#   1. $WEBHOOK_REPORT_TEMPLATES_DIR   (when subdir == "report-templates")
-#   2. Dev checkout: $APP_DIR/webhook/$subdir when $APP_DIR/.git exists
-#   3. Production fallback: /opt/claude-secure/webhook/$subdir
+# Resolve the default templates directory.
+# Checks $WEBHOOK_TEMPLATES_DIR first, then falls back to the installed path.
+# Override in dev: export WEBHOOK_TEMPLATES_DIR=$PWD/webhook/templates
 _resolve_default_templates_dir() {
   local subdir="${1:-templates}"
-
-  if [ "$subdir" = "templates" ] && [ -n "${WEBHOOK_TEMPLATES_DIR:-}" ]; then
-    echo "$WEBHOOK_TEMPLATES_DIR"
-    return
-  fi
-  if [ "$subdir" = "report-templates" ] && [ -n "${WEBHOOK_REPORT_TEMPLATES_DIR:-}" ]; then
-    echo "$WEBHOOK_REPORT_TEMPLATES_DIR"
-    return
-  fi
-
-  if [ -n "${APP_DIR:-}" ] && [ -d "$APP_DIR/.git" ] && [ -d "$APP_DIR/webhook/$subdir" ]; then
-    echo "$APP_DIR/webhook/$subdir"
-    return
-  fi
-
-  echo "/opt/claude-secure/webhook/$subdir"
+  echo "${WEBHOOK_TEMPLATES_DIR:-/opt/claude-secure/webhook/$subdir}"
 }
 
 # D-17 / D-18 / Pitfall 4: extract a jq path from an event payload and emit
@@ -1901,56 +1881,18 @@ ASKPASS
 # webhook-listener: configure and inspect the webhook listener service
 # =========================================================================
 
-# Write or update a single KEY=VALUE line in webhook-listener.env.
-# Creates the file with mode 600 if it doesn't exist.
-_webhook_listener_set_config_key() {
-  local key="$1" value="$2"
-  local env_file="$CONFIG_DIR/webhook-listener.env"
-  if [ ! -f "$env_file" ]; then
-    touch "$env_file"
-    chmod 600 "$env_file"
-  fi
-  local tmp
-  tmp=$(mktemp)
-  grep -v "^${key}=" "$env_file" > "$tmp" 2>/dev/null || true
-  printf '%s=%s\n' "$key" "$value" >> "$tmp"
-  mv "$tmp" "$env_file"
-  chmod 600 "$env_file"
-}
-
-# Load webhook-listener.env and export WEBHOOK_GITHUB_TOKEN, WEBHOOK_BIND, WEBHOOK_PORT.
-_webhook_listener_load_config() {
-  local env_file="$CONFIG_DIR/webhook-listener.env"
-  if [ -f "$env_file" ]; then
-    # shellcheck source=/dev/null
-    set -a; source "$env_file"; set +a
-  fi
-  export WEBHOOK_GITHUB_TOKEN="${WEBHOOK_GITHUB_TOKEN:-}"
-  export WEBHOOK_BIND="${WEBHOOK_BIND:-}"
-  export WEBHOOK_PORT="${WEBHOOK_PORT:-}"
-}
-
 # Show status of the webhook listener service.
 _webhook_listener_status() {
-  local env_file="$CONFIG_DIR/webhook-listener.env"
-  local webhook_json="${WEBHOOK_CONFIG:-/etc/claude-secure/webhook.json}"
+  local webhook_json="${WEBHOOK_CONFIG:-$HOME/.claude-secure/webhooks/webhook.json}"
 
-  if [ ! -f "$env_file" ] && [ ! -r "$webhook_json" ]; then
+  if [ ! -r "$webhook_json" ]; then
     echo "No listener configured. Run claude-secure webhook-listener --help"
     return 0
   fi
 
-  _webhook_listener_load_config
-
-  local bind="${WEBHOOK_BIND:-}"
-  local port="${WEBHOOK_PORT:-}"
-
-  if [ -z "$bind" ] && [ -r "$webhook_json" ]; then
-    bind=$(jq -r '.bind // "127.0.0.1"' "$webhook_json" 2>/dev/null || echo "127.0.0.1")
-  fi
-  if [ -z "$port" ] && [ -r "$webhook_json" ]; then
-    port=$(jq -r '.port // "9000"' "$webhook_json" 2>/dev/null || echo "9000")
-  fi
+  local bind port
+  bind=$(jq -r '.bind // "127.0.0.1"' "$webhook_json" 2>/dev/null || echo "127.0.0.1")
+  port=$(jq -r '.port // 9000' "$webhook_json" 2>/dev/null || echo "9000")
   bind="${bind:-127.0.0.1}"
   port="${port:-9000}"
 
@@ -1976,8 +1918,25 @@ _webhook_listener_status() {
   return 0
 }
 
+# Atomic jq write to webhook.json: _webhook_json_set_key <file> <key> <value> [--argjson]
+_webhook_json_set_key() {
+  local file="$1" key="$2" value="$3" numflag="${4:-}"
+  mkdir -p "$(dirname "$file")"
+  local src="{}"
+  [ -f "$file" ] && src=$(cat "$file")
+  local tmp
+  tmp=$(mktemp)
+  if [ "$numflag" = "--argjson" ]; then
+    echo "$src" | jq --argjson v "$value" --arg k "$key" '.[$k] = $v' > "$tmp"
+  else
+    echo "$src" | jq --arg v "$value" --arg k "$key" '.[$k] = $v' > "$tmp"
+  fi
+  mv "$tmp" "$file"
+  chmod 600 "$file"
+}
+
 cmd_webhook_listener() {
-  local set_token="" set_bind="" set_port=""
+  local set_token="" set_bind="" set_port="" profile_name=""
   local subcmd=""
 
   while [[ $# -gt 0 ]]; do
@@ -1985,15 +1944,17 @@ cmd_webhook_listener() {
       --set-token) set_token="$2"; shift 2 ;;
       --set-bind)  set_bind="$2";  shift 2 ;;
       --set-port)  set_port="$2";  shift 2 ;;
+      --profile)   profile_name="$2"; shift 2 ;;
       --help|-h)
         echo "Usage: claude-secure webhook-listener [subcommand]"
-        echo "       claude-secure webhook-listener --set-token <pat>"
+        echo "       claude-secure webhook-listener --set-token <pat> --profile <name>"
         echo "       claude-secure webhook-listener --set-bind <addr>"
         echo "       claude-secure webhook-listener --set-port <port>"
         echo "       claude-secure webhook-listener status"
         echo ""
-        echo "Configure the webhook listener GitHub token, bind address, and port."
-        echo "Values are persisted to ~/.claude-secure/webhook-listener.env (mode 600)."
+        echo "Configure the webhook listener. Bind/port are persisted to"
+        echo "~/.claude-secure/webhooks/webhook.json. GitHub token is stored"
+        echo "per-profile in ~/.claude-secure/profiles/<name>/profile.json."
         return 0
         ;;
       status) subcmd="status"; shift ;;
@@ -2002,22 +1963,45 @@ cmd_webhook_listener() {
     esac
   done
 
+  local WEBHOOK_JSON="${WEBHOOK_CONFIG:-$HOME/.claude-secure/webhooks/webhook.json}"
+
   if [ -n "$set_token" ]; then
-    _webhook_listener_set_config_key WEBHOOK_GITHUB_TOKEN "$set_token"
-    # Also write github_token into the listener's config.json so listener.py picks it up.
-    local wjson="${WEBHOOK_CONFIG:-/etc/claude-secure/webhook.json}"
-    if [ -w "$wjson" ]; then
-      jq --arg t "$set_token" '.github_token = $t' "$wjson" > "${wjson}.tmp" && mv "${wjson}.tmp" "$wjson"
-    elif command -v sudo >/dev/null 2>&1; then
-      sudo jq --arg t "$set_token" '.github_token = $t' "$wjson" | sudo tee "${wjson}.tmp" >/dev/null \
-        && sudo mv "${wjson}.tmp" "$wjson"
-    else
-      echo "WARNING: could not write to $wjson (no sudo). Set github_token manually." >&2
+    # Resolve target profile
+    if [ -z "$profile_name" ]; then
+      local profiles_dir="$CONFIG_DIR/profiles"
+      local profile_count
+      profile_count=$(find "$profiles_dir" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
+      if [ "$profile_count" -eq 1 ]; then
+        profile_name=$(find "$profiles_dir" -maxdepth 1 -mindepth 1 -type d | xargs basename)
+      else
+        echo "Error: --profile <name> is required when multiple profiles exist." >&2
+        echo "Available profiles:" >&2
+        find "$profiles_dir" -maxdepth 1 -mindepth 1 -type d -exec basename {} \; 2>/dev/null | sort >&2
+        return 1
+      fi
     fi
-    echo "Set WEBHOOK_GITHUB_TOKEN=<redacted>"
+    local pjson="$CONFIG_DIR/profiles/$profile_name/profile.json"
+    if [ ! -f "$pjson" ]; then
+      echo "Error: profile '$profile_name' not found at $pjson" >&2
+      return 1
+    fi
+    local tmp
+    tmp=$(mktemp)
+    jq --arg t "$set_token" '.github_token = $t' "$pjson" > "$tmp" && mv "$tmp" "$pjson"
+    chmod 600 "$pjson"
+    echo "Set github_token=<redacted> in profile '$profile_name'"
   fi
-  [ -n "$set_bind" ]  && _webhook_listener_set_config_key WEBHOOK_BIND  "$set_bind"  && echo "Set WEBHOOK_BIND=$set_bind"
-  [ -n "$set_port" ]  && _webhook_listener_set_config_key WEBHOOK_PORT  "$set_port"  && echo "Set WEBHOOK_PORT=$set_port"
+
+  if [ -n "$set_bind" ]; then
+    _webhook_json_set_key "$WEBHOOK_JSON" "bind" "$set_bind"
+    echo "Set bind=$set_bind"
+  fi
+
+  if [ -n "$set_port" ]; then
+    _webhook_json_set_key "$WEBHOOK_JSON" "port" "$set_port" "--argjson"
+    echo "Set port=$set_port"
+  fi
+
   if [ -n "$set_token" ] || [ -n "$set_bind" ] || [ -n "$set_port" ]; then
     return 0
   fi

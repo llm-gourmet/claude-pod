@@ -1,33 +1,40 @@
 ## ADDED Requirements
 
 ### Requirement: webhook-listener subcommand configures listener settings
-The `claude-secure webhook-listener` subcommand SHALL allow setting the GitHub token, bind address, and port. Values SHALL be persisted to `~/.claude-secure/webhook-listener.env` at mode 600.
-
-#### Scenario: Set GitHub token
-- **WHEN** `claude-secure webhook-listener --set-token ghp_abc123` is run
-- **THEN** `~/.claude-secure/webhook-listener.env` contains `WEBHOOK_GITHUB_TOKEN=ghp_abc123` and the file has mode 600
+The `claude-secure webhook-listener` subcommand SHALL allow setting the bind address and port. Values SHALL be persisted to `~/.claude-secure/webhooks/webhook.json` (user-owned, mode 600). No `sudo` is required.
 
 #### Scenario: Set bind address
 - **WHEN** `claude-secure webhook-listener --set-bind 0.0.0.0` is run
-- **THEN** `~/.claude-secure/webhook-listener.env` contains `WEBHOOK_BIND=0.0.0.0`
+- **THEN** `~/.claude-secure/webhooks/webhook.json` contains `"bind": "0.0.0.0"`
 
 #### Scenario: Set port
 - **WHEN** `claude-secure webhook-listener --set-port 9001` is run
-- **THEN** `~/.claude-secure/webhook-listener.env` contains `WEBHOOK_PORT=9001`
+- **THEN** `~/.claude-secure/webhooks/webhook.json` contains `"port": 9001` as a JSON number
 
 #### Scenario: Updating one key preserves other keys
-- **WHEN** `--set-token` and `--set-port` have been set, then `--set-bind` is run
-- **THEN** token and port values remain unchanged in the env file
+- **WHEN** `--set-port` has been set, then `--set-bind` is run
+- **THEN** port value remains unchanged in `~/.claude-secure/webhooks/webhook.json`
+
+### Requirement: --set-token writes GitHub PAT to profile.json
+The `claude-secure webhook-listener --set-token <pat>` subcommand SHALL write `github_token` into the named profile's `profile.json`. The `--profile <name>` flag SHALL be required; if omitted and exactly one profile exists, that profile is used; otherwise the command exits with an error.
+
+#### Scenario: Set token for a named profile
+- **WHEN** `claude-secure webhook-listener --set-token ghp_abc123 --profile myrepo` is run
+- **THEN** `~/.claude-secure/profiles/myrepo/profile.json` contains `"github_token": "ghp_abc123"`
 
 #### Scenario: Token redacted in output
 - **WHEN** `--set-token` is called
 - **THEN** stdout confirms the operation without printing the token value
 
+#### Scenario: No profile specified with multiple profiles exits with error
+- **WHEN** `--set-token` is run without `--profile` and more than one profile exists
+- **THEN** command exits non-zero with a message listing available profiles
+
 ### Requirement: webhook-listener status shows state of all known instances
-`claude-secure webhook-listener status` SHALL query each configured listener instance and display: bind address, port, systemd unit active state, and HTTP health check result.
+`claude-secure webhook-listener status` SHALL query the listener instance and display: bind address, port, systemd unit active state, and HTTP health check result. Bind address and port SHALL be read from `~/.claude-secure/webhooks/webhook.json`.
 
 #### Scenario: Single healthy instance
-- **WHEN** `claude-secure webhook-listener status` is run and the default listener at `localhost:9000` is healthy
+- **WHEN** `claude-secure webhook-listener status` is run and the listener is healthy
 - **THEN** output shows bind, port, systemd status `active`, and health `ok`
 
 #### Scenario: Listener not running
@@ -35,7 +42,7 @@ The `claude-secure webhook-listener` subcommand SHALL allow setting the GitHub t
 - **THEN** output shows systemd status and health check as `unreachable` or `inactive`; exit code is non-zero
 
 #### Scenario: No config file exits with message
-- **WHEN** no `~/.claude-secure/webhook-listener.env` exists and no `/etc/claude-secure/webhook.json` is readable
+- **WHEN** `~/.claude-secure/webhooks/webhook.json` does not exist and `$WEBHOOK_CONFIG` is unset
 - **THEN** output shows "No listener configured. Run claude-secure webhook-listener --help"
 
 ### Requirement: webhook-listener is dispatch-routed without superuser load

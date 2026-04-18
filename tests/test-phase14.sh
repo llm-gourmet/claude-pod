@@ -151,7 +151,7 @@ test_install_webhook() {
   grep -q 'systemctl daemon-reload' "$PROJECT_DIR/install.sh" || return 1
   grep -q '__REPLACED_BY_INSTALLER__PROFILES__' "$PROJECT_DIR/install.sh" || return 1
   grep -q '/opt/claude-secure/webhook/listener.py' "$PROJECT_DIR/install.sh" || return 1
-  grep -q '/etc/claude-secure/webhook.json' "$PROJECT_DIR/install.sh" || return 1
+  grep -q '\.claude-secure/webhooks/webhook\.json' "$PROJECT_DIR/install.sh" || return 1
   return 0
 }
 

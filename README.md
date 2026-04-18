@@ -41,6 +41,27 @@ The interactive installer also prompts for the base URL when you choose auth met
 
 ---
 
+## Host file locations
+
+Everything on the host falls into two trees:
+
+| Path | Owner | Purpose |
+|------|-------|---------|
+| `~/.claude-secure/profiles/<name>/` | user | Per-profile secrets (`.env`), whitelist, and config (`profile.json`) |
+| `~/.claude-secure/app/` | user | Copy of the project tree (updated by `claude-secure update`) |
+| `~/.claude-secure/logs/` | user | Structured logs written by the listener (`webhook.jsonl`) |
+| `~/.claude-secure/webhooks/webhook.json` | user (600) | Webhook listener runtime config: bind address, port, operational settings |
+| `~/.claude-secure/profiles/<name>/profile.json` | user | Also holds `github_token` (per-repo GitHub PAT for TODO detection) and `webhook_secret` |
+| `/etc/systemd/system/claude-secure-webhook.service` | root | Systemd unit for the webhook listener (runs as installing user via `User=`) |
+| `/opt/claude-secure/` | root | Installed app files: `webhook/listener.py`, templates, reaper script |
+| `/usr/local/bin/claude-secure` | root | CLI wrapper |
+
+**Warum `~/.claude-secure/webhooks/` und nicht `/etc/`?**
+
+Der systemd-Service läuft als installierender User (`User=<username>` in der Unit), nicht als root — Port 9000 braucht keine Root-Rechte. Damit ist `~/.claude-secure/` direkt zugänglich, kein `sudo` nötig. Der `webhooks/`-Unterordner trennt Listener-Betriebsconfig klar von Profil-Config (Profile sind per-Repo-Workspaces mit eigenen Secrets und Whitelists).
+
+---
+
 ## Auth variables
 
 Two variables control where traffic goes:
@@ -252,29 +273,40 @@ claude-secure webhook-listener --set-bind <addr>          # Bind address (defaul
 claude-secure webhook-listener --set-port <port>          # Port (default: 9000)
 ```
 
-#### GitHub token (one-time, global)
+Bind and port are persisted to `~/.claude-secure/webhooks/webhook.json`. Override the path with `$WEBHOOK_CONFIG`.
 
-The listener uses a single GitHub PAT to fetch commit diffs for TODO detection. This token is **shared across all repos** — one PAT with `repo` read scope is enough.
+#### GitHub token (per repo)
+
+The listener uses a GitHub PAT to fetch commit diffs for TODO detection. Each profile stores its own token, so different repos can use different PATs.
 
 ```bash
-claude-secure webhook-listener --set-token <github-pat>
+claude-secure webhook-listener --set-token <github-pat> --profile <name>
 ```
 
-Persisted to `~/.claude-secure/webhook-listener.env` (mode 600) and written into `webhook.json` so `listener.py` picks it up without a restart. Replace only when rotating the PAT.
+Persisted to `~/.claude-secure/profiles/<name>/profile.json`. If only one profile exists, `--profile` can be omitted. Replace only when rotating the PAT.
+
+#### Template directory
+
+Prompt templates are loaded from `/opt/claude-secure/webhook/templates` by default. Override with:
+
+```bash
+export WEBHOOK_TEMPLATES_DIR=/path/to/custom/templates
+```
 
 ### Adding a second repo
 
-Each repo gets its own profile with its own `webhook_secret`. The global token and listener port stay unchanged.
+Each repo gets its own profile with its own `webhook_secret` and `github_token`. The listener port stays unchanged.
 
 1. Create a profile with `repo` set to the new `owner/repo`:
    ```bash
    claude-secure --profile myproject2
    # enter owner/repo when prompted
    ```
-2. Add `webhook_secret` to the profile:
+2. Add `webhook_secret` and optionally a repo-specific `github_token` to the profile:
    ```bash
    # ~/.claude-secure/profiles/myproject2/profile.json
    # add: "webhook_secret": "<secret>"
+   claude-secure webhook-listener --set-token <pat> --profile myproject2
    ```
 3. Register a GitHub webhook on the repo:
    - **URL:** `https://<vps>:9000/`

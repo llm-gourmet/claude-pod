@@ -1,9 +1,10 @@
 #!/bin/bash
 # test-webhook-listener-cli.sh -- Unit tests for webhook-listener CLI subcommand
-# Tests WLCLI-01 through WLCLI-08
+# Tests WLCLI-01 through WLCLI-09
 #
 # Strategy: source bin/claude-secure with __CLAUDE_SECURE_SOURCE_ONLY=1 to
-# load function definitions, use temp dirs as CONFIG_DIR. No Docker, no network.
+# load function definitions, use temp dirs as CONFIG_DIR and HOME.
+# No Docker, no network.
 #
 # Usage: bash tests/test-webhook-listener-cli.sh
 # Exit 0 if all pass, exit 1 if any fail.
@@ -28,79 +29,95 @@ run_test() {
   fi
 }
 
-# Source the CLI with CONFIG_DIR pointing to a temp directory
+# Source the CLI with CONFIG_DIR and HOME pointing to temp directories
 setup_cli() {
   local config_dir="$1"
+  local fake_home="${2:-$config_dir}"
   export CONFIG_DIR="$config_dir"
+  export HOME="$fake_home"
   export __CLAUDE_SECURE_SOURCE_ONLY=1
   # shellcheck source=/dev/null
   source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
-# WLCLI-01: --set-token writes env file with mode 600
+# WLCLI-01: --set-token writes github_token to profile.json
 # ---------------------------------------------------------------------------
-test_set_token_writes_env_600() {
+test_set_token_writes_profile_json() {
   local tmpdir
   tmpdir=$(mktemp -d)
   trap "rm -rf $tmpdir" RETURN
 
-  setup_cli "$tmpdir"
-  _webhook_listener_set_config_key WEBHOOK_GITHUB_TOKEN "ghp_abc123"
+  mkdir -p "$tmpdir/profiles/myrepo"
+  echo '{"workspace": "/tmp/ws"}' > "$tmpdir/profiles/myrepo/profile.json"
 
-  local env_file="$tmpdir/webhook-listener.env"
-  [ -f "$env_file" ] || { echo "env file not created" >&2; return 1; }
-  grep -q "WEBHOOK_GITHUB_TOKEN=ghp_abc123" "$env_file" || { echo "token not in env file" >&2; return 1; }
-  local perms
-  perms=$(stat -c "%a" "$env_file" 2>/dev/null || stat -f "%OLp" "$env_file" 2>/dev/null)
-  [ "$perms" = "600" ] || { echo "Expected mode 600, got $perms" >&2; return 1; }
+  setup_cli "$tmpdir"
+  cmd_webhook_listener --set-token "ghp_abc123" --profile "myrepo" 2>/dev/null
+
+  local pjson="$tmpdir/profiles/myrepo/profile.json"
+  [ -f "$pjson" ] || { echo "profile.json not found" >&2; return 1; }
+  local token
+  token=$(jq -r '.github_token // ""' "$pjson" 2>/dev/null)
+  [ "$token" = "ghp_abc123" ] || { echo "Expected token in profile.json, got: $token" >&2; return 1; }
 }
 
 # ---------------------------------------------------------------------------
-# WLCLI-02: --set-bind writes WEBHOOK_BIND
+# WLCLI-02: --set-bind writes bind to webhooks/webhook.json
 # ---------------------------------------------------------------------------
-test_set_bind_writes_value() {
+test_set_bind_writes_webhook_json() {
   local tmpdir
   tmpdir=$(mktemp -d)
   trap "rm -rf $tmpdir" RETURN
 
-  setup_cli "$tmpdir"
-  _webhook_listener_set_config_key WEBHOOK_BIND "0.0.0.0"
+  setup_cli "$tmpdir" "$tmpdir"
+  cmd_webhook_listener --set-bind "0.0.0.0" 2>/dev/null
 
-  grep -q "WEBHOOK_BIND=0.0.0.0" "$tmpdir/webhook-listener.env" || return 1
+  local wjson="$tmpdir/.claude-secure/webhooks/webhook.json"
+  [ -f "$wjson" ] || { echo "webhook.json not created at $wjson" >&2; return 1; }
+  local bind
+  bind=$(jq -r '.bind // ""' "$wjson" 2>/dev/null)
+  [ "$bind" = "0.0.0.0" ] || { echo "Expected bind=0.0.0.0, got: $bind" >&2; return 1; }
 }
 
 # ---------------------------------------------------------------------------
-# WLCLI-03: --set-port writes WEBHOOK_PORT
+# WLCLI-03: --set-port writes port as JSON number to webhooks/webhook.json
 # ---------------------------------------------------------------------------
-test_set_port_writes_value() {
+test_set_port_writes_number() {
   local tmpdir
   tmpdir=$(mktemp -d)
   trap "rm -rf $tmpdir" RETURN
 
-  setup_cli "$tmpdir"
-  _webhook_listener_set_config_key WEBHOOK_PORT "9001"
+  setup_cli "$tmpdir" "$tmpdir"
+  cmd_webhook_listener --set-port "9001" 2>/dev/null
 
-  grep -q "WEBHOOK_PORT=9001" "$tmpdir/webhook-listener.env" || return 1
+  local wjson="$tmpdir/.claude-secure/webhooks/webhook.json"
+  [ -f "$wjson" ] || { echo "webhook.json not created" >&2; return 1; }
+  local port_type
+  port_type=$(jq -r '.port | type' "$wjson" 2>/dev/null)
+  [ "$port_type" = "number" ] || { echo "Expected port to be number type, got: $port_type" >&2; return 1; }
+  local port
+  port=$(jq -r '.port' "$wjson" 2>/dev/null)
+  [ "$port" = "9001" ] || { echo "Expected port=9001, got: $port" >&2; return 1; }
 }
 
 # ---------------------------------------------------------------------------
-# WLCLI-04: Updating one key preserves other keys
+# WLCLI-04: Updating one key preserves other keys in webhook.json
 # ---------------------------------------------------------------------------
 test_key_update_preserves_others() {
   local tmpdir
   tmpdir=$(mktemp -d)
   trap "rm -rf $tmpdir" RETURN
 
-  setup_cli "$tmpdir"
-  _webhook_listener_set_config_key WEBHOOK_GITHUB_TOKEN "ghp_abc123"
-  _webhook_listener_set_config_key WEBHOOK_PORT "9001"
-  _webhook_listener_set_config_key WEBHOOK_BIND "0.0.0.0"
+  setup_cli "$tmpdir" "$tmpdir"
+  cmd_webhook_listener --set-port "9001" 2>/dev/null
+  cmd_webhook_listener --set-bind "0.0.0.0" 2>/dev/null
 
-  local env_file="$tmpdir/webhook-listener.env"
-  grep -q "WEBHOOK_GITHUB_TOKEN=ghp_abc123" "$env_file" || { echo "token lost" >&2; return 1; }
-  grep -q "WEBHOOK_PORT=9001" "$env_file" || { echo "port lost" >&2; return 1; }
-  grep -q "WEBHOOK_BIND=0.0.0.0" "$env_file" || { echo "bind lost" >&2; return 1; }
+  local wjson="$tmpdir/.claude-secure/webhooks/webhook.json"
+  local port bind
+  port=$(jq -r '.port' "$wjson" 2>/dev/null)
+  bind=$(jq -r '.bind' "$wjson" 2>/dev/null)
+  [ "$port" = "9001" ] || { echo "port lost after set-bind, got: $port" >&2; return 1; }
+  [ "$bind" = "0.0.0.0" ] || { echo "bind lost, got: $bind" >&2; return 1; }
 }
 
 # ---------------------------------------------------------------------------
@@ -111,14 +128,15 @@ test_key_update_no_duplicate() {
   tmpdir=$(mktemp -d)
   trap "rm -rf $tmpdir" RETURN
 
-  setup_cli "$tmpdir"
-  _webhook_listener_set_config_key WEBHOOK_PORT "9001"
-  _webhook_listener_set_config_key WEBHOOK_PORT "9002"
+  setup_cli "$tmpdir" "$tmpdir"
+  cmd_webhook_listener --set-port "9001" 2>/dev/null
+  cmd_webhook_listener --set-port "9002" 2>/dev/null
 
-  local count
-  count=$(grep -c "WEBHOOK_PORT=" "$tmpdir/webhook-listener.env" 2>/dev/null || echo 0)
-  [ "$count" -eq 1 ] || { echo "Expected 1 WEBHOOK_PORT line, got $count" >&2; return 1; }
-  grep -q "WEBHOOK_PORT=9002" "$tmpdir/webhook-listener.env" || { echo "Expected updated value 9002" >&2; return 1; }
+  local wjson="$tmpdir/.claude-secure/webhooks/webhook.json"
+  local port
+  port=$(jq -r '.port' "$wjson" 2>/dev/null)
+  [ "$port" = "9002" ] || { echo "Expected updated port 9002, got: $port" >&2; return 1; }
+  # jq output is always single-value, so no duplicate risk; just verify value
 }
 
 # ---------------------------------------------------------------------------
@@ -129,9 +147,12 @@ test_set_token_redacted_in_output() {
   tmpdir=$(mktemp -d)
   trap "rm -rf $tmpdir" RETURN
 
+  mkdir -p "$tmpdir/profiles/myrepo"
+  echo '{"workspace": "/tmp/ws"}' > "$tmpdir/profiles/myrepo/profile.json"
+
   setup_cli "$tmpdir"
   local output
-  output=$(cmd_webhook_listener --set-token "ghp_supersecret" 2>&1)
+  output=$(cmd_webhook_listener --set-token "ghp_supersecret" --profile "myrepo" 2>&1)
   echo "$output" | grep -q "ghp_supersecret" && { echo "token leaked in output: $output" >&2; return 1; }
   echo "$output" | grep -qi "redacted\|<redact" || { echo "Expected redacted confirmation, got: $output" >&2; return 1; }
 }
@@ -144,8 +165,7 @@ test_status_no_config_helpful_message() {
   tmpdir=$(mktemp -d)
   trap "rm -rf $tmpdir" RETURN
 
-  setup_cli "$tmpdir"
-  # Override WEBHOOK_CONFIG to a non-existent path so status finds nothing
+  setup_cli "$tmpdir" "$tmpdir"
   local output
   WEBHOOK_CONFIG="$tmpdir/nonexistent.json" output=$(cmd_webhook_listener status 2>&1)
   echo "$output" | grep -qi "no listener configured\|webhook-listener --help" || {
@@ -158,15 +178,12 @@ test_status_no_config_helpful_message() {
 # WLCLI-08: status with mock health endpoint shows health=ok
 # ---------------------------------------------------------------------------
 test_status_with_mock_health() {
-  # Start a minimal HTTP server on a random port that responds to /health
   local tmpdir
   tmpdir=$(mktemp -d)
 
-  # Find a free port
   local port
   port=$(python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()")
 
-  # Start mock health server (writes its PID to a file)
   python3 -c "
 import http.server, json, os
 
@@ -186,7 +203,6 @@ with open('$tmpdir/mock.pid', 'w') as f: f.write(str(os.getpid()))
 srv.serve_forever()
 " &
 
-  # Wait for server to start
   local i=0
   while [ $i -lt 20 ]; do
     curl -sf "http://127.0.0.1:${port}/health" >/dev/null 2>&1 && break
@@ -194,19 +210,42 @@ srv.serve_forever()
     i=$((i+1))
   done
 
-  setup_cli "$tmpdir"
-  _webhook_listener_set_config_key WEBHOOK_BIND "127.0.0.1"
-  _webhook_listener_set_config_key WEBHOOK_PORT "$port"
+  # Write webhook.json with test bind/port
+  mkdir -p "$tmpdir/.claude-secure/webhooks"
+  jq -n --arg b "127.0.0.1" --argjson p "$port" '{"bind": $b, "port": $p}' \
+    > "$tmpdir/.claude-secure/webhooks/webhook.json"
 
+  setup_cli "$tmpdir" "$tmpdir"
   local output
-  output=$(WEBHOOK_CONFIG="$tmpdir/nonexistent.json" cmd_webhook_listener status 2>&1) || true
+  output=$(cmd_webhook_listener status 2>&1) || true
 
-  # Kill mock server
   [ -f "$tmpdir/mock.pid" ] && kill "$(cat "$tmpdir/mock.pid")" 2>/dev/null || true
   rm -rf "$tmpdir"
 
   echo "$output" | grep -qi "health.*ok\|ok" || {
     echo "Expected health=ok in output, got: $output" >&2
+    return 1
+  }
+}
+
+# ---------------------------------------------------------------------------
+# WLCLI-09: --set-token without --profile when multiple profiles exist → error
+# ---------------------------------------------------------------------------
+test_set_token_requires_profile_when_multiple() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+
+  mkdir -p "$tmpdir/profiles/repo1" "$tmpdir/profiles/repo2"
+  echo '{"workspace": "/tmp/ws1"}' > "$tmpdir/profiles/repo1/profile.json"
+  echo '{"workspace": "/tmp/ws2"}' > "$tmpdir/profiles/repo2/profile.json"
+
+  setup_cli "$tmpdir"
+  local output rc=0
+  output=$(cmd_webhook_listener --set-token "ghp_abc123" 2>&1) || rc=$?
+  [ "$rc" -ne 0 ] || { echo "Expected non-zero exit, got 0" >&2; return 1; }
+  echo "$output" | grep -qi "profile\|repo1\|repo2" || {
+    echo "Expected profile list in error output, got: $output" >&2
     return 1
   }
 }
@@ -218,14 +257,15 @@ echo ""
 echo "=== Webhook Listener CLI Tests ==="
 echo ""
 
-run_test "WLCLI-01: --set-token writes env file with mode 600" test_set_token_writes_env_600
-run_test "WLCLI-02: --set-bind writes WEBHOOK_BIND" test_set_bind_writes_value
-run_test "WLCLI-03: --set-port writes WEBHOOK_PORT" test_set_port_writes_value
+run_test "WLCLI-01: --set-token writes github_token to profile.json" test_set_token_writes_profile_json
+run_test "WLCLI-02: --set-bind writes bind to webhooks/webhook.json" test_set_bind_writes_webhook_json
+run_test "WLCLI-03: --set-port writes port as JSON number" test_set_port_writes_number
 run_test "WLCLI-04: updating one key preserves other keys" test_key_update_preserves_others
 run_test "WLCLI-05: updating a key does not duplicate it" test_key_update_no_duplicate
 run_test "WLCLI-06: --set-token output does not print token value" test_set_token_redacted_in_output
 run_test "WLCLI-07: status with no config prints helpful message" test_status_no_config_helpful_message
 run_test "WLCLI-08: status with mock health endpoint shows health=ok" test_status_with_mock_health
+run_test "WLCLI-09: --set-token without --profile (multiple profiles) exits non-zero" test_set_token_requires_profile_when_multiple
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed out of $TOTAL tests"
