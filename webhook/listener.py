@@ -159,9 +159,9 @@ def apply_event_filter(profile: dict, event_type: str, payload: dict, config=Non
             return (False, f"branch_not_matched:{branch}")
 
         # D-04: opt-in diff filter when profile has todo_path_pattern and
-        # global config has github_token. Fail-open on any API error.
+        # github_token. Fail-open on any API error.
         todo_pattern = profile.get("todo_path_pattern") or ""
-        github_token = (config.github_token if config is not None else "") or ""
+        github_token = profile.get("github_token") or ""
         if todo_pattern and github_token:
             repo_name = profile.get("repo") or ""
             commits = (payload.get("commits") if isinstance(payload, dict) else []) or []
@@ -223,7 +223,7 @@ class Config:
 
     def __init__(self, data: dict):
         self.bind = data.get("bind", "127.0.0.1")
-        self.port = int(data["port"])
+        self.port = int(data.get("port", 9000))
         self.max_concurrent_spawns = int(data.get("max_concurrent_spawns", 3))
         self.profiles_dir = pathlib.Path(data["profiles_dir"])
         self.events_dir = pathlib.Path(data["events_dir"])
@@ -231,11 +231,7 @@ class Config:
         self.claude_secure_bin = data.get(
             "claude_secure_bin", "/usr/local/bin/claude-secure"
         )
-        # Optional: explicit CONFIG_DIR for claude-secure spawn. Needed when
-        # the listener runs as a different user (e.g. root via systemd) whose
-        # $HOME differs from the user who installed claude-secure.
         self.config_dir = data.get("config_dir") or ""
-        self.github_token = data.get("github_token") or ""
 
 
 def load_config(path: pathlib.Path) -> Config:
@@ -327,6 +323,7 @@ def resolve_profile_by_repo(profiles_dir: pathlib.Path, repo_full_name: str):
                 "webhook_event_filter": data.get("webhook_event_filter") or {},
                 "webhook_bot_users": data.get("webhook_bot_users") or [],
                 "todo_path_pattern": data.get("todo_path_pattern") or "",
+                "github_token": data.get("github_token") or "",
             }
     return None
 

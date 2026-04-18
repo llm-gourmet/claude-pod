@@ -16,7 +16,7 @@ Requires=docker.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/claude-secure/webhook/listener.py --config /etc/claude-secure/webhook.json
+ExecStart=/usr/bin/python3 /opt/claude-secure/webhook/listener.py --config __WEBHOOK_CONFIG_PATH__
 
 # Restart policy (D-25): always restart on crash, throttle at 5s to avoid tight loops
 # if the config file is broken.
@@ -30,13 +30,8 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=claude-secure-webhook
 
-# User (D-24): root is required because the listener shells out to `docker compose`,
-# which needs /var/run/docker.sock access. A dedicated user would need `usermod -aG docker`
-# which is equivalent to root for security purposes (docker group = root). The listener
-# itself delegates ALL real work to `bin/claude-secure spawn`, which invokes the hardened
-# container stack -- this unit is only the transport layer, not a new security boundary.
-User=root
-Group=root
+User=__WEBHOOK_USER__
+Group=__WEBHOOK_GROUP__
 
 # === D-11 (Phase 17): Safe-subset systemd hardening ===
 # Each directive below was verified compatible with the listener's docker compose

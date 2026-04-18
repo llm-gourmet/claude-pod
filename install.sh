@@ -432,7 +432,7 @@ CONF
 
   # Write profile config (workspace is per-profile)
   mkdir -p "$CONFIG_DIR/profiles/default"
-  jq -n --arg ws "$ws_path" '{"workspace": $ws}' > "$CONFIG_DIR/profiles/default/profile.json"
+  jq -n --arg ws "$ws_path" '{"workspace": $ws, "github_token": ""}' > "$CONFIG_DIR/profiles/default/profile.json"
 
   log_info "Workspace: $ws_path"
 }
@@ -661,29 +661,39 @@ install_webhook_service() {
   log_info "Installed systemd unit /etc/systemd/system/claude-secure-reaper.timer"
 
   # 6. Copy config template (idempotent -- never overwrite existing config)
-  sudo mkdir -p /etc/claude-secure
-  if [ ! -f /etc/claude-secure/webhook.json ]; then
+  local webhook_config_path="${invoking_home}/.claude-secure/webhooks/webhook.json"
+  mkdir -p "${invoking_home}/.claude-secure/webhooks"
+  chmod 700 "${invoking_home}/.claude-secure/webhooks"
+  if [ ! -f "$webhook_config_path" ]; then
     sed \
       -e "s|__REPLACED_BY_INSTALLER__PROFILES__|${invoking_home}/.claude-secure/profiles|" \
       -e "s|__REPLACED_BY_INSTALLER__EVENTS__|${invoking_home}/.claude-secure/events|" \
       -e "s|__REPLACED_BY_INSTALLER__LOGS__|${invoking_home}/.claude-secure/logs|" \
       -e "s|__REPLACED_BY_INSTALLER__CONFIG_DIR__|${invoking_home}/.claude-secure|" \
-      "$app_dir/webhook/config.example.json" | sudo tee /etc/claude-secure/webhook.json > /dev/null
-    sudo chmod 644 /etc/claude-secure/webhook.json
-    log_info "Installed default config at /etc/claude-secure/webhook.json"
+      "$app_dir/webhook/config.example.json" > "$webhook_config_path"
+    chmod 600 "$webhook_config_path"
+    log_info "Installed default config at $webhook_config_path"
   else
-    log_info "Existing /etc/claude-secure/webhook.json preserved (no overwrite)"
+    log_info "Existing $webhook_config_path preserved (no overwrite)"
   fi
 
   # 7. Install systemd unit file
-  # Patch ExecStart to use the actual app_dir so `claude-secure update` (git pull
-  # in app_dir) is immediately reflected without copying to /opt/claude-secure/.
+  # Patch ExecStart: use actual app_dir (so `claude-secure update` is reflected without
+  # copying to /opt), set User/Group to the installing user, and point --config to the
+  # user-owned webhooks/webhook.json path.
+  local invoking_user invoking_group
+  invoking_user=$(id -un)
+  invoking_group=$(id -gn)
   sudo cp "$app_dir/webhook/claude-secure-webhook.service" /etc/systemd/system/claude-secure-webhook.service
-  sudo sed -i "s|/opt/claude-secure/webhook/listener.py|${app_dir}/webhook/listener.py|g" \
+  sudo sed -i \
+    -e "s|/opt/claude-secure/webhook/listener.py|${app_dir}/webhook/listener.py|g" \
+    -e "s|__WEBHOOK_CONFIG_PATH__|${webhook_config_path}|g" \
+    -e "s|__WEBHOOK_USER__|${invoking_user}|g" \
+    -e "s|__WEBHOOK_GROUP__|${invoking_group}|g" \
     /etc/systemd/system/claude-secure-webhook.service
   sudo chmod 644 /etc/systemd/system/claude-secure-webhook.service
   sudo systemctl daemon-reload 2>/dev/null || log_warn "systemctl daemon-reload failed (likely WSL2-no-systemd)"
-  log_info "Installed systemd unit /etc/systemd/system/claude-secure-webhook.service (ExecStart: ${app_dir}/webhook/listener.py)"
+  log_info "Installed systemd unit /etc/systemd/system/claude-secure-webhook.service (User=${invoking_user}, config=${webhook_config_path})"
 
   # 8. Enable + start (unless WSL2 gated)
   if [ "$wsl2_no_systemd" -eq 1 ]; then
