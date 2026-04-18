@@ -1,6 +1,6 @@
 # Test Specification
 
-72 integration tests across 8 suites covering all security layers and CLI commands of claude-secure.
+86 tests across 10 suites covering all security layers and CLI commands of claude-secure.
 
 ## Infrastructure
 
@@ -194,3 +194,35 @@ Override: `RUN_ALL_TESTS=1 git push` or skip with `git push --no-verify`.
 | BOOT-06 | Path already exists exits 1 with message | Pre-create path in bare repo, call command, assert exit ≠ 0 and "already exists" in output |
 | BOOT-07 | End-to-end scaffold creates all files in remote repo | Run against local bare repo, clone result, verify all 8 expected files exist |
 | BOOT-08 | No tmpdir remains after execution | Count `cs-bootstrap-*` dirs before/after, assert count unchanged |
+
+## DIFF-FILTER: Webhook Diff Filter (6 tests)
+
+**File:** `tests/test-webhook-diff-filter.sh`
+**Covers:** `has_meaningful_todo_change` logic — new open items, checkbox-offs, edited open items, non-matching paths.
+**Note:** No Docker, no network. Uses local Python to exec listener.py functions directly.
+
+| ID | Test | How |
+|----|------|-----|
+| DIFF-FILTER-01 | New open item triggers spawn | Patch with `+- [ ] task` in TODOS.md → expect True |
+| DIFF-FILTER-02 | Checkbox-off only does not trigger spawn | Patch with only `+- [x] done` in TODOS.md → expect False |
+| DIFF-FILTER-03 | Edited open item text triggers spawn | Patch with `-  - [ ] old` + `+- [ ] new` → expect True |
+| DIFF-FILTER-04 | Non-matching path returns False | Patch with `+- [ ] goal` in GOALS.md (not TODOS.md) → expect False |
+| DIFF-FILTER-05 | Empty patch returns False | Empty string → expect False |
+| DIFF-FILTER-06 | Mixed patch, only matching file evaluated | GOALS.md has new open item, TODOS.md has only checkbox-off → expect False |
+
+## WLCLI: Webhook Listener CLI (8 tests)
+
+**File:** `tests/test-webhook-listener-cli.sh`
+**Covers:** `claude-secure webhook-listener` subcommand — config setters, key preservation, token redaction, status output.
+**Note:** No Docker, no real credentials. Uses temp dirs as CONFIG_DIR, mock HTTP server for status test.
+
+| ID | Test | How |
+|----|------|-----|
+| WLCLI-01 | `--set-token` writes env file with mode 600 | Source CLI, call setter, assert file + `stat` mode = 600 |
+| WLCLI-02 | `--set-bind` writes WEBHOOK_BIND | Call setter, grep env file |
+| WLCLI-03 | `--set-port` writes WEBHOOK_PORT | Call setter, grep env file |
+| WLCLI-04 | Updating one key preserves other keys | Set all three, update one, verify others unchanged |
+| WLCLI-05 | Updating a key does not duplicate it | Set port twice, assert exactly one WEBHOOK_PORT line |
+| WLCLI-06 | `--set-token` output does not print token value | Capture stdout, assert token absent, "redacted" present |
+| WLCLI-07 | Status with no config prints helpful message | Call status with no env file, assert helpful message |
+| WLCLI-08 | Status with mock health endpoint shows health=ok | Start Python HTTP mock on random port, call status, assert health=ok |

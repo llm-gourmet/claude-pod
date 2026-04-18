@@ -77,7 +77,8 @@
         "test-phase23.sh",
         "test-phase25.sh",
         "test-update-cmd.sh",
-        "test-bootstrap-docs.sh"
+        "test-bootstrap-docs.sh",
+        "test-webhook-listener-cli.sh"
       ]
     },
     {
@@ -86,6 +87,14 @@
       ],
       "tests": [
         "test-bootstrap-docs.sh"
+      ]
+    },
+    {
+      "paths": [
+        "webhook/listener.py"
+      ],
+      "tests": [
+        "test-webhook-diff-filter.sh"
       ]
     },
     {

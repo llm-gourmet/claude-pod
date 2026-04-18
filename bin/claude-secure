@@ -329,22 +329,14 @@ load_profile_config() {
   export COMPOSE_PROJECT_NAME="claude-${name}"
   export COMPOSE_FILE="$APP_DIR/docker-compose.yml"
   export WORKSPACE_PATH
-  # Filter REPORT_REPO_TOKEN out of the .env passed to docker-compose (env_file:).
-  # The raw .env is still sourced into host bash below for publish_report.
   if [ -f "$pdir/.env" ]; then
     SECRETS_FILE=$(project_env_for_containers "$pdir/.env")
     export SECRETS_FILE
   else
     export SECRETS_FILE="$pdir/.env"
   fi
-  # REPORT_* vars for publish_report: read directly from profile.json.
-  # REPORT_REPO_TOKEN is sourced from .env below.
-  REPORT_REPO=$(jq -r '.report_repo // empty' "$pdir/profile.json" 2>/dev/null || true)
-  REPORT_BRANCH=$(jq -r '.report_branch // "main"' "$pdir/profile.json" 2>/dev/null || echo "main")
-  REPORT_PATH_PREFIX=$(jq -r '.report_path_prefix // "reports"' "$pdir/profile.json" 2>/dev/null || echo "reports")
-  REPORT_PROJECT_DIR=$(jq -r '.report_project_dir // empty' "$pdir/profile.json" 2>/dev/null || true)
   CLAUDE_SECURE_SYSTEM_PROMPT=$(jq -r '.system_prompt // empty' "$pdir/profile.json" 2>/dev/null || true)
-  export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX REPORT_PROJECT_DIR CLAUDE_SECURE_SYSTEM_PROMPT
+  export CLAUDE_SECURE_SYSTEM_PROMPT
   export WHITELIST_PATH="$pdir/whitelist.json"
   export LOG_DIR="$CONFIG_DIR/logs"
   export LOG_PREFIX="${name}-"
@@ -1187,179 +1179,6 @@ write_audit_entry() {
   printf '%s\n' "$line" >> "$audit_file"
 }
 
-# Phase 16 D-14 / Pattern D / Pitfall 6: push the currently-committed
-# report to origin/$branch. On non-fast-forward rejection, rebase once
-# and retry exactly once. Never force-push. "Everything up-to-date" is
-# a success (exit 0), even after a rebase where our commit was already
-# upstream. LC_ALL=C makes git's English error messages deterministic
-# for the retry-trigger grep.
-push_with_retry() {
-  local clone_dir="$1" branch="$2"
-  local repo_path="$clone_dir/repo"
-
-  local err_log="$clone_dir/push.err"
-
-  # Initial push attempt.
-  if LC_ALL=C GIT_ASKPASS="$clone_dir/.askpass.sh" \
-     GIT_ASKPASS_PAT="$REPORT_REPO_TOKEN" \
-     GIT_TERMINAL_PROMPT=0 \
-     git -C "$repo_path" -c credential.helper= -c credential.helper='' \
-         push origin "$branch" 2>"$err_log"; then
-    return 0
-  fi
-
-  # Phase 17 Rule 1 fix: rebase+retry loop up to 3 attempts. The original
-  # single-retry path loses a 3-way concurrent race (Phase 17 17-03 D-14.2
-  # test). File-protocol bare repos report non-ff rejection as:
-  #   "remote rejected", "failed to update ref", or "cannot lock ref"
-  # none of which match the https "non-fast-forward" string. Expanded grep
-  # keeps the https path working while covering file://.
-  local attempt=0 max_attempts=3
-  while [ "$attempt" -lt "$max_attempts" ]; do
-    if ! grep -q -e 'non-fast-forward' \
-                 -e 'Updates were rejected' \
-                 -e 'failed to update ref' \
-                 -e 'cannot lock ref' \
-                 -e 'remote rejected' \
-                 "$err_log"; then
-      # Not a non-ff race -- hard fail (e.g. auth, network, perms).
-      break
-    fi
-    attempt=$((attempt + 1))
-    echo "INFO: report push rejected (non-fast-forward, attempt $attempt/$max_attempts). Rebasing and retrying." >&2
-    : > "$err_log"  # reset so the next grep only sees the next attempt's output
-    if ! LC_ALL=C GIT_ASKPASS="$clone_dir/.askpass.sh" \
-         GIT_ASKPASS_PAT="$REPORT_REPO_TOKEN" \
-         GIT_TERMINAL_PROMPT=0 \
-         git -C "$repo_path" -c credential.helper= -c credential.helper='' \
-             pull --rebase origin "$branch" 2>>"$err_log"; then
-      sed "s|${REPORT_REPO_TOKEN}|<REDACTED:REPORT_REPO_TOKEN>|g" "$err_log" >&2
-      return 1
-    fi
-    if LC_ALL=C GIT_ASKPASS="$clone_dir/.askpass.sh" \
-       GIT_ASKPASS_PAT="$REPORT_REPO_TOKEN" \
-       GIT_TERMINAL_PROMPT=0 \
-       git -C "$repo_path" -c credential.helper= -c credential.helper='' \
-           push origin "$branch" 2>>"$err_log"; then
-      return 0
-    fi
-  done
-
-  sed "s|${REPORT_REPO_TOKEN}|<REDACTED:REPORT_REPO_TOKEN>|g" "$err_log" >&2
-  return 1
-}
-
-# Phase 16 D-01 .. D-03 / D-12 / D-13 / D-14 / Pattern A / Pitfall 3 / Pitfall 11:
-# Publish a rendered+redacted report file to the configured doc repo via
-# fresh shallow clone + commit + push (retry once on non-fast-forward).
-#
-# Args:
-#   $1 = rendered_redacted_body_path
-#   $2 = event_type
-#   $3 = delivery_id
-#   $4 = delivery_id_short (last 8 hex chars)
-#   $5 = repo_full_name (e.g. "owner/name", or "" if unknown)
-#
-# Returns:
-#   exit 0  + stdout last line = report_url (on push success)
-#   exit 2  (skip; REPORT_REPO or REPORT_REPO_TOKEN empty)
-#   exit 1  (push failure)
-publish_report() {
-  local body_path="$1"
-  local event_type="$2"
-  local delivery_id="$3"
-  local delivery_id_short="$4"
-  local repo_full_name="$5"
-
-  local repo_url="${REPORT_REPO:-}"
-  local branch="${REPORT_BRANCH:-main}"
-  local prefix="${REPORT_PATH_PREFIX:-reports}"
-  local pat="${REPORT_REPO_TOKEN:-}"
-
-  if [ -z "$repo_url" ] || [ -z "$pat" ]; then
-    return 2
-  fi
-
-  local clone_dir
-  clone_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-report-XXXXXXXX")
-  _CLEANUP_FILES+=("$clone_dir")
-
-  # Ephemeral askpass helper (Pattern A). Lives inside clone_dir so
-  # spawn_cleanup wipes it along with the clone.
-  local askpass="$clone_dir/.askpass.sh"
-  cat > "$askpass" <<'ASKPASS'
-#!/bin/sh
-case "$1" in
-  Username*) printf 'x-access-token\n' ;;
-  Password*) printf '%s\n' "$GIT_ASKPASS_PAT" ;;
-esac
-ASKPASS
-  chmod 700 "$askpass"
-
-  # Pitfall 3: pipe git stderr through sed to scrub any accidental PAT echo.
-  # Pitfall 11: bounded clone via GIT_HTTP_LOW_SPEED_* + outer `timeout 60`.
-  local clone_err="$clone_dir/clone.err"
-  if ! LC_ALL=C \
-       GIT_ASKPASS="$askpass" \
-       GIT_ASKPASS_PAT="$pat" \
-       GIT_TERMINAL_PROMPT=0 \
-       GIT_HTTP_LOW_SPEED_LIMIT=1 \
-       GIT_HTTP_LOW_SPEED_TIME=30 \
-       timeout 60 \
-       git -c credential.helper= -c credential.helper='' \
-           -c core.autocrlf=false \
-           clone --depth 1 --branch "$branch" --quiet "$repo_url" "$clone_dir/repo" \
-           2>"$clone_err"; then
-    sed "s|${pat}|<REDACTED:REPORT_REPO_TOKEN>|g" "$clone_err" >&2
-    return 1
-  fi
-
-  # D-12: place file at <prefix>/<YYYY>/<MM>/<event_type>-<id8>.md
-  local year month
-  year=$(date -u +%Y)
-  month=$(date -u +%m)
-  local rel_path="${prefix}/${year}/${month}/${event_type}-${delivery_id_short}.md"
-  local abs_path="$clone_dir/repo/$rel_path"
-  mkdir -p "$(dirname "$abs_path")"
-  cp "$body_path" "$abs_path"
-
-  # D-13: authored via env vars (no host git config touched).
-  local commit_repo="${repo_full_name:-unknown}"
-  local commit_msg="report(${event_type}): ${commit_repo} ${delivery_id_short}"
-
-  if ! LC_ALL=C \
-       GIT_AUTHOR_NAME="claude-secure" \
-       GIT_AUTHOR_EMAIL="claude-secure@localhost" \
-       GIT_COMMITTER_NAME="claude-secure" \
-       GIT_COMMITTER_EMAIL="claude-secure@localhost" \
-       git -C "$clone_dir/repo" -c core.autocrlf=false add "$rel_path"; then
-    return 1
-  fi
-
-  if ! LC_ALL=C \
-       GIT_AUTHOR_NAME="claude-secure" \
-       GIT_AUTHOR_EMAIL="claude-secure@localhost" \
-       GIT_COMMITTER_NAME="claude-secure" \
-       GIT_COMMITTER_EMAIL="claude-secure@localhost" \
-       git -C "$clone_dir/repo" -c core.autocrlf=false commit -q -m "$commit_msg"; then
-    # Pitfall 6: nothing to commit (e.g. identical file on replay) -> treat
-    # as success; emit the expected URL so audit records the known location.
-    :
-  fi
-
-  if ! push_with_retry "$clone_dir" "$branch"; then
-    return 1
-  fi
-
-  # D-12 + D-14: derive report_url. For https URLs, map .git -> /blob/<branch>/<rel>
-  local url_base="$repo_url"
-  url_base="${url_base%.git}"
-  printf '%s/blob/%s/%s\n' "$url_base" "$branch" "$rel_path"
-  return 0
-}
-
-
-
 # Phase 16: best-effort audit writer for early-return spawn_error paths.
 # Called from do_spawn precondition checks before delivery_id/event_type
 # are known. Uses synthetic manual-<uuid> and "unknown" event_type.
@@ -1384,7 +1203,6 @@ do_spawn() {
       echo "  --event '<json>'       Inline GitHub webhook event JSON"
       echo "  --event-file <path>    Path to event JSON file"
       echo "  --prompt-template <n>  Override automatic template resolution"
-      echo "  --skip-report          Skip report push (audit log still written)"
       echo "  --dry-run              Show resolved prompt without executing"
       return 0
     fi
@@ -1403,10 +1221,6 @@ do_spawn() {
   EVENT_FILE=""
   PROMPT_TEMPLATE=""
   DRY_RUN=0
-  # Phase 16: --skip-report flag (mirrors --dry-run). Also accepts
-  # CLAUDE_SECURE_SKIP_REPORT=1 env var for test harness convenience.
-  SKIP_REPORT=0
-  [ "${CLAUDE_SECURE_SKIP_REPORT:-0}" = "1" ] && SKIP_REPORT=1
   local i=1
   while [ $i -lt ${#REMAINING_ARGS[@]} ]; do
     case "${REMAINING_ARGS[$i]:-}" in
@@ -1414,7 +1228,6 @@ do_spawn() {
       --event-file)     EVENT_FILE="${REMAINING_ARGS[$((i+1))]:-}"; i=$((i+2)) ;;
       --prompt-template) PROMPT_TEMPLATE="${REMAINING_ARGS[$((i+1))]:-}"; i=$((i+2)) ;;
       --dry-run)        DRY_RUN=1; i=$((i+1)) ;;
-      --skip-report)    SKIP_REPORT=1; i=$((i+1)) ;;
       *)                i=$((i+1)) ;;
     esac
   done
@@ -1482,18 +1295,10 @@ do_spawn() {
   audit_branch=$(echo "$EVENT_JSON" | jq -r '.pull_request.head.ref // (.ref // empty | sub("^refs/heads/"; ""))')
   [ "$audit_branch" = "null" ] && audit_branch=""
 
-  # Read report_repo fields from profile.json for publish_report.
-  # REPORT_REPO_TOKEN is sourced from .env via load_profile_config.
-  # REPORT_REPO/REPORT_BRANCH/REPORT_PATH_PREFIX are set by load_profile_config
-  # but re-export here to ensure they are available in the spawn subshell.
   local _profile_json="$CONFIG_DIR/profiles/$PROFILE/profile.json"
   if [ -f "$_profile_json" ]; then
-    REPORT_REPO=$(jq -r '.report_repo // empty' "$_profile_json")
-    REPORT_BRANCH=$(jq -r '.report_branch // "main"' "$_profile_json")
-    REPORT_PATH_PREFIX=$(jq -r '.report_path_prefix // "reports"' "$_profile_json")
-    REPORT_PROJECT_DIR=$(jq -r '.report_project_dir // empty' "$_profile_json")
     CLAUDE_SECURE_SYSTEM_PROMPT=$(jq -r '.system_prompt // empty' "$_profile_json" 2>/dev/null || true)
-    export REPORT_REPO REPORT_BRANCH REPORT_PATH_PREFIX REPORT_PROJECT_DIR CLAUDE_SECURE_SYSTEM_PROMPT
+    export CLAUDE_SECURE_SYSTEM_PROMPT
   fi
 
   # Resolve and render prompt template (per D-13 through D-17)
@@ -1559,20 +1364,7 @@ do_spawn() {
     fi
   fi
 
-  # =======================================================================
-  # Phase 16 / Pattern E: publish + audit wrapper.
-  #
-  # Flow:
-  #   1. Build envelope (success or error) into $envelope_json.
-  #   2. Render report template if one exists for event_type.
-  #   3. Redact env secrets from rendered report.
-  #   4. publish_report() -> report_url (or empty on skip/failure).
-  #   5. write_audit_entry() with final report_url (D-17: audit-always).
-  #   6. Emit envelope to stdout.
-  # D-18: exit nonzero ONLY when Claude itself failed. Publish failures
-  # are logged in audit.status but do NOT flip the spawn exit code.
-  # =======================================================================
-  local envelope_json report_url="" audit_status report_body_file=""
+  local envelope_json audit_status
   local _audit_ts _audit_duration_total _audit_cost _audit_session _audit_err_short=""
   _audit_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
@@ -1592,37 +1384,7 @@ do_spawn() {
   _audit_duration_total=$(echo "$envelope_json" | jq -r '.claude.duration_ms // .claude.duration // 0' 2>/dev/null || echo 0)
   _audit_session=$(echo "$envelope_json" | jq -r '.claude.session_id // ""' 2>/dev/null || echo "")
 
-  # Render + redact + publish report when not skipped.
-  if [ "$SKIP_REPORT" -ne 1 ]; then
-    local _report_template
-    _report_template=$(resolve_report_template "$event_type" 2>/dev/null || echo "")
-    if [ -n "$_report_template" ] && [ -f "$_report_template" ]; then
-      report_body_file=$(mktemp)
-      _CLEANUP_FILES+=("$report_body_file")
-      if render_report_template "$_report_template" "$EVENT_JSON" "$envelope_json" "$audit_status" \
-           > "$report_body_file" 2>/dev/null; then
-        # Redact env secrets (D-15) from rendered report before publishing.
-        local _env_file="$CONFIG_DIR/profiles/$PROFILE/.env"
-        if [ -f "$_env_file" ]; then
-          redact_report_file "$report_body_file" "$_env_file" 2>/dev/null || true
-        fi
-        # D-17: publish is best-effort. Failures are logged in audit.status
-        # but do NOT flip spawn exit code (only claude failures do — D-18).
-        local _publish_rc=0
-        report_url=$(publish_report "$report_body_file" "$event_type" \
-                       "$delivery_id" "$delivery_id_short" "$audit_repo") || _publish_rc=$?
-        if [ "$_publish_rc" -ne 0 ] && [ "$_publish_rc" -ne 2 ]; then
-          # 2 = skipped (no REPORT_REPO/TOKEN); anything else = real failure.
-          if [ "$audit_status" = "success" ]; then
-            audit_status="push_error"
-          fi
-          report_url=""
-        fi
-      fi
-    fi
-  fi
-
-  # D-17: audit-always, with final report_url populated (Pattern E).
+  # D-17: audit-always.
   write_audit_entry \
     "$_audit_ts" \
     "$delivery_id" \
@@ -1636,13 +1398,12 @@ do_spawn() {
     "$_audit_duration_total" \
     "$_audit_session" \
     "$audit_status" \
-    "$report_url" \
+    "" \
     "$_audit_err_short" 2>/dev/null || true
 
   # Emit envelope to stdout.
   echo "$envelope_json"
 
-  # D-18: only flip exit on claude failure. Publish failures audit-logged only.
   return "$claude_exit"
 }
 
@@ -2137,6 +1898,132 @@ ASKPASS
 }
 
 # =========================================================================
+# webhook-listener: configure and inspect the webhook listener service
+# =========================================================================
+
+# Write or update a single KEY=VALUE line in webhook-listener.env.
+# Creates the file with mode 600 if it doesn't exist.
+_webhook_listener_set_config_key() {
+  local key="$1" value="$2"
+  local env_file="$CONFIG_DIR/webhook-listener.env"
+  if [ ! -f "$env_file" ]; then
+    touch "$env_file"
+    chmod 600 "$env_file"
+  fi
+  local tmp
+  tmp=$(mktemp)
+  grep -v "^${key}=" "$env_file" > "$tmp" 2>/dev/null || true
+  printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  mv "$tmp" "$env_file"
+  chmod 600 "$env_file"
+}
+
+# Load webhook-listener.env and export WEBHOOK_GITHUB_TOKEN, WEBHOOK_BIND, WEBHOOK_PORT.
+_webhook_listener_load_config() {
+  local env_file="$CONFIG_DIR/webhook-listener.env"
+  if [ -f "$env_file" ]; then
+    # shellcheck source=/dev/null
+    set -a; source "$env_file"; set +a
+  fi
+  export WEBHOOK_GITHUB_TOKEN="${WEBHOOK_GITHUB_TOKEN:-}"
+  export WEBHOOK_BIND="${WEBHOOK_BIND:-}"
+  export WEBHOOK_PORT="${WEBHOOK_PORT:-}"
+}
+
+# Show status of the webhook listener service.
+_webhook_listener_status() {
+  local env_file="$CONFIG_DIR/webhook-listener.env"
+  local webhook_json="${WEBHOOK_CONFIG:-/etc/claude-secure/webhook.json}"
+
+  if [ ! -f "$env_file" ] && [ ! -r "$webhook_json" ]; then
+    echo "No listener configured. Run claude-secure webhook-listener --help"
+    return 0
+  fi
+
+  _webhook_listener_load_config
+
+  local bind="${WEBHOOK_BIND:-}"
+  local port="${WEBHOOK_PORT:-}"
+
+  if [ -z "$bind" ] && [ -r "$webhook_json" ]; then
+    bind=$(jq -r '.bind // "127.0.0.1"' "$webhook_json" 2>/dev/null || echo "127.0.0.1")
+  fi
+  if [ -z "$port" ] && [ -r "$webhook_json" ]; then
+    port=$(jq -r '.port // "9000"' "$webhook_json" 2>/dev/null || echo "9000")
+  fi
+  bind="${bind:-127.0.0.1}"
+  port="${port:-9000}"
+
+  local systemd_status="unknown"
+  if command -v systemctl >/dev/null 2>&1; then
+    systemd_status=$(systemctl is-active claude-secure-webhook 2>/dev/null || echo "inactive")
+  fi
+
+  local health_status="unreachable"
+  local health_response
+  if health_response=$(curl -sf --max-time 3 "http://${bind}:${port}/health" 2>/dev/null); then
+    health_status=$(echo "$health_response" | jq -r '.status // "unknown"' 2>/dev/null || echo "unknown")
+  fi
+
+  echo "Webhook Listener Status"
+  echo "  Bind:     ${bind}:${port}"
+  echo "  Systemd:  $systemd_status"
+  echo "  Health:   $health_status"
+
+  if [ "$health_status" != "ok" ] || [ "$systemd_status" != "active" ]; then
+    return 1
+  fi
+  return 0
+}
+
+cmd_webhook_listener() {
+  local set_token="" set_bind="" set_port=""
+  local subcmd=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --set-token) set_token="$2"; shift 2 ;;
+      --set-bind)  set_bind="$2";  shift 2 ;;
+      --set-port)  set_port="$2";  shift 2 ;;
+      --help|-h)
+        echo "Usage: claude-secure webhook-listener [subcommand]"
+        echo "       claude-secure webhook-listener --set-token <pat>"
+        echo "       claude-secure webhook-listener --set-bind <addr>"
+        echo "       claude-secure webhook-listener --set-port <port>"
+        echo "       claude-secure webhook-listener status"
+        echo ""
+        echo "Configure the webhook listener GitHub token, bind address, and port."
+        echo "Values are persisted to ~/.claude-secure/webhook-listener.env (mode 600)."
+        return 0
+        ;;
+      status) subcmd="status"; shift ;;
+      -*) echo "Error: unknown flag '$1'" >&2; return 1 ;;
+      *) subcmd="$1"; shift ;;
+    esac
+  done
+
+  [ -n "$set_token" ] && _webhook_listener_set_config_key WEBHOOK_GITHUB_TOKEN "$set_token" && echo "Set WEBHOOK_GITHUB_TOKEN=<redacted>"
+  [ -n "$set_bind" ]  && _webhook_listener_set_config_key WEBHOOK_BIND  "$set_bind"  && echo "Set WEBHOOK_BIND=$set_bind"
+  [ -n "$set_port" ]  && _webhook_listener_set_config_key WEBHOOK_PORT  "$set_port"  && echo "Set WEBHOOK_PORT=$set_port"
+  if [ -n "$set_token" ] || [ -n "$set_bind" ] || [ -n "$set_port" ]; then
+    return 0
+  fi
+
+  case "${subcmd:-}" in
+    status) _webhook_listener_status ;;
+    "")
+      echo "Usage: claude-secure webhook-listener [status|--set-token|--set-bind|--set-port]" >&2
+      echo "Run 'claude-secure webhook-listener --help' for more information." >&2
+      return 1
+      ;;
+    *)
+      echo "Error: unknown subcommand '$subcmd'" >&2
+      return 1
+      ;;
+  esac
+}
+
+# =========================================================================
 # Source-only guard: if sourced by tests, stop here
 # =========================================================================
 if [ "$__CLAUDE_SECURE_SOURCE_ONLY" = "1" ]; then
@@ -2233,7 +2120,7 @@ else
   #     its own error. Superuser merge is not valid for spawn.
   #   - status: reads docker ps only; no workspace config needed.
   case "$FIRST_ARG" in
-    list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs)
+    list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs|webhook-listener)
       : # skip superuser load
       ;;
     *)
@@ -2413,6 +2300,7 @@ case "$CMD" in
     echo "  spawn      Run headless Claude Code session (requires --profile and --event)"
     echo "  reap       Clean up orphaned spawn containers and stale event files"
     echo "  bootstrap-docs <path>  Scaffold project docs at <path> in configured remote repo"
+  echo "  webhook-listener       Configure and inspect the webhook listener service"
   echo "  help       Show this help message"
     echo ""
     echo "Modes:"
@@ -2442,6 +2330,9 @@ case "$CMD" in
     ;;
   bootstrap-docs)
     cmd_bootstrap_docs "${REMAINING_ARGS[@]:1}"
+    ;;
+  webhook-listener)
+    cmd_webhook_listener "${REMAINING_ARGS[@]:1}"
     ;;
   spawn)
     do_spawn

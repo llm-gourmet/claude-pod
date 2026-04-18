@@ -16,6 +16,7 @@ thread than serve_forever() or it deadlocks for 90s until systemd SIGKILLs.
 """
 import argparse
 import datetime
+import fnmatch
 import hashlib
 import hmac
 import json
@@ -26,6 +27,8 @@ import signal
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -40,6 +43,50 @@ DEFAULT_FILTER = {
     "push": {"branches": ["main", "master"]},
     "workflow_run": {"conclusions": ["failure"], "workflows": []},
 }
+
+
+# ---------------------------------------------------------------------------
+# Diff filter helpers (webhook-diff-filter feature, D-02..D-05)
+# ---------------------------------------------------------------------------
+
+def fetch_commit_patch(repo: str, sha: str, token: str) -> str:
+    """Fetch unified diff for a commit from the GitHub API.
+
+    Returns raw diff string. Raises urllib.error.URLError / HTTPError on failure.
+    """
+    url = f"https://api.github.com/repos/{repo}/commits/{sha}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github.v3.diff",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "claude-secure-webhook/1.0",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
+def has_meaningful_todo_change(patch: str, path_pattern: str) -> bool:
+    """Return True if the unified diff adds an unchecked TODO item in a matching file.
+
+    D-05 heuristic: any added line ('+' prefix) starting with '- [ ]' in a file
+    matching path_pattern triggers spawn. Checkbox-only commits produce only
+    '+- [x] ...' lines — no '+- [ ] ' lines — so they return False.
+    """
+    in_matching_file = False
+    for line in patch.splitlines():
+        if line.startswith("diff --git "):
+            parts = line.split(" ")
+            if len(parts) >= 4:
+                bpath = parts[-1]
+                if bpath.startswith("b/"):
+                    bpath = bpath[2:]
+                in_matching_file = fnmatch.fnmatch(bpath, path_pattern)
+        elif in_matching_file and line.startswith("+") and not line.startswith("+++"):
+            if line[1:].startswith("- [ ]"):
+                return True
+    return False
 
 
 def compute_event_type(headers, payload: dict) -> str:
@@ -64,7 +111,7 @@ def compute_event_type(headers, payload: dict) -> str:
     return base
 
 
-def apply_event_filter(profile: dict, event_type: str, payload: dict):
+def apply_event_filter(profile: dict, event_type: str, payload: dict, config=None):
     """Return (allowed: bool, reason: str). `reason` is empty when allowed.
 
     D-05..D-10. Zero I/O: takes the already-loaded profile dict, does dict
@@ -110,6 +157,39 @@ def apply_event_filter(profile: dict, event_type: str, payload: dict):
         allowed_branches = fcfg.get("branches") or []
         if allowed_branches and branch not in allowed_branches:
             return (False, f"branch_not_matched:{branch}")
+
+        # D-04: opt-in diff filter when profile has todo_path_pattern and
+        # global config has github_token. Fail-open on any API error.
+        todo_pattern = profile.get("todo_path_pattern") or ""
+        github_token = (config.github_token if config is not None else "") or ""
+        if todo_pattern and github_token:
+            repo_name = profile.get("repo") or ""
+            commits = (payload.get("commits") if isinstance(payload, dict) else []) or []
+            if not isinstance(commits, list):
+                commits = []
+            has_todo_files = any(
+                fnmatch.fnmatch(f, todo_pattern)
+                for commit in commits
+                if isinstance(commit, dict)
+                for f in (
+                    list(commit.get("added") or []) + list(commit.get("modified") or [])
+                )
+                if isinstance(f, str)
+            )
+            if has_todo_files:
+                sha = (payload.get("after") or "") if isinstance(payload, dict) else ""
+                null_sha = "0" * 40
+                if sha and sha != null_sha and repo_name:
+                    try:
+                        patch = fetch_commit_patch(repo_name, sha, github_token)
+                        if not has_meaningful_todo_change(patch, todo_pattern):
+                            return (False, "todo_no_meaningful_change")
+                    except Exception as exc:
+                        logging.getLogger("webhook").warning(
+                            "diff_filter_api_error repo=%s sha=%s: %s",
+                            repo_name, sha[:8] if sha else "", exc,
+                        )
+
         return (True, "")
 
     if base == "workflow_run":
@@ -155,6 +235,7 @@ class Config:
         # the listener runs as a different user (e.g. root via systemd) whose
         # $HOME differs from the user who installed claude-secure.
         self.config_dir = data.get("config_dir") or ""
+        self.github_token = data.get("github_token") or ""
 
 
 def load_config(path: pathlib.Path) -> Config:
@@ -245,6 +326,7 @@ def resolve_profile_by_repo(profiles_dir: pathlib.Path, repo_full_name: str):
                 "webhook_secret": secret,
                 "webhook_event_filter": data.get("webhook_event_filter") or {},
                 "webhook_bot_users": data.get("webhook_bot_users") or [],
+                "todo_path_pattern": data.get("todo_path_pattern") or "",
             }
     return None
 
@@ -486,7 +568,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         # D-05..D-10: per-profile filter between HMAC and persist.
         # D-07: filtered events log + return 202 WITHOUT persisting or spawning.
-        allowed, reason = apply_event_filter(profile, event_type, payload)
+        allowed, reason = apply_event_filter(profile, event_type, payload, config=_config)
         if not allowed:
             log_event(
                 event="filtered",
