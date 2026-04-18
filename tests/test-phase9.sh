@@ -78,10 +78,9 @@ test_dns_validation() {
 run_test "MULTI-02: DNS-safe instance name validation" test_dns_validation
 
 # =========================================================================
-# MULTI-03: Migration from single-instance layout
-# Old layout: CONFIG_DIR/{config.sh, .env} -> new: CONFIG_DIR/instances/default/
+# MULTI-03: load_profile_config exports core vars (WORKSPACE_PATH, COMPOSE_PROJECT_NAME)
 # =========================================================================
-test_load_profile_config_reads_report_fields() {
+test_load_profile_config_exports_core_vars() {
   local tmpdir
   tmpdir=$(mktemp -d)
   trap "rm -rf '$tmpdir'" RETURN
@@ -92,51 +91,37 @@ test_load_profile_config_reads_report_fields() {
 
   cat > "$pdir/profile.json" <<EOF
 {
-  "workspace": "$tmpdir/workspace",
-  "report_repo": "https://github.com/user/reports.git",
-  "report_branch": "docs",
-  "report_project_dir": "projects/myproj"
+  "workspace": "$tmpdir/workspace"
 }
 EOF
-  printf 'ANTHROPIC_API_KEY=test\nREPORT_REPO_TOKEN=ghp_fake\n' > "$pdir/.env"
+  printf 'ANTHROPIC_API_KEY=test\n' > "$pdir/.env"
   echo '{"secrets":[]}' > "$pdir/whitelist.json"
 
-  local repo branch pdir_var
-  # Source the script and call load_profile_config
-  repo=$(
+  local workspace compose_name
+  workspace=$(
     export __CLAUDE_SECURE_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$cfg"
     source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
     unset __CLAUDE_SECURE_SOURCE_ONLY
     load_profile_config "myproj"
-    echo "$REPORT_REPO"
+    echo "$WORKSPACE_PATH"
   )
-  branch=$(
+  compose_name=$(
     export __CLAUDE_SECURE_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$cfg"
     source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
     unset __CLAUDE_SECURE_SOURCE_ONLY
     load_profile_config "myproj"
-    echo "$REPORT_BRANCH"
-  )
-  pdir_var=$(
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
-    export APP_DIR="$PROJECT_DIR"
-    export CONFIG_DIR="$cfg"
-    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
-    unset __CLAUDE_SECURE_SOURCE_ONLY
-    load_profile_config "myproj"
-    echo "$REPORT_PROJECT_DIR"
+    echo "$COMPOSE_PROJECT_NAME"
   )
 
-  [ "$repo"   = "https://github.com/user/reports.git" ] || { echo "REPORT_REPO wrong: $repo" >&2; return 1; }
-  [ "$branch" = "docs" ]                                 || { echo "REPORT_BRANCH wrong: $branch" >&2; return 1; }
-  [ "$pdir_var" = "projects/myproj" ]                    || { echo "REPORT_PROJECT_DIR wrong: $pdir_var" >&2; return 1; }
+  [ "$workspace" = "$tmpdir/workspace" ] || { echo "WORKSPACE_PATH wrong: $workspace" >&2; return 1; }
+  [ "$compose_name" = "claude-myproj" ]  || { echo "COMPOSE_PROJECT_NAME wrong: $compose_name" >&2; return 1; }
   return 0
 }
-run_test "MULTI-03: load_profile_config exports REPORT_REPO/BRANCH/PROJECT_DIR" test_load_profile_config_reads_report_fields
+run_test "MULTI-03: load_profile_config exports WORKSPACE_PATH + COMPOSE_PROJECT_NAME" test_load_profile_config_exports_core_vars
 
 # =========================================================================
 # MULTI-04: COMPOSE_PROJECT_NAME isolation
