@@ -36,9 +36,9 @@
 
 ## 6. Ship
 
-- [ ] 6.1 Deploy updated `listener.py` to VPS (`claude-secure update` or manual copy)
-- [ ] 6.2 Run `claude-secure webhook-listener --set-token <pat>` on VPS to write token
-- [ ] 6.3 Add `todo_path_pattern` to obsidian profile.json on VPS
-- [ ] 6.4 Restart `claude-secure-webhook.service` on VPS
-- [ ] 6.5 Push a new open TODO to obsidian repo; verify spawn fires
-- [ ] 6.6 Push a checkbox-only change; verify HTTP 202 filtered response in webhook.jsonl
+- [x] 6.1 Deploy updated `listener.py` to VPS (`claude-secure update` or manual copy)
+- [x] 6.2 Run `claude-secure webhook-listener --set-token <pat>` on VPS to write token
+- [x] 6.3 Add `todo_path_pattern` to obsidian profile.json on VPS
+- [x] 6.4 Restart `claude-secure-webhook.service` on VPS
+- [x] 6.5 Push a new open TODO to obsidian repo; verify spawn fires
+- [x] 6.6 Push a checkbox-only change; verify HTTP 202 filtered response in webhook.jsonl

@@ -15,28 +15,20 @@ A claude-secure profile named `obsidian` SHALL exist with `"repo": "llm-gourmet/
 - **WHEN** GitHub sends a push event for a repo other than `llm-gourmet/obsidian`
 - **THEN** the listener returns HTTP 404 with `{"error": "unknown_repo"}`
 
-### Requirement: TODO scanner detects projects/*/TODOS.md changes from event JSON
-The obsidian profile's push prompt template SHALL instruct Claude to inspect `{{COMMITS_JSON}}` for file paths matching `projects/*/TODOS.md` (exactly: `projects/` + single path segment + `/TODOS.md`) across all commits' `added` and `modified` arrays. Claude SHALL NOT run shell commands or read files.
+### Requirement: TODO detection moves from Claude prompt to listener diff filter
+The obsidian profile SHALL no longer use a Claude prompt to detect TODO changes. Instead, the webhook listener SHALL evaluate commit patches directly (via `webhook-diff-filter`) before deciding to spawn. The `prompts/push.md` template for the obsidian profile SHALL be replaced with a simple task prompt that assumes the spawn was already pre-filtered.
 
-#### Scenario: Commit contains a new TODOS.md
-- **WHEN** `{{COMMITS_JSON}}` contains a commit with `"added": ["projects/myproject/TODOS.md"]`
-- **THEN** Claude outputs a line containing `TODO-Scanner: neue TODOs erkannt in: projects/myproject/TODOS.md`
+#### Scenario: Spawn only fires on meaningful TODO change
+- **WHEN** GitHub sends a push event for `llm-gourmet/obsidian` containing a commit that adds a new `- [ ]` line in `projects/*/TODOS.md`
+- **THEN** the listener spawns a Claude session
 
-#### Scenario: Commit modifies an existing TODOS.md
-- **WHEN** `{{COMMITS_JSON}}` contains a commit with `"modified": ["projects/myproject/TODOS.md"]`
-- **THEN** Claude outputs a line containing `TODO-Scanner: neue TODOs erkannt in: projects/myproject/TODOS.md`
+#### Scenario: No spawn on checkbox-only change
+- **WHEN** GitHub sends a push event where the only change in any `projects/*/TODOS.md` is converting `- [ ]` to `- [x]`
+- **THEN** the listener returns HTTP 202 with `{"status": "filtered", "reason": "todo_no_meaningful_change"}` and no spawn occurs
 
-#### Scenario: Commit touches no TODOS.md files
-- **WHEN** no file path matching `projects/*/TODOS.md` appears in any commit's `added` or `modified` array
-- **THEN** Claude outputs exactly `TODO-Scanner: keine Änderungen erkannt.` and stops
-
-#### Scenario: Multiple TODOS.md files changed
-- **WHEN** commits contain changes to `projects/alpha/TODOS.md` and `projects/beta/TODOS.md`
-- **THEN** Claude outputs both file paths in the result line
-
-#### Scenario: Old todo.md path is not matched
-- **WHEN** `{{COMMITS_JSON}}` contains a commit with `"modified": ["projects/myproject/todo.md"]`
-- **THEN** Claude outputs exactly `TODO-Scanner: keine Änderungen erkannt.` and stops
+#### Scenario: No spawn when TODOS.md not touched
+- **WHEN** GitHub sends a push event where no `projects/*/TODOS.md` file appears in any commit's `added` or `modified` array
+- **THEN** no spawn occurs (existing branch/path filter behavior unchanged)
 
 ### Requirement: Caddy exposes webhook listener to GitHub
 Caddy SHALL be configured as a reverse proxy forwarding requests to `<public-host>/webhook` → `localhost:9000/webhook`. The GitHub webhook endpoint SHALL be reachable from GitHub's IP ranges.
