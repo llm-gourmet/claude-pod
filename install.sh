@@ -681,19 +681,16 @@ install_webhook_service() {
   # Patch ExecStart: use actual app_dir (so `claude-secure update` is reflected without
   # copying to /opt), set User/Group to the installing user, and point --config to the
   # user-owned webhooks/webhook.json path.
-  local invoking_user invoking_group
-  invoking_user=$(id -un)
-  invoking_group=$(id -gn)
   sudo cp "$app_dir/webhook/claude-secure-webhook.service" /etc/systemd/system/claude-secure-webhook.service
   sudo sed -i \
     -e "s|/opt/claude-secure/webhook/listener.py|${app_dir}/webhook/listener.py|g" \
     -e "s|__WEBHOOK_CONFIG_PATH__|${webhook_config_path}|g" \
-    -e "s|__WEBHOOK_USER__|${invoking_user}|g" \
-    -e "s|__WEBHOOK_GROUP__|${invoking_group}|g" \
+    -e "s|__WEBHOOK_USER__|${_invoking_user}|g" \
+    -e "s|__WEBHOOK_GROUP__|${_invoking_group}|g" \
     /etc/systemd/system/claude-secure-webhook.service
   sudo chmod 644 /etc/systemd/system/claude-secure-webhook.service
   sudo systemctl daemon-reload 2>/dev/null || log_warn "systemctl daemon-reload failed (likely WSL2-no-systemd)"
-  log_info "Installed systemd unit /etc/systemd/system/claude-secure-webhook.service (User=${invoking_user}, config=${webhook_config_path})"
+  log_info "Installed systemd unit /etc/systemd/system/claude-secure-webhook.service (User=${_invoking_user}, config=${webhook_config_path})"
 
   # 8. Enable + start (unless WSL2 gated)
   if [ "$wsl2_no_systemd" -eq 1 ]; then
@@ -769,13 +766,14 @@ main() {
 
   install_git_hooks
 
+  install_webhook_service
+
   # Reclaim ownership of CONFIG_DIR for the invoking user (sudo creates as root).
+  # Runs after install_webhook_service so webhooks/ is included.
   # install_cli + install_git_hooks + install_webhook_service deliberately leave
   # system paths (/usr/local/bin, /etc/systemd, /opt/claude-secure) as root.
   chown -R "$_invoking_user:$_invoking_group" "$CONFIG_DIR"
   chmod 777 "$CONFIG_DIR/logs"
-
-  install_webhook_service
 
   echo ""
   log_info "Installation complete!"
