@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: bootstrap-docs subcommand scaffolds a path in a remote repo
 `claude-secure bootstrap-docs --connection <name> <path>` SHALL look up the named connection from `~/.claude-secure/docs-bootstrap/connections.json`, clone the connection's repo, create the standard project folder structure at `<path>` using the templates from `scripts/templates/`, commit the new files, and push back to the remote. The `--connection` flag is required. The command SHALL exit non-zero and print a clear error if `<path>` already exists in the repo.
@@ -23,31 +23,8 @@
 - **WHEN** `claude-secure bootstrap-docs --connection nosuchname projects/JAD` is run
 - **THEN** the command exits with status 1 and prints `Error: connection 'nosuchname' not found. Run --list-connections to see available connections.`
 
-### Requirement: bootstrap-docs uses ephemeral ASKPASS for token auth
-The git clone and push SHALL use an ephemeral ASKPASS helper script that reads the token from the environment, consistent with the existing report-repo publish pattern. The token SHALL NOT be passed as a CLI argument to git or stored in `.git/config`.
+## REMOVED Requirements
 
-#### Scenario: Token never appears in git process args
-- **WHEN** `claude-secure bootstrap-docs --connection <name> <path>` is run with a configured token
-- **THEN** the git clone and push succeed without the token appearing in the git command arguments
-
-#### Scenario: Token scrubbed from error output
-- **WHEN** git clone fails and the error output would contain the token
-- **THEN** the token is replaced with `<REDACTED:DOCS_BOOTSTRAP_TOKEN>` before printing to stderr
-
-### Requirement: bootstrap-docs cleans up temp clone on exit
-The temporary clone directory SHALL be removed on exit, whether the command succeeds or fails.
-
-#### Scenario: Temp dir removed after success
-- **WHEN** `claude-secure bootstrap-docs --connection <name> <path>` completes successfully
-- **THEN** no temporary clone directory remains on the filesystem
-
-#### Scenario: Temp dir removed after failure
-- **WHEN** `claude-secure bootstrap-docs --connection <name> <path>` fails at any step
-- **THEN** no temporary clone directory remains on the filesystem
-
-### Requirement: install.sh copies scripts/templates/ to installed layout
-The installer SHALL copy `scripts/templates/` to the installed share directory so that `bootstrap-docs` can locate templates when run from the installed `claude-secure` binary.
-
-#### Scenario: Templates available after install
-- **WHEN** `install.sh` completes
-- **THEN** the template files exist at the installed share path and `claude-secure bootstrap-docs` can locate them
+### Requirement: bootstrap-docs config stores repo URL, token, and branch
+**Reason**: Replaced by multi-connection model (`docs-bootstrap-connections` capability). The single-connection `--set-repo`, `--set-token`, `--set-branch` flags and `~/.claude-secure/docs-bootstrap.env` file are superseded by `--add-connection` / `connections.json`.
+**Migration**: Use `claude-secure bootstrap-docs --add-connection --name <name> --repo <url> --token <token> [--branch <branch>]` to register connections. Manually copy values from the old `~/.claude-secure/docs-bootstrap.env` if needed.

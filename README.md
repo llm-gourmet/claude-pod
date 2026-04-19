@@ -48,6 +48,7 @@ Everything on the host falls into two trees:
 | Path | Owner | Purpose |
 |------|-------|---------|
 | `~/.claude-secure/profiles/<name>/` | user | Per-profile secrets (`.env`), whitelist, and config (`profile.json`) |
+| `~/.claude-secure/docs/<name>/` | user | Docs-oriented profiles (e.g. Obsidian vault configs); same structure as `profiles/` |
 | `~/.claude-secure/app/` | user | Copy of the project tree (updated by `claude-secure update`) |
 | `~/.claude-secure/logs/` | user | Structured logs written by the listener (`webhook.jsonl`) |
 | `~/.claude-secure/webhooks/webhook.json` | user (600) | Webhook listener runtime config: bind address, port, operational settings |
@@ -151,9 +152,9 @@ claude-secure --profile <name> spawn --event '<json>'    # Headless spawn
 claude-secure --profile <name> replay <delivery-id>      # Replay webhook
 claude-secure reap                     # Clean up orphaned containers and stale events
 
-claude-secure bootstrap-docs --set-repo <url>   # Configure docs repo (once)
-claude-secure bootstrap-docs --set-token <pat>  # Configure auth token
-claude-secure bootstrap-docs <path>             # Scaffold project docs in remote repo
+claude-secure bootstrap-docs --add-connection --name <n> --repo <url> --token <pat>  # Add connection
+claude-secure bootstrap-docs --list-connections                                       # List connections
+claude-secure bootstrap-docs --connection <name> <path>                               # Scaffold project docs
 
 claude-secure help                     # Show all commands
 ```
@@ -293,6 +294,22 @@ Prompt templates are loaded from `/opt/claude-secure/webhook/templates` by defau
 export WEBHOOK_TEMPLATES_DIR=/path/to/custom/templates
 ```
 
+### Docs-oriented profiles
+
+Profiles for documentation tools (e.g. an Obsidian vault) can live under `~/.claude-secure/docs/<name>/` instead of `~/.claude-secure/profiles/<name>/`. The structure is identical — `profile.json`, `.env`, `whitelist.json`, `prompts/`. The listener and CLI probe both directories; `profiles/` takes priority when a name collision occurs.
+
+```bash
+# Move an existing profile to docs/
+mv ~/.claude-secure/profiles/obsidian ~/.claude-secure/docs/obsidian
+```
+
+The `docs_dir` key in `~/.claude-secure/webhooks/webhook.json` points at the docs directory (set by the installer). If absent or empty the listener only scans `profiles_dir` — no change in behaviour for existing installs.
+
+**Migrating from profiles/ to docs/:**
+1. Move the profile directory: `mv ~/.claude-secure/profiles/obsidian ~/.claude-secure/docs/obsidian`
+2. Restart the listener: `sudo systemctl restart claude-secure-webhook`
+3. Verify: `claude-secure webhook-listener status`
+
 ### Adding a second repo
 
 Each repo gets its own profile with its own `webhook_secret` and `github_token`. The listener port stays unchanged.
@@ -322,14 +339,17 @@ No new listener, no new port — the existing systemd service routes events by m
 Scaffold a standard project documentation structure into a remote git repo — no Docker, no Claude involved, runs directly on the host.
 
 ```bash
-# One-time config
-claude-secure bootstrap-docs --set-repo https://github.com/you/vault.git
-claude-secure bootstrap-docs --set-token ghp_...
-claude-secure bootstrap-docs --set-branch main   # default: main
+# Register a named connection (repeat for each docs repo)
+claude-secure bootstrap-docs --add-connection --name work-docs \
+  --repo https://github.com/you/vault.git --token ghp_... [--branch main]
+
+# Manage connections
+claude-secure bootstrap-docs --list-connections
+claude-secure bootstrap-docs --remove-connection work-docs
 
 # Scaffold a new project (path is relative to repo root)
-claude-secure bootstrap-docs projects/JAD
-claude-secure bootstrap-docs custom/my-project
+claude-secure bootstrap-docs --connection work-docs projects/JAD
+claude-secure bootstrap-docs --connection work-docs custom/my-project
 ```
 
 Creates under `<path>/`:
@@ -339,5 +359,5 @@ TODOS.md         TASKS.md
 decisions/       ideas/          done/
 ```
 
-Each file is seeded from `scripts/templates/`. Config stored in `~/.claude-secure/docs-bootstrap.env` (mode 600) — the token never touches Claude or Docker.
+Each file is seeded from `scripts/templates/`. Connections stored in `~/.claude-secure/docs-bootstrap/connections.json` (mode 600, dir mode 700) — tokens never touch Claude or Docker.
 
