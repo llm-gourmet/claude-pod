@@ -1,6 +1,6 @@
 #!/bin/bash
 # test-webhook-diff-filter.sh -- Unit tests for has_meaningful_todo_change and fetch_commit_patch
-# Tests DIFF-FILTER-01 through DIFF-FILTER-06
+# Tests DIFF-FILTER-01 through DIFF-FILTER-07
 #
 # Strategy: import the two Python functions by running them inline via local Python.
 # No Docker, no network calls (fetch_commit_patch tested with a mock).
@@ -247,6 +247,34 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# DIFF-FILTER-07: persist_event output does not contain github_token
+# ---------------------------------------------------------------------------
+test_event_file_no_github_token() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+
+  python3 - "$LISTENER" "$tmpdir" <<'PYEOF'
+import sys, pathlib, json, importlib.util, unittest.mock as mock
+
+listener_path = pathlib.Path(sys.argv[1])
+events_dir = pathlib.Path(sys.argv[2]) / "events"
+
+src = listener_path.read_text().replace("if __name__ == '__main__':", "if False:")
+ns = {}
+exec(compile(src, str(listener_path), 'exec'), ns)
+persist_event = ns["persist_event"]
+
+raw = json.dumps({"repository": {"full_name": "org/repo"}, "commits": []}).encode()
+path = persist_event(events_dir, raw, "myrepo", "push", "delivery-001")
+content = path.read_text()
+assert "github_token" not in content, f"github_token found in event file: {content}"
+print("ok")
+PYEOF
+  [ $? -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
 echo ""
@@ -259,6 +287,7 @@ run_test "DIFF-FILTER-03: edited open item text triggers spawn" test_edited_open
 run_test "DIFF-FILTER-04: non-matching path returns False" test_non_matching_path_no_spawn
 run_test "DIFF-FILTER-05: empty patch returns False" test_empty_patch_no_spawn
 run_test "DIFF-FILTER-06: mixed patch, only matching file evaluated" test_mixed_patch_only_todos_evaluated
+run_test "DIFF-FILTER-07: event file does not contain github_token" test_event_file_no_github_token
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed out of $TOTAL tests"

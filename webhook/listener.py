@@ -227,6 +227,7 @@ class Config:
         self.max_concurrent_spawns = int(data.get("max_concurrent_spawns", 3))
         self.profiles_dir = pathlib.Path(data["profiles_dir"])
         self.docs_dir = pathlib.Path(data["docs_dir"]) if data.get("docs_dir") else None
+        self.webhooks_dir = pathlib.Path(data["webhooks_dir"]) if data.get("webhooks_dir") else None
         self.events_dir = pathlib.Path(data["events_dir"])
         self.logs_dir = pathlib.Path(data["logs_dir"])
         self.claude_secure_bin = data.get(
@@ -290,7 +291,43 @@ def log_event(**kwargs):
 
 
 # ---------------------------------------------------------------------------
-# Profile resolution (D-08, Pattern 4)
+# Connection resolution — reads ~/.claude-secure/webhooks/connections.json
+# ---------------------------------------------------------------------------
+def resolve_connection_by_repo(
+    webhooks_dir: "pathlib.Path | None",
+    repo_full_name: str,
+):
+    """Read connections.json and return the entry whose `repo` matches repo_full_name.
+
+    Returns dict {name, repo, webhook_secret, webhook_event_filter,
+    webhook_bot_users, todo_path_pattern, github_token} or None.
+    """
+    if not repo_full_name or webhooks_dir is None:
+        return None
+    connections_path = webhooks_dir / "connections.json"
+    try:
+        data = json.loads(connections_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    for entry in data:
+        if entry.get("repo") == repo_full_name:
+            secret = entry.get("webhook_secret")
+            if not secret:
+                return None
+            return {
+                "name": entry["name"],
+                "repo": repo_full_name,
+                "webhook_secret": secret,
+                "webhook_event_filter": entry.get("webhook_event_filter") or {},
+                "webhook_bot_users": entry.get("webhook_bot_users") or [],
+                "todo_path_pattern": entry.get("todo_path_pattern") or "",
+                "github_token": entry.get("github_token") or "",
+            }
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Profile resolution (D-08, Pattern 4) — kept for reference; no longer used
 # ---------------------------------------------------------------------------
 def resolve_profile_by_repo(
     profiles_dir: pathlib.Path,
@@ -379,68 +416,28 @@ _active_lock = threading.Lock()
 _config: Config = None  # set in main()
 
 
-def spawn_async(profile_name: str, event_path: pathlib.Path, delivery_id: str):
+def spawn_async(connection_name: str, event_path: pathlib.Path, delivery_id: str):
     """Launch a daemon thread that will acquire the semaphore and spawn."""
     t = threading.Thread(
         target=_spawn_worker,
-        args=(profile_name, event_path, delivery_id),
+        args=(connection_name, event_path, delivery_id),
         daemon=True,
         name=f"spawn-{delivery_id[:12]}",
     )
     t.start()
 
 
-def _spawn_worker(profile_name: str, event_path: pathlib.Path, delivery_id: str):
-    """Worker thread: acquire semaphore, run claude-secure spawn, log result."""
+def _spawn_worker(connection_name: str, event_path: pathlib.Path, delivery_id: str):
+    """Worker thread: acquire semaphore, log spawn_skipped (spawn wired in future change)."""
     global _active_spawns
     _spawn_semaphore.acquire()  # may block if saturated (D-15)
     with _active_lock:
         _active_spawns += 1
     try:
-        spawns_dir = _config.logs_dir / "spawns"
-        spawns_dir.mkdir(parents=True, exist_ok=True)
-        log_path = spawns_dir / f"{delivery_id}.log"
-        with open(log_path, "wb") as log_fp:
-            # close_fds=True is the Python 3.7+ default on POSIX (Gotcha 6).
-            # If config_dir is set in webhook.json, inject CONFIG_DIR so spawn
-            # finds the right config when running as a different user (e.g.
-            # root via systemd whose $HOME != the installing user's home).
-            popen_kwargs: dict = {"stdout": log_fp, "stderr": subprocess.STDOUT}
-            if _config.config_dir:
-                spawn_env = os.environ.copy()
-                spawn_env["CONFIG_DIR"] = _config.config_dir
-                popen_kwargs["env"] = spawn_env
-            proc = subprocess.Popen(
-                [
-                    _config.claude_secure_bin,
-                    "spawn",
-                    "--profile",
-                    profile_name,
-                    "--event-file",
-                    str(event_path),
-                ],
-                **popen_kwargs,
-            )
-            log_event(
-                event="spawned",
-                profile=profile_name,
-                delivery_id=delivery_id,
-                spawn_pid=proc.pid,
-            )
-            rc = proc.wait()
-            log_event(
-                event="spawn_completed",
-                profile=profile_name,
-                delivery_id=delivery_id,
-                spawn_pid=proc.pid,
-                exit_code=rc,
-            )
-    except Exception as exc:
         log_event(
-            event="spawn_error",
-            profile=profile_name,
+            event="spawn_skipped",
+            connection=connection_name,
             delivery_id=delivery_id,
-            error=str(exc),
         )
     finally:
         with _active_lock:
@@ -521,18 +518,18 @@ class WebhookHandler(BaseHTTPRequestHandler):
         if isinstance(repo_obj, dict):
             repo = repo_obj.get("full_name")
 
-        profile = resolve_profile_by_repo(_config.profiles_dir, repo, _config.docs_dir)
+        profile = resolve_connection_by_repo(_config.webhooks_dir, repo)
 
         # D-11: unknown repo -> 404 BEFORE HMAC check
         if profile is None:
             log_event(
                 event="rejected",
                 repo=repo,
-                reason="unknown_repo",
+                reason="unknown_connection",
                 source_ip=self.client_address[0],
                 status_code=404,
             )
-            return self._send_json(404, {"error": "unknown_repo"})
+            return self._send_json(404, {"error": "unknown_connection"})
 
         # HMAC verification against RAW BYTES (Gotcha 1)
         sig_header = self.headers.get("X-Hub-Signature-256", "")
@@ -629,7 +626,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             status_code=202,
         )
 
-        spawn_async(profile["name"], event_path, delivery_id)
+        spawn_async(profile["name"], event_path, delivery_id)  # noqa: profile key kept for compat
         return self._send_json(
             202, {"status": "accepted", "delivery_id": delivery_id}
         )
