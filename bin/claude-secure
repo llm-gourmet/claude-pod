@@ -70,9 +70,25 @@ validate_profile_name() {
   fi
 }
 
+resolve_profile_dir() {
+  local name="$1"
+  local p="$CONFIG_DIR/profiles/$name"
+  if [ -f "$p/profile.json" ]; then
+    echo "$p"
+    return 0
+  fi
+  local d="$CONFIG_DIR/docs/$name"
+  if [ -f "$d/profile.json" ]; then
+    echo "$d"
+    return 0
+  fi
+  echo "$p"
+}
+
 validate_profile() {
   local name="$1"
-  local pdir="$CONFIG_DIR/profiles/$name"
+  local pdir
+  pdir=$(resolve_profile_dir "$name")
 
   if [ ! -d "$pdir" ]; then
     echo "ERROR: Profile '$name' does not exist at $pdir" >&2
@@ -322,7 +338,8 @@ merge_env_files() {
 
 load_profile_config() {
   local name="$1"
-  local pdir="$CONFIG_DIR/profiles/$name"
+  local pdir
+  pdir=$(resolve_profile_dir "$name")
 
   WORKSPACE_PATH=$(jq -r '.workspace' "$pdir/profile.json")
 
@@ -648,8 +665,10 @@ resolve_template() {
   local event_type="$1"
   local explicit_template="${2:-}"
 
-  local profile_dir="$CONFIG_DIR/profiles/$PROFILE"
+  local profile_dir
+  profile_dir=$(resolve_profile_dir "$PROFILE")
   local prompts_dir="$profile_dir/prompts"
+  local docs_prompts_dir="$CONFIG_DIR/docs/$PROFILE/prompts"
 
   # D-13 step 1: explicit --prompt-template stays in the profile dir ONLY.
   # No default-dir fallback when the user named a template explicitly — a
@@ -664,9 +683,18 @@ resolve_template() {
     return 1
   fi
 
-  # D-13 step 2: profile override by event_type.
+  # D-13 step 2: profile override by event_type (profiles/ dir).
   if [ -d "$prompts_dir" ]; then
     local path="$prompts_dir/${event_type}.md"
+    if [ -f "$path" ]; then
+      echo "$path"
+      return 0
+    fi
+  fi
+
+  # D-13 step 2b: docs/ fallback for profile prompts.
+  if [ -d "$docs_prompts_dir" ]; then
+    local path="$docs_prompts_dir/${event_type}.md"
     if [ -f "$path" ]; then
       echo "$path"
       return 0
@@ -687,6 +715,7 @@ resolve_template() {
   # D-13 step 4: hard fail, listing every path checked.
   echo "ERROR: No template found for event_type '$event_type'" >&2
   echo "  Checked: $prompts_dir/${event_type}.md" >&2
+  echo "  Checked: $docs_prompts_dir/${event_type}.md" >&2
   echo "  Checked: $default_dir/${event_type}.md" >&2
   echo "  Use --prompt-template to override, or create one of the above." >&2
   return 1
@@ -700,12 +729,23 @@ resolve_template() {
 resolve_report_template() {
   local event_type="$1"
 
-  local profile_dir="$CONFIG_DIR/profiles/$PROFILE"
+  local profile_dir
+  profile_dir=$(resolve_profile_dir "$PROFILE")
   local reports_dir="$profile_dir/report-templates"
+  local docs_reports_dir="$CONFIG_DIR/docs/$PROFILE/report-templates"
 
-  # Step 1: profile override by event_type.
+  # Step 1: profile override by event_type (profiles/ dir).
   if [ -d "$reports_dir" ]; then
     local path="$reports_dir/${event_type}.md"
+    if [ -f "$path" ]; then
+      echo "$path"
+      return 0
+    fi
+  fi
+
+  # Step 1b: docs/ fallback for profile report templates.
+  if [ -d "$docs_reports_dir" ]; then
+    local path="$docs_reports_dir/${event_type}.md"
     if [ -f "$path" ]; then
       echo "$path"
       return 0
@@ -726,6 +766,7 @@ resolve_report_template() {
   # Step 3: hard fail, listing every path checked.
   echo "ERROR: No report template found for event_type '$event_type'" >&2
   echo "  Checked: $reports_dir/${event_type}.md" >&2
+  echo "  Checked: $docs_reports_dir/${event_type}.md" >&2
   echo "  Checked: $default_dir/${event_type}.md" >&2
   echo "  Create one of the above to enable report publishing." >&2
   return 1
@@ -1686,37 +1727,36 @@ do_reap() {
 # bootstrap-docs: scaffold project documentation in a remote git repo
 # =========================================================================
 
-# Write or update a single KEY=VALUE line in docs-bootstrap.env.
-# Creates the file with mode 600 if it doesn't exist.
-_bootstrap_docs_set_config_key() {
-  local key="$1" value="$2"
-  local env_file="$CONFIG_DIR/docs-bootstrap.env"
-  if [ ! -f "$env_file" ]; then
-    touch "$env_file"
-    chmod 600 "$env_file"
-  fi
-  # Remove existing line for this key, then append updated value.
-  local tmp
-  tmp=$(mktemp)
-  grep -v "^${key}=" "$env_file" > "$tmp" 2>/dev/null || true
-  printf '%s=%s\n' "$key" "$value" >> "$tmp"
-  mv "$tmp" "$env_file"
-  chmod 600 "$env_file"
+_bootstrap_docs_connections_file() {
+  echo "$CONFIG_DIR/docs-bootstrap/connections.json"
 }
 
-# Load docs-bootstrap.env and verify DOCS_BOOTSTRAP_REPO is set.
-# Exports DOCS_BOOTSTRAP_REPO, DOCS_BOOTSTRAP_TOKEN, DOCS_BOOTSTRAP_BRANCH.
-_bootstrap_docs_load_config() {
-  local env_file="$CONFIG_DIR/docs-bootstrap.env"
-  if [ -f "$env_file" ]; then
-    # shellcheck source=/dev/null
-    set -a; source "$env_file"; set +a
-  fi
-  if [ -z "${DOCS_BOOTSTRAP_REPO:-}" ]; then
-    echo "Error: docs repo not configured. Run: claude-secure bootstrap-docs --set-repo <url>" >&2
+_bootstrap_docs_read_connections() {
+  local f; f=$(_bootstrap_docs_connections_file)
+  if [ ! -f "$f" ]; then echo "[]"; return 0; fi
+  cat "$f"
+}
+
+_bootstrap_docs_write_connections() {
+  local json="$1"
+  local dir="$CONFIG_DIR/docs-bootstrap"
+  local f="$dir/connections.json"
+  if [ ! -d "$dir" ]; then mkdir -p "$dir"; chmod 700 "$dir"; fi
+  local tmp; tmp=$(mktemp "$dir/connections.XXXXXXXX.json")
+  printf '%s\n' "$json" > "$tmp"
+  mv "$tmp" "$f"
+  chmod 600 "$f"
+}
+
+_bootstrap_docs_find_connection() {
+  local name="$1"
+  local connections; connections=$(_bootstrap_docs_read_connections)
+  local conn; conn=$(printf '%s' "$connections" | jq -r --arg n "$name" '.[] | select(.name == $n) | @json' 2>/dev/null | head -1)
+  if [ -z "$conn" ]; then
+    echo "Error: connection '$name' not found. Run --list-connections to see available connections." >&2
     return 1
   fi
-  DOCS_BOOTSTRAP_BRANCH="${DOCS_BOOTSTRAP_BRANCH:-main}"
+  echo "$conn"
 }
 
 # Resolve the templates directory (dev-layout or installed-layout).
@@ -1753,21 +1793,27 @@ _bootstrap_docs_scaffold() {
 }
 
 cmd_bootstrap_docs() {
-  local path_arg=""
-  local set_repo="" set_token="" set_branch=""
+  local path_arg="" connection_name=""
+  local add_connection=0 remove_connection="" list_connections=0
+  local conn_name="" conn_repo="" conn_token="" conn_branch=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --set-repo)   set_repo="$2";   shift 2 ;;
-      --set-token)  set_token="$2";  shift 2 ;;
-      --set-branch) set_branch="$2"; shift 2 ;;
+      --add-connection)    add_connection=1;           shift ;;
+      --remove-connection) remove_connection="$2";     shift 2 ;;
+      --list-connections)  list_connections=1;         shift ;;
+      --connection)        connection_name="$2";       shift 2 ;;
+      --name)              conn_name="$2";             shift 2 ;;
+      --repo)              conn_repo="$2";             shift 2 ;;
+      --token)             conn_token="$2";            shift 2 ;;
+      --branch)            conn_branch="$2";           shift 2 ;;
       --help|-h)
-        echo "Usage: claude-secure bootstrap-docs <path>"
-        echo "       claude-secure bootstrap-docs --set-repo <url>"
-        echo "       claude-secure bootstrap-docs --set-token <token>"
-        echo "       claude-secure bootstrap-docs --set-branch <branch>"
+        echo "Usage: claude-secure bootstrap-docs --connection <name> <path>"
+        echo "       claude-secure bootstrap-docs --add-connection --name <n> --repo <url> --token <t> [--branch <b>]"
+        echo "       claude-secure bootstrap-docs --remove-connection <name>"
+        echo "       claude-secure bootstrap-docs --list-connections"
         echo ""
-        echo "Scaffold project documentation at <path> in the configured docs repo."
+        echo "Scaffold project documentation at <path> in the named connection's docs repo."
         echo "<path> is relative to the repo root, e.g. projects/JAD or custom/myproject"
         return 0
         ;;
@@ -1776,28 +1822,73 @@ cmd_bootstrap_docs() {
     esac
   done
 
-  # Config setters
-  [ -n "$set_repo" ]   && _bootstrap_docs_set_config_key DOCS_BOOTSTRAP_REPO   "$set_repo"   && echo "Set DOCS_BOOTSTRAP_REPO=$set_repo"
-  [ -n "$set_token" ]  && _bootstrap_docs_set_config_key DOCS_BOOTSTRAP_TOKEN  "$set_token"  && echo "Set DOCS_BOOTSTRAP_TOKEN=<redacted>"
-  [ -n "$set_branch" ] && _bootstrap_docs_set_config_key DOCS_BOOTSTRAP_BRANCH "$set_branch" && echo "Set DOCS_BOOTSTRAP_BRANCH=$set_branch"
-  if [ -n "$set_repo" ] || [ -n "$set_token" ] || [ -n "$set_branch" ]; then
+  # --add-connection
+  if [ "$add_connection" -eq 1 ]; then
+    if [ -z "$conn_name" ] || [ -z "$conn_repo" ] || [ -z "$conn_token" ]; then
+      echo "Error: --add-connection requires --name, --repo, and --token" >&2
+      return 1
+    fi
+    conn_branch="${conn_branch:-main}"
+    local connections; connections=$(_bootstrap_docs_read_connections)
+    local existing; existing=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" '.[] | select(.name == $n) | .name' 2>/dev/null)
+    if [ -n "$existing" ]; then
+      echo "Error: connection '$conn_name' already exists" >&2
+      return 1
+    fi
+    local new_conn; new_conn=$(jq -n --arg n "$conn_name" --arg r "$conn_repo" \
+      --arg t "$conn_token" --arg b "$conn_branch" '{name:$n,repo:$r,token:$t,branch:$b}')
+    local updated; updated=$(printf '%s' "$connections" | jq --argjson c "$new_conn" '. + [$c]')
+    _bootstrap_docs_write_connections "$updated"
+    echo "Added connection '$conn_name'"
     return 0
   fi
 
+  # --remove-connection
+  if [ -n "$remove_connection" ]; then
+    local connections; connections=$(_bootstrap_docs_read_connections)
+    local existing; existing=$(printf '%s' "$connections" | jq -r --arg n "$remove_connection" '.[] | select(.name == $n) | .name' 2>/dev/null)
+    if [ -z "$existing" ]; then
+      echo "Error: connection '$remove_connection' not found" >&2
+      return 1
+    fi
+    local updated; updated=$(printf '%s' "$connections" | jq --arg n "$remove_connection" '[.[] | select(.name != $n)]')
+    _bootstrap_docs_write_connections "$updated"
+    echo "Removed connection '$remove_connection'"
+    return 0
+  fi
+
+  # --list-connections
+  if [ "$list_connections" -eq 1 ]; then
+    local connections; connections=$(_bootstrap_docs_read_connections)
+    local count; count=$(printf '%s' "$connections" | jq 'length' 2>/dev/null)
+    if [ "${count:-0}" -eq 0 ]; then
+      echo "No connections configured."
+      return 0
+    fi
+    printf '%s' "$connections" | jq -r '.[] | "\(.name)  \(.repo)  \(.branch // "main")"'
+    return 0
+  fi
+
+  # Bootstrap action: --connection required
+  if [ -z "$connection_name" ]; then
+    echo "Error: --connection <name> is required" >&2
+    echo "Run 'claude-secure bootstrap-docs --list-connections' to see available connections." >&2
+    return 1
+  fi
+
   if [ -z "$path_arg" ]; then
-    echo "Usage: claude-secure bootstrap-docs <path>" >&2
+    echo "Usage: claude-secure bootstrap-docs --connection <name> <path>" >&2
     echo "Run 'claude-secure bootstrap-docs --help' for more information." >&2
     return 1
   fi
 
-  _bootstrap_docs_load_config || return 1
+  local conn_json; conn_json=$(_bootstrap_docs_find_connection "$connection_name") || return 1
+  local repo_url; repo_url=$(printf '%s' "$conn_json" | jq -r '.repo')
+  local branch; branch=$(printf '%s' "$conn_json" | jq -r '.branch // "main"')
+  local pat; pat=$(printf '%s' "$conn_json" | jq -r '.token // ""')
 
   local templates_dir
   templates_dir=$(_bootstrap_docs_find_templates) || return 1
-
-  local repo_url="${DOCS_BOOTSTRAP_REPO}"
-  local branch="${DOCS_BOOTSTRAP_BRANCH}"
-  local pat="${DOCS_BOOTSTRAP_TOKEN:-}"
 
   local clone_dir
   clone_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-bootstrap-XXXXXXXX")
@@ -1966,21 +2057,29 @@ cmd_webhook_listener() {
   local WEBHOOK_JSON="${WEBHOOK_CONFIG:-$HOME/.claude-secure/webhooks/webhook.json}"
 
   if [ -n "$set_token" ]; then
-    # Resolve target profile
+    # Resolve target profile — search profiles/ and docs/ combined.
     if [ -z "$profile_name" ]; then
-      local profiles_dir="$CONFIG_DIR/profiles"
-      local profile_count
-      profile_count=$(find "$profiles_dir" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
-      if [ "$profile_count" -eq 1 ]; then
-        profile_name=$(find "$profiles_dir" -maxdepth 1 -mindepth 1 -type d | xargs basename)
+      local profiles_count docs_count total_count
+      profiles_count=$(find "$CONFIG_DIR/profiles" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
+      docs_count=$(find "$CONFIG_DIR/docs" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
+      total_count=$(( profiles_count + docs_count ))
+      if [ "$total_count" -eq 1 ]; then
+        profile_name=$(
+          { find "$CONFIG_DIR/profiles" -maxdepth 1 -mindepth 1 -type d 2>/dev/null;
+            find "$CONFIG_DIR/docs"     -maxdepth 1 -mindepth 1 -type d 2>/dev/null; } \
+          | xargs -I{} basename {}
+        )
       else
         echo "Error: --profile <name> is required when multiple profiles exist." >&2
         echo "Available profiles:" >&2
-        find "$profiles_dir" -maxdepth 1 -mindepth 1 -type d -exec basename {} \; 2>/dev/null | sort >&2
+        { find "$CONFIG_DIR/profiles" -maxdepth 1 -mindepth 1 -type d 2>/dev/null;
+          find "$CONFIG_DIR/docs"     -maxdepth 1 -mindepth 1 -type d 2>/dev/null; } \
+          | xargs -I{} basename {} | sort >&2
         return 1
       fi
     fi
-    local pjson="$CONFIG_DIR/profiles/$profile_name/profile.json"
+    local pjson
+    pjson="$(resolve_profile_dir "$profile_name")/profile.json"
     if [ ! -f "$pjson" ]; then
       echo "Error: profile '$profile_name' not found at $pjson" >&2
       return 1

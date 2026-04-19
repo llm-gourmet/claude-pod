@@ -181,19 +181,26 @@ Override: `RUN_ALL_TESTS=1 git push` or skip with `git push --no-verify`.
 ## Bootstrap-Docs: Project Documentation Scaffold (8 tests)
 
 **File:** `tests/test-bootstrap-docs.sh`
-**Covers:** `claude-secure bootstrap-docs` subcommand — config management, error handling, git workflow, cleanup.
+**Covers:** `claude-secure bootstrap-docs` subcommand — connection management, error handling, git workflow, cleanup.
 **Note:** No Docker, no real credentials. Uses local bare repos as git remote.
 
 | ID | Test | How |
 |----|------|-----|
-| BOOT-01 | `--set-repo` writes env file with mode 600 | Source CLI, call `--set-repo`, assert file content + `stat` mode = 600 |
-| BOOT-02 | `--set-token` and `--set-branch` write correct values | Call both setters, grep env file |
-| BOOT-03 | Updating one key preserves other keys | Set repo + token, update only branch, verify repo + token unchanged |
-| BOOT-04 | No repo configured exits 1 with message | Call with no env file, assert exit code ≠ 0 and message contains "docs repo not configured" |
-| BOOT-05 | No path argument exits non-zero | Call without path arg, assert non-zero exit |
-| BOOT-06 | Path already exists exits 1 with message | Pre-create path in bare repo, call command, assert exit ≠ 0 and "already exists" in output |
-| BOOT-07 | End-to-end scaffold creates all files in remote repo | Run against local bare repo, clone result, verify all 8 expected files exist |
-| BOOT-08 | No tmpdir remains after execution | Count `cs-bootstrap-*` dirs before/after, assert count unchanged |
+| BOOT-01 | `--add-connection` creates `connections.json` mode 600, dir mode 700 | Call `--add-connection`, assert `stat` modes |
+| BOOT-02 | `--add-connection` stores name/repo/branch; branch defaults to `main` | Call without `--branch`, assert JSON fields |
+| BOOT-03 | `--add-connection --branch` stores explicit branch | Call with `--branch dev`, assert JSON field |
+| BOOT-04 | `--add-connection` duplicate name exits 1, file unchanged | Add twice with same name, assert error message + count = 1 |
+| BOOT-05 | `--add-connection` missing `--token` exits non-zero | Omit `--token`, assert non-zero exit |
+| BOOT-06 | `--remove-connection` removes the named connection | Add two, remove one, assert count = 1 and correct one remains |
+| BOOT-07 | `--remove-connection` unknown name exits 1 with message | Remove non-existent name, assert error message |
+| BOOT-08 | `--list-connections` shows name/repo/branch, not token | Add connection with known token, assert token absent in output |
+| BOOT-09 | `--list-connections` empty prints message and exits 0 | Call with no connections, assert "No connections configured" |
+| BOOT-10 | Missing `--connection` flag exits 1 with error | Call with path but no `--connection`, assert error message |
+| BOOT-11 | `--connection` unknown name exits 1 with message | Use unknown name, assert "not found" message |
+| BOOT-12 | No path argument exits non-zero | Call with `--connection` only, assert non-zero exit |
+| BOOT-13 | Path already exists exits 1 with message | Pre-create path in bare repo, call command, assert exit ≠ 0 and "already exists" in output |
+| BOOT-14 | End-to-end scaffold creates all files in remote repo | Run against local bare repo, clone result, verify all 8 expected files exist |
+| BOOT-15 | No tmpdir remains after execution | Count `cs-bootstrap-*` dirs before/after, assert count unchanged |
 
 ## DIFF-FILTER: Webhook Diff Filter (6 tests)
 

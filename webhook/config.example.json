@@ -3,6 +3,7 @@
   "port": 9000,
   "max_concurrent_spawns": 3,
   "profiles_dir": "__REPLACED_BY_INSTALLER__PROFILES__",
+  "docs_dir": "__REPLACED_BY_INSTALLER__DOCS__",
   "events_dir": "__REPLACED_BY_INSTALLER__EVENTS__",
   "logs_dir": "__REPLACED_BY_INSTALLER__LOGS__",
   "claude_secure_bin": "/usr/local/bin/claude-secure",

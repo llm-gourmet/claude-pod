@@ -119,6 +119,7 @@ EVENT_TYPE={{EVENT_TYPE}}
   "port": $LISTENER_PORT,
   "max_concurrent_spawns": 3,
   "profiles_dir": "$home_dir/.claude-secure/profiles",
+  "docs_dir": "$home_dir/.claude-secure/docs",
   "events_dir": "$home_dir/.claude-secure/events",
   "logs_dir": "$home_dir/.claude-secure/logs",
   "claude_secure_bin": "$TEST_TMPDIR/bin/claude-secure"
@@ -531,6 +532,41 @@ test_replay_auto_profile() {
   return 0
 }
 
+test_listener_starts_without_docs_dir() {
+  # docs_dir absent from config — listener must start cleanly.
+  if [ ! -f "$PROJECT_DIR/webhook/listener.py" ]; then
+    echo "SKIP (listener.py not present)"
+    return 0
+  fi
+  local home_dir="$TEST_TMPDIR/home"
+  local no_docs_config="$TEST_TMPDIR/webhook-no-docs.json"
+  local no_docs_port=19151
+  cat > "$no_docs_config" <<JSON
+{
+  "bind": "127.0.0.1",
+  "port": $no_docs_port,
+  "max_concurrent_spawns": 1,
+  "profiles_dir": "$home_dir/.claude-secure/profiles",
+  "events_dir": "$home_dir/.claude-secure/events",
+  "logs_dir": "$home_dir/.claude-secure/logs",
+  "claude_secure_bin": "/usr/local/bin/claude-secure"
+}
+JSON
+  python3 "$PROJECT_DIR/webhook/listener.py" --config "$no_docs_config" \
+    >"$TEST_TMPDIR/no-docs-listener.stdout" 2>"$TEST_TMPDIR/no-docs-listener.stderr" &
+  local pid=$!
+  local i=0
+  local started=0
+  while [ $i -lt 20 ]; do
+    if curl -sSf "http://127.0.0.1:$no_docs_port/health" >/dev/null 2>&1; then started=1; break; fi
+    sleep 0.1; i=$((i+1))
+  done
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  [ $started -eq 1 ] || { echo "Listener failed to start without docs_dir in config" >&2; return 1; }
+  return 0
+}
+
 # =========================================================================
 # Locked decision assertions (D-01 through D-22)
 # =========================================================================
@@ -657,11 +693,32 @@ test_render_handles_backslash_in_value() {
   return 0
 }
 
+test_resolve_template_from_docs_dir() {
+  # docs/ fallback: profile has no prompts/ under profiles/, but has one under docs/.
+  local home_dir="$TEST_TMPDIR/home"
+  rm -f "$home_dir/.claude-secure/profiles/test-profile/prompts/issues-opened.md"
+  local docs_prompts="$home_dir/.claude-secure/docs/test-profile/prompts"
+  mkdir -p "$docs_prompts"
+  local marker="DOCS_DIR_MARKER_$(uuidgen | tr -d -)"
+  printf '%s {{ISSUE_TITLE}}\n' "$marker" > "$docs_prompts/issues-opened.md"
+  local out rc
+  out=$(WEBHOOK_TEMPLATES_DIR="$PROJECT_DIR/webhook/templates" \
+    PATH="$PROJECT_DIR/bin:$PATH" claude-secure --profile test-profile spawn \
+    --event-file "$PROJECT_DIR/tests/fixtures/github-issues-opened.json" \
+    --dry-run 2>&1)
+  rc=$?
+  rm -rf "$docs_prompts"
+  [ $rc -eq 0 ] || { echo "exited $rc: $out" >&2; return 1; }
+  printf '%s' "$out" | grep -q "$marker" || return 1
+  return 0
+}
+
 test_resolve_template_fallback_chain() {
   # D-13: no profile prompts/ override → falls back to webhook/templates/.
   # Green after Plan 15-03. Remove any profile-level issues-opened override.
   local home_dir="$TEST_TMPDIR/home"
   rm -f "$home_dir/.claude-secure/profiles/test-profile/prompts/issues-opened.md"
+  rm -f "$home_dir/.claude-secure/docs/test-profile/prompts/issues-opened.md"
   local out rc
   out=$(WEBHOOK_TEMPLATES_DIR="$PROJECT_DIR/webhook/templates" \
     PATH="$PROJECT_DIR/bin:$PATH" claude-secure --profile test-profile spawn \
@@ -847,6 +904,7 @@ main() {
 
   # Locked decisions
   echo "--- Locked decisions D-01..D-22 ---"
+  run_test "listener starts without docs_dir" test_listener_starts_without_docs_dir
   run_test "compute_event_type cases"         test_compute_event_type_cases
   if [ $listener_up -eq 1 ]; then
     run_test "ping event filtered"            test_ping_event_filtered
@@ -857,6 +915,7 @@ main() {
   run_test "extract_field utf8-safe"          test_extract_field_utf8_safe
   run_test "render handles pipe in value"     test_render_handles_pipe_in_value
   run_test "render handles backslash in val"  test_render_handles_backslash_in_value
+  run_test "resolve_template from docs/ dir"  test_resolve_template_from_docs_dir
   run_test "resolve_template fallback chain"  test_resolve_template_fallback_chain
   run_test "explicit template no default fb"  test_explicit_template_no_default_fallback
   run_test "WEBHOOK_TEMPLATES_DIR env var"    test_webhook_templates_dir_env_var

@@ -301,6 +301,8 @@ setup_directories() {
   # Create profiles directory for profile-based configuration
   mkdir -p "$CONFIG_DIR/profiles"
   log_info "Created profiles directory: $CONFIG_DIR/profiles"
+  mkdir -p "$CONFIG_DIR/docs"
+  log_info "Created docs directory: $CONFIG_DIR/docs"
 
   # Create logs directory for service logging (LOG_DIR in docker-compose)
   # chmod 755: owner has full access, others can read/traverse.
@@ -667,6 +669,7 @@ install_webhook_service() {
   if [ ! -f "$webhook_config_path" ]; then
     sed \
       -e "s|__REPLACED_BY_INSTALLER__PROFILES__|${invoking_home}/.claude-secure/profiles|" \
+      -e "s|__REPLACED_BY_INSTALLER__DOCS__|${invoking_home}/.claude-secure/docs|" \
       -e "s|__REPLACED_BY_INSTALLER__EVENTS__|${invoking_home}/.claude-secure/events|" \
       -e "s|__REPLACED_BY_INSTALLER__LOGS__|${invoking_home}/.claude-secure/logs|" \
       -e "s|__REPLACED_BY_INSTALLER__CONFIG_DIR__|${invoking_home}/.claude-secure|" \

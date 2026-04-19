@@ -375,6 +375,50 @@ test_resolve_template_missing_fails() {
 }
 run_test "HEAD-05c: resolve_template fails for missing template" test_resolve_template_missing_fails
 
+test_resolve_template_from_docs_dir() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _setup_source_env "$tmpdir"
+  create_test_profile "docsprof" "$tmpdir/.claude-secure" "$tmpdir/ws-docsprof"
+  _source_functions "$tmpdir"
+  if ! type resolve_template &>/dev/null; then
+    echo "SKIP (resolve_template not yet implemented)"
+    return 0
+  fi
+
+  # Profile lives under docs/ not profiles/ — simulate by placing prompt there.
+  mkdir -p "$tmpdir/.claude-secure/docs/docsprof/prompts"
+  echo "Docs prompt: {{REPO_NAME}}" > "$tmpdir/.claude-secure/docs/docsprof/prompts/push.md"
+
+  PROFILE="docsprof"
+  local result
+  result=$(resolve_template "push" "")
+  [ -f "$result" ] || return 1
+  grep -q "REPO_NAME" "$result" || return 1
+  return 0
+}
+run_test "HEAD-05f: resolve_template finds template in docs/ dir" test_resolve_template_from_docs_dir
+
+test_resolve_profile_dir_finds_docs() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _setup_source_env "$tmpdir"
+  _source_functions "$tmpdir"
+  if ! type resolve_profile_dir &>/dev/null; then
+    echo "SKIP (resolve_profile_dir not yet implemented)"
+    return 0
+  fi
+
+  mkdir -p "$tmpdir/.claude-secure/docs/obsidian"
+  echo '{"workspace":"'$tmpdir'"}' > "$tmpdir/.claude-secure/docs/obsidian/profile.json"
+
+  local result
+  result=$(resolve_profile_dir "obsidian")
+  [ "$result" = "$tmpdir/.claude-secure/docs/obsidian" ] || return 1
+  return 0
+}
+run_test "DOCS-01: resolve_profile_dir returns docs/ path when profile absent from profiles/" test_resolve_profile_dir_finds_docs
+
 test_render_template_substitutes_vars() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
