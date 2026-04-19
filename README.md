@@ -199,17 +199,39 @@ Edit `.env` directly to add or rotate secrets. No restart needed for the proxy �
 # List secrets configured in a profile
 claude-secure profile <name> secret list
 
-# Add or update a secret
-claude-secure profile <name> secret add <KEY> [<value>] [--redacted <TOKEN>] [--domains d1,d2,...]
-# If <value> is omitted you are prompted silently (recommended to avoid shell history)
-# --redacted defaults to REDACTED_<KEY>
-# --domains is a comma-separated list; omit to leave the domains array empty
+# Add or update a secret (value prompted silently if omitted — recommended to avoid shell history)
+claude-secure profile <name> secret add <KEY>
+claude-secure profile <name> secret add <KEY> <value>
+claude-secure profile <name> secret add <KEY> <value> --redacted <TOKEN> --domains d1,d2,d3
+
+# Examples
+claude-secure profile myproject secret add GITHUB_TOKEN --redacted REDACTED_GITHUB --domains github.com,api.github.com
+claude-secure profile myproject secret add GITHUB_TOKEN  # prompts silently
+claude-secure profile myproject secret add NPM_TOKEN ghp_xxx  # value inline (recorded in shell history)
 
 # Remove a secret
 claude-secure profile <name> secret remove <KEY>
 ```
 
-`secret add` writes the raw value to `.env` (mode 600) and adds the metadata entry to `profile.json secrets[]`. If the key already exists it is replaced in both files. The proxy re-reads `profile.json` on every request, so no restart is needed for redaction to take effect. The containers must be restarted (`stop` + `start`) for the new env var to be visible inside the Claude container.
+- `--redacted` defaults to `REDACTED_<KEY>` if omitted.
+- `--domains` is a comma-separated list with **no spaces** (e.g. `github.com,api.github.com`).
+- `secret add` writes the raw value to `.env` (mode 600) and upserts the metadata in `profile.json secrets[]`.
+- The proxy re-reads `profile.json` on every request — no restart needed for redaction changes. A container restart (`stop` + `start`) is required for the new env var to be visible inside Claude.
+
+#### Managing the system prompt
+
+```bash
+# Set or replace the system prompt injected for every session
+claude-secure profile <name> system-prompt set "You are a focused code reviewer."
+
+# Show the current system prompt
+claude-secure profile <name> system-prompt get
+
+# Remove the system prompt
+claude-secure profile <name> system-prompt clear
+```
+
+The system prompt is stored as `system_prompt` in `profile.json` and passed to Claude Code via `--system-prompt` when starting interactive or headless sessions. Changing it takes effect on the next `start` or `spawn` — no container restart needed.
 
 #### Profile lifecycle commands
 

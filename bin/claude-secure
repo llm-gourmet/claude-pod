@@ -485,13 +485,30 @@ cmd_profile() {
           ;;
       esac
       ;;
+    system-prompt)
+      local action="${3:-}"
+      case "$action" in
+        set)   profile_system_prompt_set "$prof_dir" "${4:-}" ;;
+        get)   profile_system_prompt_get "$prof_dir" ;;
+        clear) profile_system_prompt_clear "$prof_dir" ;;
+        "")
+          echo "ERROR: Action required: set, get, clear" >&2
+          echo "Usage: claude-secure profile <name> system-prompt <set|get|clear>" >&2
+          exit 1
+          ;;
+        *)
+          echo "ERROR: Unknown action '$action'. Use: set, get, clear" >&2
+          exit 1
+          ;;
+      esac
+      ;;
     "")
-      echo "ERROR: Subcommand required: secret" >&2
-      echo "Usage: claude-secure profile <name> secret <add|remove|list>" >&2
+      echo "ERROR: Subcommand required: secret, system-prompt" >&2
+      echo "Usage: claude-secure profile <name> <secret|system-prompt> <action>" >&2
       exit 1
       ;;
     *)
-      echo "ERROR: Unknown subcommand '$subcmd'. Use: secret" >&2
+      echo "ERROR: Unknown subcommand '$subcmd'. Use: secret, system-prompt" >&2
       exit 1
       ;;
   esac
@@ -605,6 +622,46 @@ profile_secret_remove() {
   mv "$tmp_json" "$pjson"
 
   echo "Secret '$key' removed from profile."
+}
+
+profile_system_prompt_set() {
+  local pdir="$1"
+  local text="${2:-}"
+
+  if [ -z "$text" ]; then
+    read -rp "System prompt: " text
+    if [ -z "$text" ]; then
+      echo "ERROR: System prompt was empty." >&2; return 1
+    fi
+  fi
+
+  local pjson="$pdir/profile.json"
+  local tmp_json
+  tmp_json=$(mktemp)
+  jq --arg t "$text" '.system_prompt = $t' "$pjson" > "$tmp_json"
+  mv "$tmp_json" "$pjson"
+  echo "System prompt set."
+}
+
+profile_system_prompt_get() {
+  local pdir="$1"
+  local val
+  val=$(jq -r '.system_prompt // empty' "$pdir/profile.json")
+  if [ -z "$val" ]; then
+    echo "(no system prompt set)"
+  else
+    echo "$val"
+  fi
+}
+
+profile_system_prompt_clear() {
+  local pdir="$1"
+  local pjson="$pdir/profile.json"
+  local tmp_json
+  tmp_json=$(mktemp)
+  jq 'del(.system_prompt)' "$pjson" > "$tmp_json"
+  mv "$tmp_json" "$pjson"
+  echo "System prompt cleared."
 }
 
 # Use docker compose project-scoped cleanup instead of hardcoded names
@@ -2647,8 +2704,11 @@ case "$CMD" in
     echo ""
     echo "Profile config:"
     echo "  profile <name> secret list"
-    echo "  profile <name> secret add <KEY> [<value>] [--redacted <TOKEN>] [--domains d1,d2]"
+    echo "  profile <name> secret add <KEY> [<value>] [--redacted <TOKEN>] [--domains d1,d2,...]"
     echo "  profile <name> secret remove <KEY>"
+    echo "  profile <name> system-prompt set \"<text>\""
+    echo "  profile <name> system-prompt get"
+    echo "  profile <name> system-prompt clear"
     echo ""
     echo "System commands:"
     echo "  update             Pull latest claude-secure, update CLI, rebuild all images"
