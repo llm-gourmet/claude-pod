@@ -112,8 +112,17 @@ if [ "$READY" != "true" ]; then
   exit 1
 fi
 
-# Copy profile to writable location inside proxy (PROFILE_PATH=/tmp/profile-test.json)
-docker compose exec -T proxy cp /etc/claude-secure/profile.json /tmp/profile-test.json
+# Write test profile with all 3 secrets to writable location (PROFILE_PATH=/tmp/profile-test.json)
+docker compose exec -T proxy sh -c 'cat > /tmp/profile-test.json' <<'PROFILE'
+{
+  "workspace": "/workspace",
+  "secrets": [
+    {"env_var": "GITHUB_TOKEN",    "redacted": "REDACTED_GITHUB", "domains": ["github.com"]},
+    {"env_var": "STRIPE_KEY",      "redacted": "REDACTED_STRIPE", "domains": ["stripe.com"]},
+    {"env_var": "OPENAI_API_KEY",  "redacted": "REDACTED_OPENAI", "domains": ["api.openai.com"]}
+  ]
+}
+PROFILE
 
 # Start mock upstream inside proxy container
 echo "Starting mock upstream server..."
@@ -130,7 +139,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({
       id: "msg_test",
       type: "message",
-      content: [{type: "text", text: "Your token is PLACEHOLDER_GITHUB and key is PLACEHOLDER_STRIPE and oai is PLACEHOLDER_OPENAI"}]
+      content: [{type: "text", text: "Your token is REDACTED_GITHUB and key is REDACTED_STRIPE and oai is REDACTED_OPENAI"}]
     }));
   });
 });
@@ -186,8 +195,8 @@ UPSTREAM_LOG=$(docker compose exec -T proxy cat /tmp/upstream-requests.log 2>/de
 
 # Check that placeholders appear and real secrets do not
 SECR02_OK=1
-if echo "$UPSTREAM_LOG" | grep -q 'PLACEHOLDER_GITHUB' && \
-   echo "$UPSTREAM_LOG" | grep -q 'PLACEHOLDER_STRIPE' && \
+if echo "$UPSTREAM_LOG" | grep -q 'REDACTED_GITHUB' && \
+   echo "$UPSTREAM_LOG" | grep -q 'REDACTED_STRIPE' && \
    ! echo "$UPSTREAM_LOG" | grep -q 'ghp_test_secret_value_12345' && \
    ! echo "$UPSTREAM_LOG" | grep -q 'sk_test_stripe_secret_67890'; then
   SECR02_OK=0
@@ -207,9 +216,9 @@ sleep 1
 UPSTREAM_LOG2=$(docker compose exec -T proxy cat /tmp/upstream-requests.log 2>/dev/null)
 
 SECR02B_OK=1
-if echo "$UPSTREAM_LOG2" | grep -q 'PLACEHOLDER_GITHUB' && \
-   echo "$UPSTREAM_LOG2" | grep -q 'PLACEHOLDER_STRIPE' && \
-   echo "$UPSTREAM_LOG2" | grep -q 'PLACEHOLDER_OPENAI' && \
+if echo "$UPSTREAM_LOG2" | grep -q 'REDACTED_GITHUB' && \
+   echo "$UPSTREAM_LOG2" | grep -q 'REDACTED_STRIPE' && \
+   echo "$UPSTREAM_LOG2" | grep -q 'REDACTED_OPENAI' && \
    ! echo "$UPSTREAM_LOG2" | grep -q 'ghp_test_secret_value_12345' && \
    ! echo "$UPSTREAM_LOG2" | grep -q 'sk_test_stripe_secret_67890' && \
    ! echo "$UPSTREAM_LOG2" | grep -q 'sk-test-openai-secret-abcde'; then
@@ -230,9 +239,9 @@ SECR03_OK=1
 if echo "$RESPONSE_BODY" | grep -q 'ghp_test_secret_value_12345' && \
    echo "$RESPONSE_BODY" | grep -q 'sk_test_stripe_secret_67890' && \
    echo "$RESPONSE_BODY" | grep -q 'sk-test-openai-secret-abcde' && \
-   ! echo "$RESPONSE_BODY" | grep -q 'PLACEHOLDER_GITHUB' && \
-   ! echo "$RESPONSE_BODY" | grep -q 'PLACEHOLDER_STRIPE' && \
-   ! echo "$RESPONSE_BODY" | grep -q 'PLACEHOLDER_OPENAI'; then
+   ! echo "$RESPONSE_BODY" | grep -q 'REDACTED_GITHUB' && \
+   ! echo "$RESPONSE_BODY" | grep -q 'REDACTED_STRIPE' && \
+   ! echo "$RESPONSE_BODY" | grep -q 'REDACTED_OPENAI'; then
   SECR03_OK=0
 fi
 report "SECR-03" "Placeholders restored to real values in responses" $SECR03_OK
@@ -267,7 +276,7 @@ UPSTREAM_LOG3=$(docker compose exec -T proxy cat /tmp/upstream-requests.log 2>/d
 SECR04_OK=1
 # After removing entry, the real value should pass through unredacted
 if echo "$UPSTREAM_LOG3" | grep -q 'ghp_test_secret_value_12345' && \
-   ! echo "$UPSTREAM_LOG3" | grep -q 'PLACEHOLDER_GITHUB'; then
+   ! echo "$UPSTREAM_LOG3" | grep -q 'REDACTED_GITHUB'; then
   SECR04_OK=0
 fi
 report "SECR-04" "Config hot-reload: removed secret no longer redacted" $SECR04_OK
@@ -294,7 +303,7 @@ sleep 1
 UPSTREAM_LOG4=$(docker compose exec -T proxy cat /tmp/upstream-requests.log 2>/dev/null)
 
 SECR04B_OK=1
-if echo "$UPSTREAM_LOG4" | grep -q 'PLACEHOLDER_GITHUB' && \
+if echo "$UPSTREAM_LOG4" | grep -q 'REDACTED_GITHUB' && \
    ! echo "$UPSTREAM_LOG4" | grep -q 'ghp_test_secret_value_12345'; then
   SECR04B_OK=0
 fi
