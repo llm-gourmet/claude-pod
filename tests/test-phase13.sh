@@ -106,10 +106,10 @@ test_spawn_requires_profile() {
   PROFILE="" REMAINING_ARGS=("spawn" "--event" '{"type":"test"}')
   local output
   output=$(do_spawn 2>&1) && return 1
-  echo "$output" | grep -q "\-\-profile is required for spawn" || return 1
+  echo "$output" | grep -qi "profile.*name.*required\|profile name is required" || return 1
   return 0
 }
-run_test "HEAD-01a: spawn requires --profile" test_spawn_requires_profile
+run_test "HEAD-01a: spawn requires profile name" test_spawn_requires_profile
 
 test_spawn_requires_event() {
   local tmpdir

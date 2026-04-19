@@ -95,18 +95,21 @@ GITHUB_TOKEN=ghp_xxx
 ## CLI
 
 ```bash
+# Create a profile (prompts for workspace path and credentials, then exits)
+claude-secure --profile <name>
+
+# Start an interactive Claude Code session for a profile
+claude-secure start <name>
+
 # Interactive session (superuser — all profiles merged)
 claude-secure
 
-# Interactive session scoped to a profile
-claude-secure --profile <name>
-
 # Headless agent session (GitHub event trigger)
-claude-secure --profile <name> spawn --event '<json>'
-claude-secure --profile <name> spawn --event-file <path>
+claude-secure spawn <name> --event '<json>'
+claude-secure spawn <name> --event-file <path>
 
 # Replay a webhook delivery
-claude-secure --profile <name> replay <delivery-id>
+claude-secure replay <name> <delivery-id>
 ```
 
 ### Profiles
@@ -114,8 +117,11 @@ claude-secure --profile <name> replay <delivery-id>
 A profile is a named workspace with its own secrets and allowed domains.
 
 ```bash
-# Create (or enter) a profile — prompts for workspace path and credentials
+# Create a profile — prompts for workspace path and credentials, then exits
 claude-secure --profile myproject
+
+# Start a session for the created profile
+claude-secure start myproject
 ```
 
 Profile directory layout:
@@ -152,17 +158,25 @@ Profile directory layout:
 ## Commands
 
 ```bash
-claude-secure                          # Interactive session (superuser)
-claude-secure --profile <name>         # Interactive session (profile-scoped)
+# Profile lifecycle
+claude-secure --profile <name>         # Create profile (interactive setup), then exit
+claude-secure start <name>             # Start interactive session for a profile
+claude-secure                          # Superuser mode (all profiles merged)
 
-claude-secure stop                     # Stop all containers
-claude-secure status                   # Container status + Claude Code version
+# Profile management
+claude-secure status [name]            # Container status (all if no name given)
+claude-secure stop [name]              # Stop containers (all if no name given)
+claude-secure remove <name>            # Remove profile config and stop containers
+claude-secure logs <name>              # Tail log files [hook|anthropic|iptables|clear]
 claude-secure list                     # List all profiles and running status
+
+# Headless and replay
+claude-secure spawn <name> --event '<json>'    # Headless spawn
+claude-secure replay <name> <delivery-id>      # Replay webhook
+
+# System
 claude-secure update                   # Pull latest source, rebuild, update CLI
 claude-secure upgrade                  # Rebuild Claude image with latest Claude Code
-
-claude-secure --profile <name> spawn --event '<json>'    # Headless spawn
-claude-secure --profile <name> replay <delivery-id>      # Replay webhook
 claude-secure reap                     # Clean up orphaned containers and stale events
 
 claude-secure bootstrap-docs --add-connection --name <n> --repo <url> --token <pat>  # Add connection

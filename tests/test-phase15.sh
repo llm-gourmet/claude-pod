@@ -466,7 +466,7 @@ test_workflow_template_dry_run() {
   #     wrong, BRANCH renders empty and this assertion fails. This grep is
   #     the execution-time tripwire for the Plan 15-03 Region 2 latent bug.)
   local out rc
-  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure --profile test-profile spawn \
+  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
     --event-file "$PROJECT_DIR/tests/fixtures/github-workflow-run-failure.json" \
     --dry-run 2>&1)
   rc=$?
@@ -537,8 +537,8 @@ test_replay_auto_profile() {
   local stub_after
   stub_after=$(wc -l "$STUB_LOG" 2>/dev/null | awk '{print $1}' || echo 0)
   [ "$stub_after" -gt "$stub_before" ] || return 1
-  # The new stub invocation must include --profile test-profile.
-  tail -n1 "$STUB_LOG" | grep -q -- '--profile test-profile' || return 1
+  # The new stub invocation must use: spawn test-profile --event-file ...
+  tail -n1 "$STUB_LOG" | grep -q -- 'spawn test-profile' || return 1
   return 0
 }
 
@@ -682,7 +682,7 @@ test_extract_field_utf8_safe() {
 test_render_handles_pipe_in_value() {
   # Pitfall 1 regression. Green after Plan 15-03.
   local out rc
-  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure --profile test-profile spawn \
+  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
     --event-file "$PROJECT_DIR/tests/fixtures/github-issues-opened-with-pipe.json" \
     --dry-run 2>&1)
   rc=$?
@@ -694,7 +694,7 @@ test_render_handles_pipe_in_value() {
 test_render_handles_backslash_in_value() {
   # Pitfall 1 regression. Green after Plan 15-03.
   local out rc
-  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure --profile test-profile spawn \
+  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
     --event-file "$PROJECT_DIR/tests/fixtures/github-issues-opened-with-pipe.json" \
     --dry-run 2>&1)
   rc=$?
@@ -713,7 +713,7 @@ test_resolve_template_from_docs_dir() {
   printf '%s {{ISSUE_TITLE}}\n' "$marker" > "$docs_prompts/issues-opened.md"
   local out rc
   out=$(WEBHOOK_TEMPLATES_DIR="$PROJECT_DIR/webhook/templates" \
-    PATH="$PROJECT_DIR/bin:$PATH" claude-secure --profile test-profile spawn \
+    PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
     --event-file "$PROJECT_DIR/tests/fixtures/github-issues-opened.json" \
     --dry-run 2>&1)
   rc=$?
@@ -731,7 +731,7 @@ test_resolve_template_fallback_chain() {
   rm -f "$home_dir/.claude-secure/docs/test-profile/prompts/issues-opened.md"
   local out rc
   out=$(WEBHOOK_TEMPLATES_DIR="$PROJECT_DIR/webhook/templates" \
-    PATH="$PROJECT_DIR/bin:$PATH" claude-secure --profile test-profile spawn \
+    PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
     --event-file "$PROJECT_DIR/tests/fixtures/github-issues-opened.json" \
     --dry-run 2>&1)
   rc=$?
@@ -748,7 +748,7 @@ test_explicit_template_no_default_fallback() {
   # Ensure no profile-level "nonsense" template exists.
   rm -f "$home_dir/.claude-secure/profiles/test-profile/prompts/nonsense.md"
   local out rc
-  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure --profile test-profile spawn \
+  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
     --prompt-template nonsense \
     --event-file "$PROJECT_DIR/tests/fixtures/github-issues-opened.json" \
     --dry-run 2>&1)
@@ -770,7 +770,7 @@ test_webhook_templates_dir_env_var() {
   rm -f "$home_dir/.claude-secure/profiles/test-profile/prompts/issues-opened.md"
   local out rc
   out=$(WEBHOOK_TEMPLATES_DIR="$custom_dir" \
-    PATH="$PROJECT_DIR/bin:$PATH" claude-secure --profile test-profile spawn \
+    PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
     --event-file "$PROJECT_DIR/tests/fixtures/github-issues-opened.json" \
     --dry-run 2>&1)
   rc=$?
@@ -831,7 +831,7 @@ EVENT_TYPE={{EVENT_TYPE}}
   # (4) Invoke REAL bin/claude-secure with --prompt-template priority-top
   # and --dry-run. Assert EVENT_TYPE=priority-top in output.
   local out rc
-  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure --profile test-profile spawn \
+  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
     --event-file "$ev_path" \
     --prompt-template priority-top \
     --dry-run 2>&1)
