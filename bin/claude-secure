@@ -452,6 +452,161 @@ list_profiles() {
   fi
 }
 
+cmd_profile() {
+  local prof_name="${1:-}"
+  if [ -z "$prof_name" ]; then
+    echo "ERROR: profile name is required" >&2
+    echo "Usage: claude-secure profile <name> secret <add|remove|list> [args...]" >&2
+    exit 1
+  fi
+  validate_profile_name "$prof_name"
+  local prof_dir
+  prof_dir=$(resolve_profile_dir "$prof_name")
+  if [ ! -f "$prof_dir/profile.json" ]; then
+    echo "ERROR: Profile '$prof_name' not found. Run: claude-secure --profile $prof_name" >&2
+    exit 1
+  fi
+  local subcmd="${2:-}"
+  case "$subcmd" in
+    secret)
+      local action="${3:-}"
+      case "$action" in
+        add)    profile_secret_add "$prof_dir" "${@:4}" ;;
+        remove) profile_secret_remove "$prof_dir" "${4:-}" ;;
+        list)   profile_secret_list "$prof_dir" ;;
+        "")
+          echo "ERROR: Action required: add, remove, list" >&2
+          echo "Usage: claude-secure profile <name> secret <add|remove|list>" >&2
+          exit 1
+          ;;
+        *)
+          echo "ERROR: Unknown action '$action'. Use: add, remove, list" >&2
+          exit 1
+          ;;
+      esac
+      ;;
+    "")
+      echo "ERROR: Subcommand required: secret" >&2
+      echo "Usage: claude-secure profile <name> secret <add|remove|list>" >&2
+      exit 1
+      ;;
+    *)
+      echo "ERROR: Unknown subcommand '$subcmd'. Use: secret" >&2
+      exit 1
+      ;;
+  esac
+}
+
+profile_secret_list() {
+  local pdir="$1"
+  local count
+  count=$(jq -r '(.secrets // []) | length' "$pdir/profile.json")
+  if [ "$count" -eq 0 ]; then
+    echo "No secrets configured."
+    return
+  fi
+  printf "%-30s %-25s %s\n" "ENV_VAR" "REDACTED" "DOMAINS"
+  printf "%-30s %-25s %s\n" "-------" "--------" "-------"
+  jq -r '.secrets[] | [(.env_var // "-"), (.redacted // "-"), ((.domains // []) | join(","))] | @tsv' \
+    "$pdir/profile.json" | while IFS=$'\t' read -r var red doms; do
+    printf "%-30s %-25s %s\n" "$var" "$red" "$doms"
+  done
+}
+
+profile_secret_add() {
+  local pdir="$1"; shift
+  local key="" value="" redacted="" domains_str=""
+  local pos_count=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --redacted) redacted="$2"; shift 2 ;;
+      --domains)  domains_str="$2"; shift 2 ;;
+      --*)        echo "ERROR: Unknown flag: $1" >&2; return 1 ;;
+      *)
+        if   [ "$pos_count" -eq 0 ]; then key="$1"
+        elif [ "$pos_count" -eq 1 ]; then value="$1"
+        else echo "ERROR: Unexpected argument: $1" >&2; return 1
+        fi
+        pos_count=$((pos_count + 1))
+        shift ;;
+    esac
+  done
+
+  if [ -z "$key" ]; then
+    echo "ERROR: env var name required (e.g. GITHUB_TOKEN)" >&2; return 1
+  fi
+  if [[ ! "$key" =~ ^[A-Z_][A-Z0-9_]*$ ]]; then
+    echo "ERROR: Key must be an uppercase env var name (e.g. GITHUB_TOKEN)" >&2; return 1
+  fi
+
+  if [ -z "$value" ]; then
+    read -rsp "Value for $key: " value; echo ""
+    if [ -z "$value" ]; then
+      echo "ERROR: Value was empty." >&2; return 1
+    fi
+  fi
+  case "$value" in
+    *$'\n'*|*$'\r'*)
+      echo "ERROR: Value contains a newline (paste buffer leakage?)." >&2; return 1 ;;
+  esac
+
+  if [ -z "$redacted" ]; then
+    redacted="REDACTED_${key}"
+  fi
+
+  local domains_json="[]"
+  if [ -n "$domains_str" ]; then
+    domains_json=$(printf '%s' "$domains_str" | tr ',' '\n' | jq -R . | jq -s .)
+  fi
+
+  local env_file="$pdir/.env"
+  local tmp_env
+  tmp_env=$(mktemp)
+  if [ -f "$env_file" ]; then
+    LC_ALL=C grep -v "^${key}=" "$env_file" > "$tmp_env" || true
+  fi
+  printf '%s=%s\n' "$key" "$value" >> "$tmp_env"
+  chmod 600 "$tmp_env"
+  mv "$tmp_env" "$env_file"
+
+  local pjson="$pdir/profile.json"
+  local tmp_json
+  tmp_json=$(mktemp)
+  jq --arg k "$key" --arg r "$redacted" --argjson d "$domains_json" \
+    '.secrets = ((.secrets // []) | map(select(.env_var != $k))) + [{"env_var": $k, "redacted": $r, "domains": $d}]' \
+    "$pjson" > "$tmp_json"
+  mv "$tmp_json" "$pjson"
+
+  echo "Secret '$key' added to profile."
+}
+
+profile_secret_remove() {
+  local pdir="$1"
+  local key="$2"
+
+  if [ -z "$key" ]; then
+    echo "ERROR: env var name required (e.g. GITHUB_TOKEN)" >&2; return 1
+  fi
+
+  local env_file="$pdir/.env"
+  if [ -f "$env_file" ]; then
+    local tmp_env
+    tmp_env=$(mktemp)
+    LC_ALL=C grep -v "^${key}=" "$env_file" > "$tmp_env" || true
+    chmod 600 "$tmp_env"
+    mv "$tmp_env" "$env_file"
+  fi
+
+  local pjson="$pdir/profile.json"
+  local tmp_json
+  tmp_json=$(mktemp)
+  jq --arg k "$key" '.secrets = ((.secrets // []) | map(select(.env_var != $k)))' \
+    "$pjson" > "$tmp_json"
+  mv "$tmp_json" "$pjson"
+
+  echo "Secret '$key' removed from profile."
+}
+
 # Use docker compose project-scoped cleanup instead of hardcoded names
 cleanup_containers() {
   docker compose down --remove-orphans 2>/dev/null || true
@@ -2300,7 +2455,7 @@ else
   #     its own error. Superuser merge is not valid for spawn.
   #   - status: reads docker ps only; no workspace config needed.
   case "$FIRST_ARG" in
-    list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs|webhook-listener|start|stop|remove|logs)
+    list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs|webhook-listener|start|stop|remove|logs|profile)
       : # skip superuser load
       ;;
     *)
@@ -2471,6 +2626,9 @@ case "$CMD" in
         ;;
     esac
     ;;
+  profile)
+    cmd_profile "${REMAINING_ARGS[@]:1}"
+    ;;
   help|--help|-h)
     echo "Usage: claude-secure <command> [args] [log flags]"
     echo ""
@@ -2486,6 +2644,11 @@ case "$CMD" in
     echo "  remove <name>      Remove profile config and stop containers"
     echo "  logs <name>        Tail log files [hook|anthropic|iptables|clear]"
     echo "  list               List all profiles and their status"
+    echo ""
+    echo "Profile config:"
+    echo "  profile <name> secret list"
+    echo "  profile <name> secret add <KEY> [<value>] [--redacted <TOKEN>] [--domains d1,d2]"
+    echo "  profile <name> secret remove <KEY>"
     echo ""
     echo "System commands:"
     echo "  update             Pull latest claude-secure, update CLI, rebuild all images"
