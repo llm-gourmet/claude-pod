@@ -272,23 +272,27 @@ test_resolve_report_template_from_docs_dir() {
   local home_dir="$TEST_TMPDIR/home"
   local docs_reports="$home_dir/.claude-secure/docs/test-profile/report-templates"
   mkdir -p "$docs_reports"
-  local marker="DOCS_REPORT_$(uuidgen | tr -d -)"
+  local marker; marker="DOCS_REPORT_$(uuidgen | tr -d '-')"
   printf '%s\n' "$marker content" > "$docs_reports/push.md"
 
-  local result rc
-  result=$(
+  local out_file="$TEST_TMPDIR/resolve16_result.txt"
+  local rc=0
+  (
+    set +e
     export __CLAUDE_SECURE_SOURCE_ONLY=1
     export CONFIG_DIR="$home_dir/.claude-secure"
     export HOME="$home_dir"
     export PROFILE="test-profile"
     # shellcheck disable=SC1090
-    source "$PROJECT_DIR/bin/claude-secure" 2>&1
+    source "$PROJECT_DIR/bin/claude-secure" >/dev/null 2>&1
     unset __CLAUDE_SECURE_SOURCE_ONLY
-    resolve_report_template "push"
+    resolve_report_template "push" > "$out_file"
+    exit $?
   )
   rc=$?
 
-  rm -rf "$docs_reports"
+  local result; result=$(cat "$out_file" 2>/dev/null || true)
+  rm -rf "$docs_reports" "$out_file"
   [ $rc -eq 0 ] || return 1
   [ -f "$result" ] || return 1
   grep -q "$marker" "$result" || return 1
