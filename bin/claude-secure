@@ -2587,25 +2587,26 @@ case "$CMD" in
         echo "Run manually: sudo cp $CLI_SOURCE $CLI_INSTALLED"
       fi
     fi
-    echo "Rebuilding shared images (proxy, validator)..."
-    docker compose -f "$APP_DIR/docker-compose.yml" build proxy validator
-    echo "Rebuilding profile images..."
+    echo "Rebuilding images for all profiles..."
     shopt -s nullglob
     _update_count=0
     for _pdir in "$CONFIG_DIR/profiles"/*/; do
       _pname=$(basename "$_pdir")
       echo "  [$_pname] rebuilding..."
       COMPOSE_PROJECT_NAME="claude-$_pname" \
-        docker compose -f "$APP_DIR/docker-compose.yml" build claude
+        docker compose -f "$APP_DIR/docker-compose.yml" build claude proxy validator
       _update_count=$((_update_count + 1))
     done
     shopt -u nullglob
+    echo "  [superuser] rebuilding..."
+    COMPOSE_PROJECT_NAME="claude-superuser" \
+      docker compose -f "$APP_DIR/docker-compose.yml" build claude proxy validator
     if [ "$_update_count" -eq 0 ]; then
-      echo "  No profiles found; rebuilding default image..."
-      docker compose -f "$APP_DIR/docker-compose.yml" build claude
+      echo "  [default] rebuilding..."
+      docker compose -f "$APP_DIR/docker-compose.yml" build claude proxy validator
     fi
     echo ""
-    echo "Update complete. Shared images + ${_update_count} profile image(s) rebuilt."
+    echo "Update complete. ${_update_count} profile(s) + superuser rebuilt."
     exit 0
     ;;
   upgrade)
