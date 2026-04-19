@@ -2587,7 +2587,9 @@ case "$CMD" in
         echo "Run manually: sudo cp $CLI_SOURCE $CLI_INSTALLED"
       fi
     fi
-    echo "Rebuilding images for all profiles..."
+    echo "Rebuilding shared images (proxy, validator)..."
+    docker compose -f "$APP_DIR/docker-compose.yml" build proxy validator
+    echo "Rebuilding profile images..."
     shopt -s nullglob
     _update_count=0
     for _pdir in "$CONFIG_DIR/profiles"/*/; do
@@ -2603,7 +2605,7 @@ case "$CMD" in
       docker compose -f "$APP_DIR/docker-compose.yml" build claude
     fi
     echo ""
-    echo "Update complete. ${_update_count} profile image(s) rebuilt."
+    echo "Update complete. Shared images + ${_update_count} profile image(s) rebuilt."
     exit 0
     ;;
   upgrade)
