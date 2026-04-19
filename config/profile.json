@@ -1,5 +1,5 @@
 {
-  "workspace": "/tmp/claude-secure-test-ws-25-ctx",
+  "workspace": "/workspace",
   "secrets": [
     {
       "env_var": "GITHUB_TOKEN",

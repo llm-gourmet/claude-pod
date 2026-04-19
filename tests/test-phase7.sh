@@ -134,12 +134,12 @@ report "ENV-03" "Claude container has secret env vars for tooling" $?
 result=$(docker compose exec -T proxy printenv GITHUB_TOKEN 2>/dev/null)
 test "$result" = "ghp_test_token_for_phase7"
 has_token=$?
-# Verify proxy can read whitelist (redaction config)
-wl_check=$(docker compose exec -T proxy cat /etc/claude-secure/whitelist.json 2>/dev/null | jq -r '.secrets[0].env_var')
+# Verify proxy can read profile (redaction config)
+wl_check=$(docker compose exec -T proxy cat /etc/claude-secure/profile.json 2>/dev/null | jq -r '.secrets[0].env_var')
 test "$wl_check" = "GITHUB_TOKEN"
 has_whitelist=$?
 test "$has_token" -eq 0 -a "$has_whitelist" -eq 0
-report "ENV-04" "Proxy has secrets and whitelist for redaction" $?
+report "ENV-04" "Proxy has secrets and profile for redaction" $?
 
 # =========================================================================
 # ENV-05: System works with minimal .env (auth only, no secrets)

@@ -67,7 +67,7 @@ report "DOCK-03" "Docker Compose runs all 3 containers" $?
 
 # DOCK-04: Outbound connections blocked from claude (iptables OUTPUT DROP)
 # DNS may resolve via Docker embedded DNS but actual connections are blocked by iptables.
-# NOTE: Must use a domain NOT in the whitelist's readonly_domains or allowed_domains,
+# NOTE: Must use a domain NOT in the profile's secrets[].domains,
 # because the claude container has HTTP_PROXY set which routes through the proxy's
 # CONNECT handler that allows whitelisted domains.
 ! docker compose exec -T claude curl -sf --max-time 5 https://blocked-test.example.com > /dev/null 2>&1
@@ -75,11 +75,11 @@ report "DOCK-04" "Outbound connections from claude container are blocked" $?
 
 # DOCK-05: Security files root-owned and read-only
 # Hooks and settings are COPY'd in Dockerfile and genuinely root-owned.
-# Whitelist is bind-mounted (:ro flag enforces read-only at mount level; host UID visible inside).
+# Profile is bind-mounted (:ro flag enforces read-only at mount level; host UID visible inside).
 DOCK05_RESULT=0
 docker compose exec -T claude stat -c '%U %a' /etc/claude-secure/hooks/pre-tool-use.sh 2>/dev/null | grep -q 'root 555' || DOCK05_RESULT=1
 docker compose exec -T claude stat -c '%U %a' /etc/claude-secure/settings.json 2>/dev/null | grep -q 'root 444' || DOCK05_RESULT=1
-docker inspect $(docker compose ps -q claude) --format '{{json .Mounts}}' 2>/dev/null | jq '.[] | select(.Destination=="/etc/claude-secure/whitelist.json") | .RW' 2>/dev/null | grep -q 'false' || DOCK05_RESULT=1
+docker inspect $(docker compose ps -q claude) --format '{{json .Mounts}}' 2>/dev/null | jq '.[] | select(.Destination=="/etc/claude-secure/profile.json") | .RW' 2>/dev/null | grep -q 'false' || DOCK05_RESULT=1
 report "DOCK-05" "Security files are root-owned and read-only" $DOCK05_RESULT
 
 # DOCK-05b: Settings.json accessible via symlink (not shadowed by volume)
@@ -93,17 +93,17 @@ docker inspect $(docker compose ps -q claude) --format '{{.HostConfig.CapDrop}}'
 docker inspect $(docker compose ps -q claude) --format '{{.HostConfig.SecurityOpt}}' 2>/dev/null | grep -q no-new-privileges || DOCK06_RESULT=1
 report "DOCK-06" "Claude container caps dropped, no-new-privileges set" $DOCK06_RESULT
 
-# WHIT-01: Whitelist has secrets with correct schema
-jq -e '.secrets[0] | has("placeholder","env_var","allowed_domains")' config/whitelist.json > /dev/null 2>&1
-report "WHIT-01" "Whitelist maps placeholders to env vars and domains" $?
+# WHIT-01: Profile has secrets with correct schema
+jq -e '.secrets[0] | has("redacted","env_var","domains")' config/profile.json > /dev/null 2>&1
+report "WHIT-01" "Profile secrets have env_var, redacted, and domains fields" $?
 
-# WHIT-02: Whitelist has readonly_domains
-jq -e 'has("readonly_domains")' config/whitelist.json > /dev/null 2>&1
-report "WHIT-02" "Whitelist has readonly_domains section" $?
+# WHIT-02: Profile has workspace field
+jq -e 'has("workspace")' config/profile.json > /dev/null 2>&1
+report "WHIT-02" "Profile has workspace field" $?
 
-# WHIT-03: Whitelist is not writable inside container
-docker compose exec -T claude test ! -w /etc/claude-secure/whitelist.json > /dev/null 2>&1
-report "WHIT-03" "Whitelist is read-only inside claude container" $?
+# WHIT-03: Profile is not writable inside container
+docker compose exec -T claude test ! -w /etc/claude-secure/profile.json > /dev/null 2>&1
+report "WHIT-03" "Profile is read-only inside claude container" $?
 
 echo ""
 echo "========================================"

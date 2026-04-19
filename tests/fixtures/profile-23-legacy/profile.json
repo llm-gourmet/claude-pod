@@ -1,7 +1,4 @@
 {
   "workspace": "/tmp/claude-secure-test-ws-23-legacy",
-  "repo": "owner/legacy-test",
-  "report_repo": "https://github.com/owner/legacy-test.git",
-  "report_branch": "main",
-  "report_path_prefix": "reports"
+  "secrets": []
 }

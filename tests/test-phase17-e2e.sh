@@ -153,11 +153,9 @@ setup_e2e_profile() {
   # Copy the fixture tree into the profile location the loader expects.
   cp -r "$PROJECT_DIR/tests/fixtures/profile-e2e" "$CONFIG_DIR/profiles/e2e"
 
-  # Runtime-inject the bare repo file:// URL into profile.json .report_repo,
-  # and add the .workspace field (required by load_profile_config) pointing
-  # at a throwaway dir. jq tempfile pattern used per fixture.
+  # Runtime-inject a real workspace path (required by load_profile_config).
   local profile_json="$CONFIG_DIR/profiles/e2e/profile.json"
-  jq --arg url "$bare" --arg ws "$TEST_TMPDIR/workspace-e2e" '.report_repo = $url | .workspace = $ws' "$profile_json" > "$profile_json.new"
+  jq --arg ws "$TEST_TMPDIR/workspace-e2e" '.workspace = $ws' "$profile_json" > "$profile_json.new"
   mv "$profile_json.new" "$profile_json"
 
   # Pitfall 13 guardrail: verify the fixture .env does NOT carry a ghp_ prefix.
@@ -165,9 +163,6 @@ setup_e2e_profile() {
     echo "FAIL setup: fixture .env has ghp_ prefix (Pitfall 13 violation)" >&2
     return 1
   fi
-
-  # Minimal whitelist so any accidental validate_profile call doesn't break.
-  echo '{}' > "$CONFIG_DIR/profiles/e2e/whitelist.json"
 
   # Connections registry required by the refactored listener (D-23). Maps
   # the e2e/test repo to the 'e2e' profile using the same secret that

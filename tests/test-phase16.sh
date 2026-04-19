@@ -359,8 +359,6 @@ run_spawn_integration() {
     : > "$profile_dir/.env"
   fi
 
-  # Stub whitelist so validate_profile path (not taken, but defensive) works.
-  printf '{"domains":["api.anthropic.com"]}\n' > "$profile_dir/whitelist.json"
 
   local fake_stdout_file="$tdir/fake-claude.json"
   printf '%s\n' "$fake_stdout_json" > "$fake_stdout_file"
@@ -493,7 +491,6 @@ test_audit_spawn_error() {
   jq -n '{name:"test-profile", repo:"test-org/test-repo", webhook_secret:"s", workspace:"'"$TEST_TMPDIR/$tid/ws"'", report_repo:"", report_branch:"main", report_path_prefix:"reports"}' \
     > "$profile_dir/profile.json"
   : > "$profile_dir/.env"
-  printf '{"domains":[]}\n' > "$profile_dir/whitelist.json"
 
   (
     set +e
@@ -587,7 +584,6 @@ test_audit_concurrent_safe() {
   jq -n '{name:"test-profile", repo:"test-org/test-repo", webhook_secret:"s", workspace:"/tmp", report_repo:"", report_branch:"main", report_path_prefix:"reports"}' \
     > "$profile_dir/profile.json"
   : > "$profile_dir/.env"
-  printf '{"domains":[]}\n' > "$profile_dir/whitelist.json"
 
   (
     set +e
@@ -632,7 +628,6 @@ test_audit_replay_identical() {
     > "$profile_dir/profile.json"
   mkdir -p "$TEST_TMPDIR/$tid/ws"
   : > "$profile_dir/.env"
-  printf '{"domains":[]}\n' > "$profile_dir/whitelist.json"
 
   local fake_stdout_file="$TEST_TMPDIR/$tid/fake.json"
   jq -c '.claude' "$PROJECT_DIR/tests/fixtures/envelope-success.json" > "$fake_stdout_file"

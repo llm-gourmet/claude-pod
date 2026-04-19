@@ -22,10 +22,10 @@ TEST_MAP="$REPO_ROOT/tests/test-map.json"
 TEST_DIR="$REPO_ROOT/tests"
 TEST_ENV="$REPO_ROOT/tests/test.env"
 RESULTS_FILE=$(mktemp)
-TEST_WHITELIST=$(mktemp)
-cp "$REPO_ROOT/config/whitelist.json" "$TEST_WHITELIST"
-chmod 666 "$TEST_WHITELIST"
-trap 'rm -f "$RESULTS_FILE" "$TEST_WHITELIST"' EXIT
+TEST_PROFILE=$(mktemp)
+cp "$REPO_ROOT/config/profile.json" "$TEST_PROFILE"
+chmod 666 "$TEST_PROFILE"
+trap 'rm -f "$RESULTS_FILE" "$TEST_PROFILE"' EXIT
 
 # --- Dependency checks ---
 
@@ -196,7 +196,7 @@ fi
 export COMPOSE_PROJECT_NAME="claude-test"
 export COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
 export SECRETS_FILE="$TEST_ENV"
-export WHITELIST_PATH="$TEST_WHITELIST"
+export PROFILE_PATH="$TEST_PROFILE"
 export WORKSPACE_PATH="${TMPDIR:-/tmp}/claude-test-workspace"
 export LOG_DIR="${TMPDIR:-/tmp}/claude-test-logs"
 export LOG_HOOK=0

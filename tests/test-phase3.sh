@@ -80,7 +80,7 @@ services:
       - GITHUB_TOKEN=ghp_test_secret_value_12345
       - STRIPE_KEY=sk_test_stripe_secret_67890
       - OPENAI_API_KEY=sk-test-openai-secret-abcde
-      - WHITELIST_PATH=/tmp/whitelist-test.json
+      - PROFILE_PATH=/tmp/profile-test.json
   claude:
     environment:
       - ANTHROPIC_BASE_URL=http://proxy:8080
@@ -112,8 +112,17 @@ if [ "$READY" != "true" ]; then
   exit 1
 fi
 
-# Copy whitelist to writable location inside proxy (WHITELIST_PATH=/tmp/whitelist-test.json)
-docker compose exec -T proxy cp /etc/claude-secure/whitelist.json /tmp/whitelist-test.json
+# Write test profile with all 3 secrets to writable location (PROFILE_PATH=/tmp/profile-test.json)
+docker compose exec -T proxy sh -c 'cat > /tmp/profile-test.json' <<'PROFILE'
+{
+  "workspace": "/workspace",
+  "secrets": [
+    {"env_var": "GITHUB_TOKEN",    "redacted": "REDACTED_GITHUB", "domains": ["github.com"]},
+    {"env_var": "STRIPE_KEY",      "redacted": "REDACTED_STRIPE", "domains": ["stripe.com"]},
+    {"env_var": "OPENAI_API_KEY",  "redacted": "REDACTED_OPENAI", "domains": ["api.openai.com"]}
+  ]
+}
+PROFILE
 
 # Start mock upstream inside proxy container
 echo "Starting mock upstream server..."
@@ -130,7 +139,7 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({
       id: "msg_test",
       type: "message",
-      content: [{type: "text", text: "Your token is PLACEHOLDER_GITHUB and key is PLACEHOLDER_STRIPE and oai is PLACEHOLDER_OPENAI"}]
+      content: [{type: "text", text: "Your token is REDACTED_GITHUB and key is REDACTED_STRIPE and oai is REDACTED_OPENAI"}]
     }));
   });
 });
@@ -186,8 +195,8 @@ UPSTREAM_LOG=$(docker compose exec -T proxy cat /tmp/upstream-requests.log 2>/de
 
 # Check that placeholders appear and real secrets do not
 SECR02_OK=1
-if echo "$UPSTREAM_LOG" | grep -q 'PLACEHOLDER_GITHUB' && \
-   echo "$UPSTREAM_LOG" | grep -q 'PLACEHOLDER_STRIPE' && \
+if echo "$UPSTREAM_LOG" | grep -q 'REDACTED_GITHUB' && \
+   echo "$UPSTREAM_LOG" | grep -q 'REDACTED_STRIPE' && \
    ! echo "$UPSTREAM_LOG" | grep -q 'ghp_test_secret_value_12345' && \
    ! echo "$UPSTREAM_LOG" | grep -q 'sk_test_stripe_secret_67890'; then
   SECR02_OK=0
@@ -207,9 +216,9 @@ sleep 1
 UPSTREAM_LOG2=$(docker compose exec -T proxy cat /tmp/upstream-requests.log 2>/dev/null)
 
 SECR02B_OK=1
-if echo "$UPSTREAM_LOG2" | grep -q 'PLACEHOLDER_GITHUB' && \
-   echo "$UPSTREAM_LOG2" | grep -q 'PLACEHOLDER_STRIPE' && \
-   echo "$UPSTREAM_LOG2" | grep -q 'PLACEHOLDER_OPENAI' && \
+if echo "$UPSTREAM_LOG2" | grep -q 'REDACTED_GITHUB' && \
+   echo "$UPSTREAM_LOG2" | grep -q 'REDACTED_STRIPE' && \
+   echo "$UPSTREAM_LOG2" | grep -q 'REDACTED_OPENAI' && \
    ! echo "$UPSTREAM_LOG2" | grep -q 'ghp_test_secret_value_12345' && \
    ! echo "$UPSTREAM_LOG2" | grep -q 'sk_test_stripe_secret_67890' && \
    ! echo "$UPSTREAM_LOG2" | grep -q 'sk-test-openai-secret-abcde'; then
@@ -230,27 +239,27 @@ SECR03_OK=1
 if echo "$RESPONSE_BODY" | grep -q 'ghp_test_secret_value_12345' && \
    echo "$RESPONSE_BODY" | grep -q 'sk_test_stripe_secret_67890' && \
    echo "$RESPONSE_BODY" | grep -q 'sk-test-openai-secret-abcde' && \
-   ! echo "$RESPONSE_BODY" | grep -q 'PLACEHOLDER_GITHUB' && \
-   ! echo "$RESPONSE_BODY" | grep -q 'PLACEHOLDER_STRIPE' && \
-   ! echo "$RESPONSE_BODY" | grep -q 'PLACEHOLDER_OPENAI'; then
+   ! echo "$RESPONSE_BODY" | grep -q 'REDACTED_GITHUB' && \
+   ! echo "$RESPONSE_BODY" | grep -q 'REDACTED_STRIPE' && \
+   ! echo "$RESPONSE_BODY" | grep -q 'REDACTED_OPENAI'; then
   SECR03_OK=0
 fi
 report "SECR-03" "Placeholders restored to real values in responses" $SECR03_OK
 
 # =========================================================================
-# SECR-04: Config hot-reload (whitelist changes without restart)
+# SECR-04: Config hot-reload (profile changes without restart)
 # =========================================================================
 # Baseline: secrets are being redacted (already proven by SECR-02)
-# Now remove the GITHUB entry from whitelist inside the proxy container.
-# The override sets WHITELIST_PATH=/tmp/whitelist-test.json (a container-local
+# Now remove the GITHUB entry from profile inside the proxy container.
+# The override sets PROFILE_PATH=/tmp/profile-test.json (a container-local
 # copy created at startup). Proxy re-reads on each request.
 
 # Save original inside container
-docker compose exec -T proxy cp /tmp/whitelist-test.json /tmp/whitelist-test.json.bak 2>/dev/null
+docker compose exec -T proxy cp /tmp/profile-test.json /tmp/profile-test.json.bak 2>/dev/null
 
 # Remove GITHUB entry inside container (proxy re-reads on each request)
 docker compose exec -T proxy sh -c \
-  "node -e \"const d=JSON.parse(require('fs').readFileSync('/tmp/whitelist-test.json','utf8')); d.secrets=d.secrets.filter(s=>s.env_var!=='GITHUB_TOKEN'); require('fs').writeFileSync('/tmp/whitelist-test.json',JSON.stringify(d,null,2))\""
+  "node -e \"const d=JSON.parse(require('fs').readFileSync('/tmp/profile-test.json','utf8')); d.secrets=d.secrets.filter(s=>s.env_var!=='GITHUB_TOKEN'); require('fs').writeFileSync('/tmp/profile-test.json',JSON.stringify(d,null,2))\""
 
 # Clear upstream log
 docker compose exec -T proxy truncate -s 0 /tmp/upstream-requests.log 2>/dev/null
@@ -267,16 +276,16 @@ UPSTREAM_LOG3=$(docker compose exec -T proxy cat /tmp/upstream-requests.log 2>/d
 SECR04_OK=1
 # After removing entry, the real value should pass through unredacted
 if echo "$UPSTREAM_LOG3" | grep -q 'ghp_test_secret_value_12345' && \
-   ! echo "$UPSTREAM_LOG3" | grep -q 'PLACEHOLDER_GITHUB'; then
+   ! echo "$UPSTREAM_LOG3" | grep -q 'REDACTED_GITHUB'; then
   SECR04_OK=0
 fi
 report "SECR-04" "Config hot-reload: removed secret no longer redacted" $SECR04_OK
 
-# Restore original whitelist inside container
+# Restore original profile inside container
 docker compose exec -T proxy sh -c \
-  "cp /tmp/whitelist-test.json.bak /tmp/whitelist-test.json" 2>/dev/null || \
+  "cp /tmp/profile-test.json.bak /tmp/profile-test.json" 2>/dev/null || \
   docker compose exec -T proxy sh -c \
-  "cat /tmp/whitelist-test.json.bak > /tmp/whitelist-test.json" 2>/dev/null
+  "cat /tmp/profile-test.json.bak > /tmp/profile-test.json" 2>/dev/null
 
 # =========================================================================
 # SECR-04b: Config hot-reload -- re-added secret is redacted again
@@ -294,7 +303,7 @@ sleep 1
 UPSTREAM_LOG4=$(docker compose exec -T proxy cat /tmp/upstream-requests.log 2>/dev/null)
 
 SECR04B_OK=1
-if echo "$UPSTREAM_LOG4" | grep -q 'PLACEHOLDER_GITHUB' && \
+if echo "$UPSTREAM_LOG4" | grep -q 'REDACTED_GITHUB' && \
    ! echo "$UPSTREAM_LOG4" | grep -q 'ghp_test_secret_value_12345'; then
   SECR04B_OK=0
 fi

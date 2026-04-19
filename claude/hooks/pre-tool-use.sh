@@ -1,11 +1,11 @@
 #!/bin/bash
 # pre-tool-use.sh -- PreToolUse hook for claude-secure call validation
-# Intercepts Bash/WebFetch/WebSearch tool calls, checks domain whitelist,
-# registers call-IDs with validator for allowed payload calls.
+# Intercepts Bash/WebFetch/WebSearch tool calls, checks domain against
+# secrets[].domains in profile.json, registers call-IDs for payload calls.
 set -euo pipefail
 
 # Constants
-WHITELIST="/etc/claude-secure/whitelist.json"
+PROFILE="/etc/claude-secure/profile.json"
 VALIDATOR_URL="http://127.0.0.1:8088"
 LOG_FILE="/var/log/claude-secure/${LOG_PREFIX:-}hook.log"
 
@@ -132,18 +132,7 @@ domain_matches() {
 domain_in_whitelist() {
   local domain="$1"
   local entries
-  entries=$(jq -r '.secrets[].allowed_domains[]' "$WHITELIST" 2>/dev/null)
-  while IFS= read -r entry; do
-    [ -z "$entry" ] && continue
-    domain_matches "$domain" "$entry" && return 0
-  done <<< "$entries"
-  return 1
-}
-
-domain_in_readonly() {
-  local domain="$1"
-  local entries
-  entries=$(jq -r '.readonly_domains[]' "$WHITELIST" 2>/dev/null)
+  entries=$(jq -r '.secrets[].domains[]' "$PROFILE" 2>/dev/null)
   while IFS= read -r entry; do
     [ -z "$entry" ] && continue
     domain_matches "$domain" "$entry" && return 0

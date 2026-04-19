@@ -357,7 +357,7 @@ setup_auth() {
         printf '%s=%s\n' "$extra_name" "$extra_value"
       fi
       printf '\n'
-      printf '# Add secrets below (must match env_var in whitelist.json)\n'
+      printf '# Add secrets below (must match env_var in profile.json secrets[])\n'
       printf '# Example: GITHUB_TOKEN=ghp_your_token_here\n'
     } > "$env_file"
     chmod 600 "$env_file"
@@ -437,7 +437,7 @@ CONF
 
   # Write profile config (workspace is per-profile)
   mkdir -p "$CONFIG_DIR/profiles/default"
-  jq -n --arg ws "$ws_path" '{"workspace": $ws, "github_token": ""}' > "$CONFIG_DIR/profiles/default/profile.json"
+  jq -n --arg ws "$ws_path" '{"workspace": $ws, "secrets": []}' > "$CONFIG_DIR/profiles/default/profile.json"
 
   log_info "Workspace: $ws_path"
 }
@@ -459,9 +459,6 @@ copy_app_files() {
   # Append APP_DIR to config.sh
   echo "APP_DIR=\"$app_dir\"" >> "$CONFIG_DIR/config.sh"
 
-  # Copy whitelist template to default profile
-  cp "$app_dir/config/whitelist.json" "$CONFIG_DIR/profiles/default/whitelist.json"
-  log_info "Copied whitelist template to default profile"
 }
 
 build_images() {

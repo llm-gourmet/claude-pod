@@ -117,14 +117,19 @@ validate_profile() {
     echo "ERROR: Profile '$name' is missing .env (auth credentials required)" >&2
     return 1
   fi
-  if [ ! -f "$pdir/whitelist.json" ]; then
-    echo "ERROR: Profile '$name' is missing whitelist.json" >&2
-    return 1
-  fi
-  if ! jq empty "$pdir/whitelist.json" 2>/dev/null; then
-    echo "ERROR: Profile '$name' has invalid whitelist.json (not valid JSON)" >&2
-    return 1
-  fi
+  local i secret
+  i=0
+  for secret in $(jq -c '.secrets // [] | .[]' "$pdir/profile.json" 2>/dev/null); do
+    local env_var redacted domains
+    env_var=$(echo "$secret" | jq -r '.env_var // empty')
+    redacted=$(echo "$secret" | jq -r '.redacted // empty')
+    domains=$(echo "$secret" | jq -r '.domains // empty | length')
+    if [ -z "$env_var" ] || [ -z "$redacted" ] || [ "$domains" = "0" ] || [ "$domains" = "null" ]; then
+      echo "ERROR: Profile '$name' secrets[$i] is missing env_var, redacted, or domains" >&2
+      return 1
+    fi
+    i=$((i + 1))
+  done
 }
 
 # Host-only secret projection: variables listed here are stripped from the
@@ -190,23 +195,8 @@ create_profile() {
   ws_path="$(realpath -m "$ws_path")"
   mkdir -p "$ws_path"
 
-  # Repo prompt (optional — enables webhook routing via resolve_profile_by_repo). Added for PROF-02.
-  read -rp "GitHub repository for webhook routing (owner/repo) [skip]: " repo
-  repo="${repo:-}"
-  if [ -n "$repo" ] && ! [[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
-    echo "Warning: '$repo' does not look like owner/repo format — saved anyway." >&2
-  fi
-
   # Build profile.json
-  if [ -n "$repo" ]; then
-    jq -n --arg ws "$ws_path" --arg repo "$repo" \
-      '{"workspace": $ws, "repo": $repo}' > "$tmpdir/profile.json"
-  else
-    jq -n --arg ws "$ws_path" '{"workspace": $ws}' > "$tmpdir/profile.json"
-  fi
-
-  # Copy whitelist template
-  cp "$APP_DIR/config/whitelist.json" "$tmpdir/whitelist.json"
+  jq -n --arg ws "$ws_path" '{"workspace": $ws, "secrets": []}' > "$tmpdir/profile.json"
 
   # Auth setup
   local existing_env=""
@@ -283,7 +273,7 @@ setup_profile_auth() {
       printf 'REAL_ANTHROPIC_BASE_URL=%s\n' "$base_url"
     fi
     printf '\n'
-    printf '# Add secrets below (must match env_var in whitelist.json)\n'
+    printf '# Add secrets below (must match env_var in profile.json secrets[])\n'
     printf '# Example: GITHUB_TOKEN=ghp_your_token_here\n'
   } > "$dir/.env"
   chmod 600 "$dir/.env"
@@ -307,16 +297,14 @@ resolve_profile_by_repo() {
   return 1
 }
 
-merge_whitelists() {
-  local merged='{"secrets":[],"readonly_domains":[]}'
+merge_profiles() {
+  local merged='{"workspace":"/workspace","secrets":[]}'
   shopt -s nullglob
   for pdir in "$CONFIG_DIR/profiles"/*/; do
-    [ -f "$pdir/whitelist.json" ] || continue
-    merged=$(echo "$merged" | jq --slurpfile wl "$pdir/whitelist.json" '
-      .secrets += $wl[0].secrets
-      | .readonly_domains += ($wl[0].readonly_domains // [])
+    [ -f "$pdir/profile.json" ] || continue
+    merged=$(echo "$merged" | jq --slurpfile p "$pdir/profile.json" '
+      .secrets += ($p[0].secrets // [])
       | .secrets |= unique_by(.env_var)
-      | .readonly_domains |= unique
     ')
   done
   shopt -u nullglob
@@ -354,7 +342,7 @@ load_profile_config() {
   fi
   CLAUDE_SECURE_SYSTEM_PROMPT=$(jq -r '.system_prompt // empty' "$pdir/profile.json" 2>/dev/null || true)
   export CLAUDE_SECURE_SYSTEM_PROMPT
-  export WHITELIST_PATH="$pdir/whitelist.json"
+  export PROFILE_PATH="$pdir/profile.json"
   export LOG_DIR="$CONFIG_DIR/logs"
   export LOG_PREFIX="${name}-"
 
@@ -386,10 +374,10 @@ load_superuser_config() {
     echo "DEFAULT_WORKSPACE=\"$default_ws\"" >> "$CONFIG_DIR/config.sh"
   fi
 
-  # Merge whitelists to temp file
+  # Merge profile secrets to temp file
   local merged_wl
   merged_wl=$(mktemp)
-  merge_whitelists > "$merged_wl"
+  merge_profiles > "$merged_wl"
   _CLEANUP_FILES+=("$merged_wl")
 
   # Merge env files
@@ -401,7 +389,7 @@ load_superuser_config() {
   export COMPOSE_FILE="$APP_DIR/docker-compose.yml"
   export WORKSPACE_PATH="$default_ws"
   export SECRETS_FILE="$merged_env"
-  export WHITELIST_PATH="$merged_wl"
+  export PROFILE_PATH="$merged_wl"
   export LOG_DIR="$CONFIG_DIR/logs"
   export LOG_PREFIX="superuser-"
 
@@ -415,8 +403,8 @@ load_superuser_config() {
 }
 
 list_profiles() {
-  printf "%-20s %-35s %-10s %s\n" "PROFILE" "REPO" "STATUS" "WORKSPACE"
-  printf "%-20s %-35s %-10s %s\n" "-------" "----" "------" "---------"
+  printf "%-20s %-10s %-5s %s\n" "PROFILE" "STATUS" "KEYS" "WORKSPACE"
+  printf "%-20s %-10s %-5s %s\n" "-------" "------" "----" "---------"
 
   if [ ! -d "$CONFIG_DIR/profiles" ]; then
     echo "No profiles configured."
@@ -427,18 +415,17 @@ list_profiles() {
   local found=0
   for pdir in "$CONFIG_DIR/profiles"/*/; do
     found=1
-    local name repo ws status project
+    local name ws status project keys
     name=$(basename "$pdir")
-    repo=$(jq -r '.repo // "-"' "$pdir/profile.json" 2>/dev/null || echo "-")
     ws=$(jq -r '.workspace // "-"' "$pdir/profile.json" 2>/dev/null || echo "-")
+    keys=$(jq -r '(.secrets // []) | length' "$pdir/profile.json" 2>/dev/null || echo "0")
     project="claude-${name}"
-    # Check running status
     if docker compose ls --format json 2>/dev/null | jq -e ".[] | select(.Name == \"$project\")" >/dev/null 2>&1; then
       status="running"
     else
       status="stopped"
     fi
-    printf "%-20s %-35s %-10s %s\n" "$name" "$repo" "$status" "$ws"
+    printf "%-20s %-10s %-5s %s\n" "$name" "$status" "$keys" "$ws"
   done
   shopt -u nullglob
 
@@ -1283,9 +1270,6 @@ do_spawn() {
   # Set cleanup trap (per D-07) - overrides the default cleanup trap
   trap spawn_cleanup EXIT
 
-  # Read max_turns from profile.json (per D-08)
-  MAX_TURNS=$(jq -r '.max_turns // empty' "$CONFIG_DIR/profiles/$PROFILE/profile.json")
-
   # Extract event_type from event JSON for envelope
   local event_type
   # D-03: Priority: top-level .event_type (Phase 15) > ._meta.event_type (Phase 14) > .action (older)
@@ -1350,9 +1334,6 @@ do_spawn() {
   # Until empirical testing confirms hooks survive --bare, we do NOT use it.
   # The small startup time cost is acceptable vs risking security bypass.
   local claude_args=("$rendered_prompt" "--output-format" "json" "--dangerously-skip-permissions")
-  if [ -n "${MAX_TURNS:-}" ]; then
-    claude_args+=("--max-turns" "$MAX_TURNS")
-  fi
   if [ -n "${CLAUDE_SECURE_SYSTEM_PROMPT:-}" ]; then
     claude_args+=("--system-prompt" "$CLAUDE_SECURE_SYSTEM_PROMPT")
   fi
@@ -2257,7 +2238,7 @@ if [ -n "$PROFILE" ]; then
   if [ -d "$PROFILE_DIR" ]; then
     # Existing profile: validate before use, except for commands that do
     # their own lifecycle (spawn/replay read profile.json directly and do
-    # not need .env/whitelist.json until they actually boot docker).
+    # not need .env/profile.json until they actually boot docker).
     case "$FIRST_ARG" in
       remove|spawn|replay)
         : # skip full validation
@@ -2284,7 +2265,7 @@ else
   #     spawn, so skipping superuser load here avoids the interactive prompt.
   #   - reap: Phase 17 background/timer-driven, must never prompt. Uses
   #     LOG_DIR/CONFIG_DIR defaults and walks docker ps directly; no profile
-  #     config or whitelist merge is required. load_superuser_config would
+  #     config or profile merge is required. load_superuser_config would
   #     `read -rp` for DEFAULT_WORKSPACE when config.sh is absent and block
   #     forever in a non-interactive service context.
   #   - spawn: requires --profile; if called without one do_spawn will print

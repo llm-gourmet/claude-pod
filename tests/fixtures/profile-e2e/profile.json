@@ -1,9 +1,4 @@
 {
-  "repo": "e2e/test",
-  "webhook_secret": "e2e-test-secret",
-  "event_filter": ["issues.opened"],
-  "max_turns": 3,
-  "report_repo": "",
-  "report_branch": "main",
-  "report_path_prefix": "reports"
+  "workspace": "/tmp/claude-secure-test-ws-e2e",
+  "secrets": []
 }

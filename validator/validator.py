@@ -22,7 +22,7 @@ from urllib.parse import urlparse, parse_qs
 DB_PATH = os.environ.get("VALIDATOR_DB_PATH", "/data/validator.db")
 CALL_TTL_SECONDS = 10
 LISTEN_PORT = 8088
-WHITELIST_PATH = "/etc/claude-secure/whitelist.json"
+PROFILE_PATH = "/etc/claude-secure/profile.json"
 CLEANUP_INTERVAL_SECONDS = 5
 
 logger = logging.getLogger("validator")

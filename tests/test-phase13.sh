@@ -79,21 +79,13 @@ create_test_profile() {
   mkdir -p "$config_dir/profiles/$name"
   mkdir -p "$ws_path"
 
-  # Build profile.json
-  if [ -n "$repo" ]; then
-    jq -n --arg ws "$ws_path" --arg repo "$repo" '{"workspace": $ws, "repo": $repo}' \
-      > "$config_dir/profiles/$name/profile.json"
-  else
-    jq -n --arg ws "$ws_path" '{"workspace": $ws}' \
-      > "$config_dir/profiles/$name/profile.json"
-  fi
+  # Build profile.json (new schema)
+  jq -n --arg ws "$ws_path" '{"workspace": $ws, "secrets": []}' \
+    > "$config_dir/profiles/$name/profile.json"
 
   # Create .env
   echo "ANTHROPIC_API_KEY=test-key-$name" > "$config_dir/profiles/$name/.env"
   chmod 600 "$config_dir/profiles/$name/.env"
-
-  # Copy whitelist template
-  cp "$PROJECT_DIR/config/whitelist.json" "$config_dir/profiles/$name/whitelist.json"
 }
 
 # =========================================================================
@@ -269,41 +261,6 @@ test_build_output_envelope() {
 run_test "HEAD-02a: build_output_envelope has profile, event_type, timestamp, claude keys" test_build_output_envelope
 
 echo ""
-
-# =========================================================================
-# HEAD-03 Tests: Max turns (stubs for Plan 02)
-# =========================================================================
-echo "--- HEAD-03: Max Turns (stubs) ---"
-
-test_max_turns_read_from_profile() {
-  local tmpdir
-  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  _setup_source_env "$tmpdir"
-
-  mkdir -p "$tmpdir/.claude-secure/profiles/testprof"
-  echo '{"workspace":"/tmp","max_turns":5}' > "$tmpdir/.claude-secure/profiles/testprof/profile.json"
-
-  local max_turns
-  max_turns=$(jq -r '.max_turns // empty' "$tmpdir/.claude-secure/profiles/testprof/profile.json")
-  [ "$max_turns" = "5" ] || return 1
-  return 0
-}
-run_test "HEAD-03a: max_turns readable from profile.json" test_max_turns_read_from_profile
-
-test_max_turns_absent_returns_empty() {
-  local tmpdir
-  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  _setup_source_env "$tmpdir"
-
-  mkdir -p "$tmpdir/.claude-secure/profiles/testprof"
-  echo '{"workspace":"/tmp"}' > "$tmpdir/.claude-secure/profiles/testprof/profile.json"
-
-  local max_turns
-  max_turns=$(jq -r '.max_turns // empty' "$tmpdir/.claude-secure/profiles/testprof/profile.json")
-  [ -z "$max_turns" ] || return 1
-  return 0
-}
-run_test "HEAD-03b: max_turns absent returns empty" test_max_turns_absent_returns_empty
 
 echo ""
 

@@ -75,7 +75,6 @@ EOF
   # Minimal profile
   jq -n --arg ws "$tmpdir/workspace" '{"workspace":$ws}' \
     > "$cfg/profiles/default/profile.json"
-  cp "$PROJECT_DIR/config/whitelist.json" "$cfg/profiles/default/whitelist.json"
   printf 'ANTHROPIC_API_KEY=test-key\n' > "$cfg/profiles/default/.env"
 
   if [ "$mode" = "unreadable" ]; then
@@ -190,7 +189,6 @@ APP_DIR="$PROJECT_DIR"
 PLATFORM="linux"
 EOF
   jq -n '{"workspace":"/tmp"}' > "$cfg/profiles/default/profile.json"
-  cp "$PROJECT_DIR/config/whitelist.json" "$cfg/profiles/default/whitelist.json"
   printf 'ANTHROPIC_API_KEY=test-key\n' > "$cfg/profiles/default/.env"
 
   local output
@@ -233,7 +231,6 @@ APP_DIR="$PROJECT_DIR"
 PLATFORM="linux"
 EOF
   jq -n '{"workspace":"/tmp"}' > "$cfg/profiles/default/profile.json"
-  cp "$PROJECT_DIR/config/whitelist.json" "$cfg/profiles/default/whitelist.json"
   printf 'ANTHROPIC_API_KEY=test-key\n' > "$cfg/profiles/default/.env"
   chmod 000 "$cfg/profiles/default/.env"
 
