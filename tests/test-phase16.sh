@@ -292,11 +292,13 @@ test_resolve_report_template_from_docs_dir() {
   rc=$?
 
   local result; result=$(cat "$out_file" 2>/dev/null || true)
-  rm -rf "$docs_reports" "$out_file"
-  [ $rc -eq 0 ] || return 1
-  [ -f "$result" ] || return 1
-  grep -q "$marker" "$result" || return 1
-  return 0
+  rm -f "$out_file"
+  [ $rc -eq 0 ] || { rm -rf "$docs_reports"; return 1; }
+  [ -f "$result" ] || { rm -rf "$docs_reports"; return 1; }
+  grep -q "$marker" "$result"
+  local grc=$?
+  rm -rf "$docs_reports"
+  return $grc
 }
 
 
