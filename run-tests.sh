@@ -30,10 +30,10 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 TEST_DIR="$REPO_ROOT/tests"
 TEST_ENV="$REPO_ROOT/tests/test.env"
-TEST_WHITELIST=$(mktemp)
-cp "$REPO_ROOT/config/whitelist.json" "$TEST_WHITELIST"
-chmod 666 "$TEST_WHITELIST"
-trap 'rm -f "$TEST_WHITELIST"' EXIT
+TEST_PROFILE=$(mktemp)
+cp "$REPO_ROOT/config/profile.json" "$TEST_PROFILE"
+chmod 666 "$TEST_PROFILE"
+trap 'rm -f "$TEST_PROFILE"' EXIT
 
 echo ""
 echo "========================================"
@@ -73,7 +73,7 @@ echo ""
 export COMPOSE_PROJECT_NAME="claude-test"
 export COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
 export SECRETS_FILE="$TEST_ENV"
-export WHITELIST_PATH="$TEST_WHITELIST"
+export PROFILE_PATH="$TEST_PROFILE"
 export WORKSPACE_PATH="${TMPDIR:-/tmp}/claude-test-workspace"
 export LOG_DIR="${TMPDIR:-/tmp}/claude-test-logs"
 export LOG_HOOK=0
@@ -86,7 +86,7 @@ TOTAL_FAILED=0
 TOTAL_PASSED=0
 FATAL=0
 RESULTS_FILE=$(mktemp)
-trap 'rm -f "$TEST_WHITELIST" "$RESULTS_FILE"' EXIT
+trap 'rm -f "$TEST_PROFILE" "$RESULTS_FILE"' EXIT
 
 for test_script in "${SELECTED_TESTS[@]}"; do
   test_name="${test_script%.sh}"

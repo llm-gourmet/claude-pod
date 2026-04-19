@@ -65,9 +65,6 @@ EOF
 _source_functions() {
   local tmpdir="$1"
   _setup_source_env "$tmpdir"
-  # Export APP_DIR so functions like create_profile can copy whitelist template
-  # from $APP_DIR/config/whitelist.json under set -u (main dispatch normally sets
-  # this via config.sh, but source-only mode bypasses that path).
   export APP_DIR="$PROJECT_DIR"
   # shellcheck source=/dev/null
   __CLAUDE_SECURE_SOURCE_ONLY=1 source "$PROJECT_DIR/bin/claude-secure"
@@ -83,25 +80,17 @@ create_test_profile() {
   mkdir -p "$config_dir/profiles/$name"
   mkdir -p "$ws_path"
 
-  # Build profile.json
-  if [ -n "$repo" ]; then
-    jq -n --arg ws "$ws_path" --arg repo "$repo" '{"workspace": $ws, "repo": $repo}' \
-      > "$config_dir/profiles/$name/profile.json"
-  else
-    jq -n --arg ws "$ws_path" '{"workspace": $ws}' \
-      > "$config_dir/profiles/$name/profile.json"
-  fi
+  # Build profile.json (new schema: workspace + secrets[])
+  jq -n --arg ws "$ws_path" '{"workspace": $ws, "secrets": []}' \
+    > "$config_dir/profiles/$name/profile.json"
 
   # Create .env
   echo "ANTHROPIC_API_KEY=test-key-$name" > "$config_dir/profiles/$name/.env"
   chmod 600 "$config_dir/profiles/$name/.env"
-
-  # Copy whitelist template
-  cp "$PROJECT_DIR/config/whitelist.json" "$config_dir/profiles/$name/whitelist.json"
 }
 
 # =========================================================================
-# PROF-01a: After create_profile, profile dir contains profile.json, .env, whitelist.json
+# PROF-01a: After create_profile, profile dir contains profile.json and .env
 # =========================================================================
 test_prof_01a() {
   local tmpdir
@@ -112,10 +101,10 @@ test_prof_01a() {
   local pdir="$tmpdir/.claude-secure/profiles/myproj"
   [ -f "$pdir/profile.json" ] || return 1
   [ -f "$pdir/.env" ] || return 1
-  [ -f "$pdir/whitelist.json" ] || return 1
+  [ ! -f "$pdir/whitelist.json" ] || { echo "whitelist.json should not exist in new schema" >&2; return 1; }
   return 0
 }
-run_test "PROF-01a: Profile directory contains profile.json, .env, whitelist.json" test_prof_01a
+run_test "PROF-01a: Profile directory contains profile.json and .env (no whitelist.json)" test_prof_01a
 
 # =========================================================================
 # PROF-01b: profile.json is valid JSON with required workspace field
@@ -171,138 +160,41 @@ test_prof_01c_invalid() {
 run_test "PROF-01c: validate_profile_name rejects invalid names" test_prof_01c_invalid
 
 # =========================================================================
-# PROF-02a: profile.json repo field readable via jq
+# PROF-02a: create_profile writes workspace and empty secrets[] to profile.json
 # =========================================================================
 test_prof_02a() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  _source_functions "$tmpdir"
 
-  create_test_profile "myproj" "$tmpdir/.claude-secure" "$tmpdir/ws-myproj" "owner/repo"
+  # Stdin sequence: workspace default, auth=OAuth, token
+  printf '\n1\noauth-token-xyz\n' | create_profile "myproj-d" >/dev/null 2>&1
 
-  local repo
-  repo=$(jq -r '.repo' "$tmpdir/.claude-secure/profiles/myproj/profile.json")
-  [ "$repo" = "owner/repo" ] || return 1
+  local pdir="$CONFIG_DIR/profiles/myproj-d"
+  [ -f "$pdir/profile.json" ] || return 1
+  local ws
+  ws=$(jq -r '.workspace // empty' "$pdir/profile.json")
+  [ -n "$ws" ] || return 1
+  jq -e '.secrets | type == "array"' "$pdir/profile.json" >/dev/null || return 1
+  [ -f "$pdir/.env" ] || return 1
   return 0
 }
-run_test "PROF-02a: profile.json repo field readable via jq" test_prof_02a
+run_test "PROF-02a: create_profile writes workspace and secrets[] to profile.json" test_prof_02a
 
 # =========================================================================
-# PROF-02b: resolve_profile_by_repo returns correct profile for known repo
+# PROF-02b: profile.json secrets[] schema is valid
 # =========================================================================
 test_prof_02b() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
 
-  _setup_source_env "$tmpdir"
-  create_test_profile "proj-a" "$tmpdir/.claude-secure" "$tmpdir/ws-a" "owner/repo-a"
-  create_test_profile "proj-b" "$tmpdir/.claude-secure" "$tmpdir/ws-b" "owner/repo-b"
-  _source_functions "$tmpdir"
+  create_test_profile "myproj" "$tmpdir/.claude-secure" "$tmpdir/ws-myproj"
 
-  local result
-  result=$(resolve_profile_by_repo "owner/repo-b")
-  [ "$result" = "proj-b" ] || return 1
+  local pdir="$tmpdir/.claude-secure/profiles/myproj"
+  jq -e '.secrets | type == "array"' "$pdir/profile.json" >/dev/null || return 1
   return 0
 }
-run_test "PROF-02b: resolve_profile_by_repo returns correct profile" test_prof_02b
-
-# =========================================================================
-# PROF-02c: resolve_profile_by_repo returns exit 1 for unknown repo
-# =========================================================================
-test_prof_02c() {
-  local tmpdir
-  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-
-  _setup_source_env "$tmpdir"
-  create_test_profile "proj-a" "$tmpdir/.claude-secure" "$tmpdir/ws-a" "owner/repo-a"
-  _source_functions "$tmpdir"
-
-  resolve_profile_by_repo "nonexistent/repo" && return 1
-  return 0
-}
-run_test "PROF-02c: resolve_profile_by_repo returns exit 1 for unknown repo" test_prof_02c
-
-# =========================================================================
-# PROF-02d: create_profile prompts for .repo and persists the value (HAPPY PATH)
-# Exercises the REAL bin/claude-secure create_profile (not create_test_profile helper)
-# via piped stdin. Will RED until Plan 29-02 patches bin/claude-secure with the prompt.
-# =========================================================================
-test_prof_02d_create_profile_prompts_for_repo() {
-  local tmpdir
-  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  _source_functions "$tmpdir"
-
-  # Stdin sequence after 29-02:
-  #   line 1: ""               -> accept default workspace
-  #   line 2: "owner/my-repo"  -> NEW repo prompt
-  #   line 3: "1"              -> auth choice = OAuth
-  #   line 4: "oauth-token-xyz" -> OAuth token
-  printf '\nowner/my-repo\n1\noauth-token-xyz\n' | create_profile "myproj-d" >/dev/null 2>&1
-
-  local pdir="$CONFIG_DIR/profiles/myproj-d"
-  [ -f "$pdir/profile.json" ] || return 1
-  local repo
-  repo=$(jq -r '.repo // empty' "$pdir/profile.json")
-  [ "$repo" = "owner/my-repo" ] || return 1
-  return 0
-}
-run_test "PROF-02d: create_profile prompts for and persists .repo field" test_prof_02d_create_profile_prompts_for_repo
-
-# =========================================================================
-# PROF-02e: create_profile skip path -- empty repo input means no .repo key
-# Back-compat guard: pre-PROF-02 profiles omit .repo entirely, and skip path
-# must still produce a profile with no .repo key.
-# =========================================================================
-test_prof_02e_create_profile_skip_repo() {
-  local tmpdir
-  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  _source_functions "$tmpdir"
-
-  # Stdin sequence: workspace default, BLANK repo (skip), auth=OAuth, token
-  printf '\n\n1\noauth-token-xyz\n' | create_profile "myproj-e" >/dev/null 2>&1
-
-  local pdir="$CONFIG_DIR/profiles/myproj-e"
-  [ -f "$pdir/profile.json" ] || return 1
-  # Positive assertion: workspace was still written (proves flow ran to completion
-  # through all 4 prompts, not that it hung at prompt 2)
-  local ws
-  ws=$(jq -r '.workspace // empty' "$pdir/profile.json")
-  [ -n "$ws" ] || return 1
-  # Skip path assertion: .repo key must be absent or empty
-  local repo
-  repo=$(jq -r '.repo // empty' "$pdir/profile.json")
-  [ -z "$repo" ] || return 1
-  # Additional guard: .env was written (proves setup_profile_auth ran — i.e. the
-  # blank "skip" line was consumed by the repo prompt, not the auth choice prompt)
-  [ -f "$pdir/.env" ] || return 1
-  return 0
-}
-run_test "PROF-02e: create_profile allows skipping .repo (empty input)" test_prof_02e_create_profile_skip_repo
-
-# =========================================================================
-# PROF-02f: create_profile warns on malformed repo but still saves value verbatim
-# Warn-don't-block policy (29-RESEARCH.md Pitfall 3 + Architecture Pattern 2).
-# =========================================================================
-test_prof_02f_create_profile_warns_on_bad_format() {
-  local tmpdir
-  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  _source_functions "$tmpdir"
-
-  local stderr_log="$tmpdir/stderr.log"
-  # Capture stderr to a file; the garbage repo value must still persist
-  printf '\nnot-a-valid-repo-format\n1\noauth-token-xyz\n' \
-    | create_profile "myproj-f" >/dev/null 2>"$stderr_log"
-
-  local pdir="$CONFIG_DIR/profiles/myproj-f"
-  [ -f "$pdir/profile.json" ] || return 1
-  # Warning string present on stderr
-  grep -q 'Warning' "$stderr_log" || return 1
-  # Value saved verbatim (warn-don't-block)
-  local repo
-  repo=$(jq -r '.repo // empty' "$pdir/profile.json")
-  [ "$repo" = "not-a-valid-repo-format" ] || return 1
-  return 0
-}
-run_test "PROF-02f: create_profile warns on bad repo format but saves" test_prof_02f_create_profile_warns_on_bad_format
+run_test "PROF-02b: profile.json has secrets[] array" test_prof_02b
 
 # =========================================================================
 # PROF-03a: validate_profile with missing profile directory -> exit 1
@@ -330,7 +222,6 @@ test_prof_03b() {
   # Create profile dir but no profile.json
   mkdir -p "$tmpdir/.claude-secure/profiles/badprof"
   echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-secure/profiles/badprof/.env"
-  echo '{"secrets":[]}' > "$tmpdir/.claude-secure/profiles/badprof/whitelist.json"
 
   validate_profile "badprof" && return 1
   return 0
@@ -348,7 +239,6 @@ test_prof_03c() {
   mkdir -p "$tmpdir/.claude-secure/profiles/badprof"
   echo "not json" > "$tmpdir/.claude-secure/profiles/badprof/profile.json"
   echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-secure/profiles/badprof/.env"
-  echo '{"secrets":[]}' > "$tmpdir/.claude-secure/profiles/badprof/whitelist.json"
 
   validate_profile "badprof" && return 1
   return 0
@@ -366,7 +256,6 @@ test_prof_03d() {
   mkdir -p "$tmpdir/.claude-secure/profiles/badprof"
   echo '{}' > "$tmpdir/.claude-secure/profiles/badprof/profile.json"
   echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-secure/profiles/badprof/.env"
-  echo '{"secrets":[]}' > "$tmpdir/.claude-secure/profiles/badprof/whitelist.json"
 
   validate_profile "badprof" && return 1
   return 0
@@ -385,7 +274,6 @@ test_prof_03e() {
   jq -n --arg ws "/nonexistent/path/$$" '{"workspace":$ws}' \
     > "$tmpdir/.claude-secure/profiles/badprof/profile.json"
   echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-secure/profiles/badprof/.env"
-  echo '{"secrets":[]}' > "$tmpdir/.claude-secure/profiles/badprof/whitelist.json"
 
   validate_profile "badprof" && return 1
   return 0
@@ -406,7 +294,6 @@ test_prof_03f() {
   jq -n --arg ws "$ws" '{"workspace":$ws}' \
     > "$tmpdir/.claude-secure/profiles/badprof/profile.json"
   # No .env file
-  echo '{"secrets":[]}' > "$tmpdir/.claude-secure/profiles/badprof/whitelist.json"
 
   validate_profile "badprof" && return 1
   return 0
@@ -414,7 +301,7 @@ test_prof_03f() {
 run_test "PROF-03f: validate_profile fails on missing .env" test_prof_03f
 
 # =========================================================================
-# PROF-03g: validate_profile with missing whitelist.json -> exit 1
+# PROF-03g: validate_profile with malformed secrets[] entry -> exit 1
 # =========================================================================
 test_prof_03g() {
   local tmpdir
@@ -424,46 +311,39 @@ test_prof_03g() {
   local ws="$tmpdir/ws-badprof"
   mkdir -p "$ws"
   mkdir -p "$tmpdir/.claude-secure/profiles/badprof"
-  jq -n --arg ws "$ws" '{"workspace":$ws}' \
+  jq -n --arg ws "$ws" '{"workspace":$ws,"secrets":[{"env_var":"FOO"}]}' \
     > "$tmpdir/.claude-secure/profiles/badprof/profile.json"
   echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-secure/profiles/badprof/.env"
-  # No whitelist.json
 
   validate_profile "badprof" && return 1
   return 0
 }
-run_test "PROF-03g: validate_profile fails on missing whitelist.json" test_prof_03g
+run_test "PROF-03g: validate_profile fails on secrets[] entry missing redacted/domains" test_prof_03g
 
 # =========================================================================
-# SUPER-01: Merged whitelist contains secrets from multiple profiles
+# SUPER-01: Merged profile secrets contains entries from multiple profiles
 # =========================================================================
 test_super_01() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
 
-  # Create two profiles with different whitelist secrets
+  # Create two profiles with different secrets
   create_test_profile "proj-a" "$tmpdir/.claude-secure" "$tmpdir/ws-a"
   create_test_profile "proj-b" "$tmpdir/.claude-secure" "$tmpdir/ws-b"
 
-  # Give them distinct whitelist entries
-  cat > "$tmpdir/.claude-secure/profiles/proj-a/whitelist.json" <<'EOF'
-{
-  "secrets": [{"placeholder": "PH_GH", "env_var": "GITHUB_TOKEN", "allowed_domains": ["github.com"]}],
-  "readonly_domains": ["google.com"]
-}
-EOF
-  cat > "$tmpdir/.claude-secure/profiles/proj-b/whitelist.json" <<'EOF'
-{
-  "secrets": [{"placeholder": "PH_STRIPE", "env_var": "STRIPE_KEY", "allowed_domains": ["stripe.com"]}],
-  "readonly_domains": ["stackoverflow.com"]
-}
-EOF
+  # Give them distinct secrets entries in profile.json
+  jq -n --arg ws "$tmpdir/ws-a" \
+    '{"workspace":$ws,"secrets":[{"env_var":"GITHUB_TOKEN","redacted":"REDACTED_GH","domains":["github.com"]}]}' \
+    > "$tmpdir/.claude-secure/profiles/proj-a/profile.json"
+  jq -n --arg ws "$tmpdir/ws-b" \
+    '{"workspace":$ws,"secrets":[{"env_var":"STRIPE_KEY","redacted":"REDACTED_STRIPE","domains":["stripe.com"]}]}' \
+    > "$tmpdir/.claude-secure/profiles/proj-b/profile.json"
 
   _source_functions "$tmpdir"
 
   local merged
-  merged=$(merge_whitelists)
+  merged=$(merge_profiles)
 
   # Should contain both secrets
   echo "$merged" | jq -e '.secrets | length == 2' >/dev/null || return 1
@@ -471,7 +351,7 @@ EOF
   echo "$merged" | jq -e '.secrets[] | select(.env_var == "STRIPE_KEY")' >/dev/null || return 1
   return 0
 }
-run_test "SUPER-01: Merged whitelist contains secrets from multiple profiles" test_super_01
+run_test "SUPER-01: Merged profile secrets contains entries from multiple profiles" test_super_01
 
 # =========================================================================
 # SUPER-02: Merged .env contains keys from multiple profiles
@@ -503,7 +383,7 @@ test_super_02() {
 run_test "SUPER-02: Merged .env contains keys from multiple profiles" test_super_02
 
 # =========================================================================
-# SUPER-03: Merged whitelist deduplicates by env_var
+# SUPER-03: merge_profiles deduplicates by env_var
 # =========================================================================
 test_super_03() {
   local tmpdir
@@ -513,37 +393,26 @@ test_super_03() {
   create_test_profile "proj-a" "$tmpdir/.claude-secure" "$tmpdir/ws-a"
   create_test_profile "proj-b" "$tmpdir/.claude-secure" "$tmpdir/ws-b"
 
-  # Both profiles have GITHUB_TOKEN with different placeholders
-  cat > "$tmpdir/.claude-secure/profiles/proj-a/whitelist.json" <<'EOF'
-{
-  "secrets": [{"placeholder": "PH_GH_A", "env_var": "GITHUB_TOKEN", "allowed_domains": ["github.com"]}],
-  "readonly_domains": ["google.com"]
-}
-EOF
-  cat > "$tmpdir/.claude-secure/profiles/proj-b/whitelist.json" <<'EOF'
-{
-  "secrets": [{"placeholder": "PH_GH_B", "env_var": "GITHUB_TOKEN", "allowed_domains": ["api.github.com"]}],
-  "readonly_domains": ["google.com"]
-}
-EOF
+  # Both profiles have GITHUB_TOKEN with different redacted values
+  jq -n --arg ws "$tmpdir/ws-a" \
+    '{"workspace":$ws,"secrets":[{"env_var":"GITHUB_TOKEN","redacted":"REDACTED_A","domains":["github.com"]}]}' \
+    > "$tmpdir/.claude-secure/profiles/proj-a/profile.json"
+  jq -n --arg ws "$tmpdir/ws-b" \
+    '{"workspace":$ws,"secrets":[{"env_var":"GITHUB_TOKEN","redacted":"REDACTED_B","domains":["api.github.com"]}]}' \
+    > "$tmpdir/.claude-secure/profiles/proj-b/profile.json"
 
   _source_functions "$tmpdir"
 
   local merged
-  merged=$(merge_whitelists)
+  merged=$(merge_profiles)
 
   # Should deduplicate: only 1 GITHUB_TOKEN entry
   local count
   count=$(echo "$merged" | jq '[.secrets[] | select(.env_var == "GITHUB_TOKEN")] | length')
   [ "$count" -eq 1 ] || return 1
-
-  # readonly_domains should also be deduplicated
-  local domain_count
-  domain_count=$(echo "$merged" | jq '[.readonly_domains[] | select(. == "google.com")] | length')
-  [ "$domain_count" -eq 1 ] || return 1
   return 0
 }
-run_test "SUPER-03: Merged whitelist deduplicates by env_var" test_super_03
+run_test "SUPER-03: merge_profiles deduplicates by env_var" test_super_03
 
 # =========================================================================
 # LIST-01: list command output contains column headers
@@ -553,19 +422,19 @@ test_list_01() {
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
 
-  create_test_profile "myproj" "$tmpdir/.claude-secure" "$tmpdir/ws-myproj" "owner/repo"
+  create_test_profile "myproj" "$tmpdir/.claude-secure" "$tmpdir/ws-myproj"
   _source_functions "$tmpdir"
 
   local output
   output=$(list_profiles 2>&1)
 
   echo "$output" | grep -q "PROFILE" || return 1
-  echo "$output" | grep -q "REPO" || return 1
+  echo "$output" | grep -q "KEYS" || return 1
   echo "$output" | grep -q "WORKSPACE" || return 1
   echo "$output" | grep -q "STATUS" || return 1
   return 0
 }
-run_test "LIST-01: list command shows PROFILE, REPO, STATUS, WORKSPACE columns" test_list_01
+run_test "LIST-01: list command shows PROFILE, KEYS, STATUS, WORKSPACE columns" test_list_01
 
 # =========================================================================
 # NOINSTANCE-01: --instance flag produces error

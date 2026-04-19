@@ -80,12 +80,11 @@ setup_test_profile() {
   local profile_dir="$home_dir/.claude-secure/profiles/test-profile"
   local webhooks_dir="$home_dir/.claude-secure/webhooks"
   mkdir -p "$profile_dir" "$webhooks_dir" "$home_dir/.claude-secure/events" "$home_dir/.claude-secure/logs/spawns"
-  # Profile: workspace only (webhook credentials live in connections.json)
+  # Profile: workspace + empty secrets (webhook credentials live in connections.json)
   cat > "$profile_dir/profile.json" <<JSON
 {
-  "name": "test-profile",
-  "repo": "test-org/test-repo",
-  "workspace": "$TEST_TMPDIR/workspace"
+  "workspace": "$TEST_TMPDIR/workspace",
+  "secrets": []
 }
 JSON
   # Webhook connection

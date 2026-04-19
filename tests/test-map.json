@@ -42,7 +42,7 @@
     },
     {
       "paths": [
-        "config/whitelist.json"
+        "config/profile.json"
       ],
       "tests": [
         "test-phase1.sh",

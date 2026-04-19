@@ -88,8 +88,9 @@ setup_test_profile() {
   mkdir -p "$profile_dir" "$profile_dir/prompts" "$webhooks_dir" \
     "$home_dir/.claude-secure/events" "$home_dir/.claude-secure/logs/spawns"
 
-  # Profile: workspace only (webhook credentials live in connections.json)
-  printf '{\n  "name": "test-profile",\n  "repo": "test-org/test-repo",\n  "workspace": "%s/workspace"\n}\n' \
+  # Profile: workspace + secrets. .repo is kept for replay auto-resolution
+  # (resolve_profile_by_repo reads it; existing profiles may still have it).
+  printf '{\n  "workspace": "%s/workspace",\n  "repo": "test-org/test-repo",\n  "secrets": []\n}\n' \
     "$TEST_TMPDIR" > "$profile_dir/profile.json"
 
   # Build webhook connection JSON with optional event filter and bot users

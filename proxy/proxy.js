@@ -5,7 +5,7 @@ const dns = require('dns');
 const fs = require('fs');
 
 const UPSTREAM = process.env.REAL_ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
-const WHITELIST_PATH = process.env.WHITELIST_PATH || '/etc/claude-secure/whitelist.json';
+const PROFILE_PATH = process.env.PROFILE_PATH || '/etc/claude-secure/profile.json';
 const warnedEnvVars = new Set();
 
 const LOG_PREFIX = process.env.LOG_PREFIX || '';
@@ -33,12 +33,12 @@ function logJson(level, msg, extra) {
 const externalResolver = new dns.Resolver();
 externalResolver.setServers(['8.8.8.8', '1.1.1.1']);
 
-function loadWhitelist() {
+function loadProfile() {
   try {
-    const raw = fs.readFileSync(WHITELIST_PATH, 'utf8');
+    const raw = fs.readFileSync(PROFILE_PATH, 'utf8');
     return JSON.parse(raw);
   } catch (err) {
-    console.error('Failed to load whitelist: ' + err.message);
+    console.error('Failed to load profile: ' + err.message);
     return null;
   }
 }
@@ -57,11 +57,11 @@ function buildMaps(config) {
       }
       continue;
     }
-    redactMap.push([realValue, entry.placeholder]);
-    restoreMap.push([entry.placeholder, realValue]);
+    redactMap.push([realValue, entry.redacted]);
+    restoreMap.push([entry.redacted, realValue]);
     logPairs.push({
       masked: realValue.slice(0, Math.min(8, Math.floor(realValue.length / 3))) + '...',
-      placeholder: entry.placeholder,
+      redacted: entry.redacted,
       env_var: entry.env_var
     });
   }
@@ -85,12 +85,9 @@ function applyReplacements(text, pairs) {
 function isDomainAllowed(domain, config) {
   if (!config) return false;
   for (const entry of config.secrets || []) {
-    for (const d of entry.allowed_domains || []) {
+    for (const d of entry.domains || []) {
       if (domain === d || domain.endsWith('.' + d)) return true;
     }
-  }
-  for (const d of config.readonly_domains || []) {
-    if (domain === d || domain.endsWith('.' + d)) return true;
   }
   return false;
 }
@@ -127,11 +124,11 @@ const server = http.createServer((req, res) => {
   req.on('end', () => {
     const startTime = Date.now();
     // Load config fresh on each request (SECR-04)
-    const config = loadWhitelist();
+    const config = loadProfile();
     if (!config) {
-      logJson('error', 'Failed to load whitelist config');
+      logJson('error', 'Failed to load profile config');
       res.writeHead(500, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Proxy configuration error', detail: 'Failed to load whitelist config' }));
+      res.end(JSON.stringify({ error: 'Proxy configuration error', detail: 'Failed to load profile config' }));
       return;
     }
 
@@ -139,12 +136,12 @@ const server = http.createServer((req, res) => {
     const isForwardProxy = req.url.startsWith('http://') || req.url.startsWith('https://');
     const url = new URL(req.url, UPSTREAM);
 
-    // For forward proxy requests, validate domain against whitelist
+    // For forward proxy requests, validate domain against profile secrets
     if (isForwardProxy && !isDomainAllowed(url.hostname, config)) {
-      console.warn('Forward proxy blocked: ' + url.hostname + ' (not in whitelist)');
-      logJson('warn', 'Blocked request to non-whitelisted domain', { method: req.method, domain: url.hostname });
+      console.warn('Forward proxy blocked: ' + url.hostname + ' (not in profile secrets)');
+      logJson('warn', 'Blocked request to domain not in profile secrets', { method: req.method, domain: url.hostname });
       res.writeHead(403, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Forbidden', detail: 'Domain not in whitelist: ' + url.hostname }));
+      res.end(JSON.stringify({ error: 'Forbidden', detail: 'Domain not in profile secrets: ' + url.hostname }));
       return;
     }
 
@@ -234,11 +231,11 @@ const server = http.createServer((req, res) => {
 // HTTPS CONNECT tunneling for forward proxy (HTTP_PROXY/HTTPS_PROXY)
 server.on('connect', (req, clientSocket, head) => {
   const [hostname, port] = req.url.split(':');
-  const config = loadWhitelist();
+  const config = loadProfile();
 
   if (!isDomainAllowed(hostname, config)) {
-    console.warn('CONNECT blocked: ' + hostname + ' (not in whitelist)');
-    logJson('warn', 'Blocked CONNECT to non-whitelisted domain', { domain: hostname });
+    console.warn('CONNECT blocked: ' + hostname + ' (not in profile secrets)');
+    logJson('warn', 'Blocked CONNECT to domain not in profile secrets', { domain: hostname });
     clientSocket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
     clientSocket.end();
     return;
@@ -262,7 +259,7 @@ server.on('connect', (req, clientSocket, head) => {
 
 const PORT = process.env.PROXY_PORT || 8080;
 const TLS_PORT = 443;
-console.log('Whitelist path: ' + WHITELIST_PATH);
+console.log('Profile path: ' + PROFILE_PATH);
 console.log('Auth: ' + (process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'OAuth' : process.env.ANTHROPIC_API_KEY ? 'API key' : 'NONE'));
 server.listen(PORT, '0.0.0.0', () => {
   console.log('Proxy listening on :' + PORT);

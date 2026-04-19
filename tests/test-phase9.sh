@@ -95,7 +95,6 @@ test_load_profile_config_exports_core_vars() {
 }
 EOF
   printf 'ANTHROPIC_API_KEY=test\n' > "$pdir/.env"
-  echo '{"secrets":[]}' > "$pdir/whitelist.json"
 
   local workspace compose_name
   workspace=$(
@@ -153,8 +152,8 @@ test_compose_isolation() {
 run_test "MULTI-04: COMPOSE_PROJECT_NAME isolation (no container_name)" test_compose_isolation
 
 # =========================================================================
-# MULTI-05: Per-instance config files
-# Each instance directory has its own config.sh, .env, whitelist.json
+# MULTI-05: Per-profile config files
+# Each profile directory has its own profile.json and .env
 # =========================================================================
 test_per_instance_config() {
   local tmpdir
@@ -162,34 +161,29 @@ test_per_instance_config() {
   trap "rm -rf '$tmpdir'" RETURN
 
   local cfg="$tmpdir/.claude-secure"
-  mkdir -p "$cfg/instances/foo" "$cfg/instances/bar"
+  mkdir -p "$cfg/profiles/foo" "$cfg/profiles/bar"
 
-  # Instance foo
-  echo 'WORKSPACE_PATH="/home/user/project-foo"' > "$cfg/instances/foo/config.sh"
-  echo 'ANTHROPIC_API_KEY=key-foo' > "$cfg/instances/foo/.env"
-  echo '{"secrets":["foo"]}' > "$cfg/instances/foo/whitelist.json"
+  # Profile foo
+  echo '{"workspace":"/home/user/project-foo","secrets":[]}' > "$cfg/profiles/foo/profile.json"
+  echo 'ANTHROPIC_API_KEY=key-foo' > "$cfg/profiles/foo/.env"
 
-  # Instance bar
-  echo 'WORKSPACE_PATH="/home/user/project-bar"' > "$cfg/instances/bar/config.sh"
-  echo 'ANTHROPIC_API_KEY=key-bar' > "$cfg/instances/bar/.env"
-  echo '{"secrets":["bar"]}' > "$cfg/instances/bar/whitelist.json"
+  # Profile bar
+  echo '{"workspace":"/home/user/project-bar","secrets":[]}' > "$cfg/profiles/bar/profile.json"
+  echo 'ANTHROPIC_API_KEY=key-bar' > "$cfg/profiles/bar/.env"
 
   # Verify files exist for both
-  [ -f "$cfg/instances/foo/config.sh" ] || return 1
-  [ -f "$cfg/instances/foo/.env" ] || return 1
-  [ -f "$cfg/instances/foo/whitelist.json" ] || return 1
-  [ -f "$cfg/instances/bar/config.sh" ] || return 1
-  [ -f "$cfg/instances/bar/.env" ] || return 1
-  [ -f "$cfg/instances/bar/whitelist.json" ] || return 1
+  [ -f "$cfg/profiles/foo/profile.json" ] || return 1
+  [ -f "$cfg/profiles/foo/.env" ] || return 1
+  [ -f "$cfg/profiles/bar/profile.json" ] || return 1
+  [ -f "$cfg/profiles/bar/.env" ] || return 1
 
   # Verify files are independent (different content)
-  ! diff -q "$cfg/instances/foo/config.sh" "$cfg/instances/bar/config.sh" >/dev/null 2>&1 || return 1
-  ! diff -q "$cfg/instances/foo/.env" "$cfg/instances/bar/.env" >/dev/null 2>&1 || return 1
-  ! diff -q "$cfg/instances/foo/whitelist.json" "$cfg/instances/bar/whitelist.json" >/dev/null 2>&1 || return 1
+  ! diff -q "$cfg/profiles/foo/profile.json" "$cfg/profiles/bar/profile.json" >/dev/null 2>&1 || return 1
+  ! diff -q "$cfg/profiles/foo/.env" "$cfg/profiles/bar/.env" >/dev/null 2>&1 || return 1
 
   return 0
 }
-run_test "MULTI-05: Per-instance config files are independent" test_per_instance_config
+run_test "MULTI-05: Per-profile config files are independent" test_per_instance_config
 
 # =========================================================================
 # MULTI-06: LOG_PREFIX in docker-compose.yml and service code
@@ -233,14 +227,12 @@ test_list_command() {
            "$tmpdir/ws-foo" "$tmpdir/ws-bar"
 
   cat > "$cfg/profiles/foo/profile.json" \
-    <<< '{"workspace":"'"$tmpdir/ws-foo"'","repo":"org/foo"}'
+    <<< '{"workspace":"'"$tmpdir/ws-foo"'","secrets":[]}'
   printf 'ANTHROPIC_API_KEY=test\n' > "$cfg/profiles/foo/.env"
-  echo '{"secrets":[]}' > "$cfg/profiles/foo/whitelist.json"
 
   cat > "$cfg/profiles/bar/profile.json" \
-    <<< '{"workspace":"'"$tmpdir/ws-bar"'","repo":"org/bar"}'
+    <<< '{"workspace":"'"$tmpdir/ws-bar"'","secrets":[]}'
   printf 'ANTHROPIC_API_KEY=test\n' > "$cfg/profiles/bar/.env"
-  echo '{"secrets":[]}' > "$cfg/profiles/bar/whitelist.json"
 
   local output
   output=$(HOME="$tmpdir" bash "$PROJECT_DIR/bin/claude-secure" list 2>/dev/null) || true
@@ -252,8 +244,8 @@ test_list_command() {
 run_test "MULTI-07: list command shows all profiles" test_list_command
 
 # =========================================================================
-# MULTI-08: Instance auto-creation directory structure
-# After create_instance, instance dir has config.sh, .env, whitelist.json
+# MULTI-08: Profile auto-creation directory structure
+# After create_profile, profile dir has profile.json and .env
 # =========================================================================
 test_auto_creation_structure() {
   local tmpdir
@@ -261,38 +253,23 @@ test_auto_creation_structure() {
   trap "rm -rf '$tmpdir'" RETURN
 
   local cfg="$tmpdir/.claude-secure"
-  mkdir -p "$cfg"
+  local pdir="$cfg/profiles/testprof"
+  local ws="$tmpdir/ws-testprof"
+  mkdir -p "$pdir" "$ws"
 
-  # Create global config with APP_DIR pointing to our project
-  local fake_app="$tmpdir/app"
-  mkdir -p "$fake_app/config"
-  cp "$PROJECT_DIR/config/whitelist.json" "$fake_app/config/whitelist.json"
-
-  cat > "$cfg/config.sh" <<EOF
-APP_DIR="$fake_app"
-PLATFORM="linux"
-EOF
-
-  # Simulate auto-creation: create instance directory structure manually
-  # (create_instance is interactive so we simulate its output)
-  local idir="$cfg/instances/testinst"
-  mkdir -p "$idir"
-  echo 'WORKSPACE_PATH="/tmp/ws-testinst"' > "$idir/config.sh"
-  echo 'ANTHROPIC_API_KEY=test-key' > "$idir/.env"
-  chmod 600 "$idir/.env"
-  cp "$fake_app/config/whitelist.json" "$idir/whitelist.json"
+  # Simulate profile creation output
+  jq -n --arg ws "$ws" '{"workspace": $ws, "secrets": []}' > "$pdir/profile.json"
+  echo 'ANTHROPIC_API_KEY=test-key' > "$pdir/.env"
+  chmod 600 "$pdir/.env"
 
   # Verify expected structure
-  [ -f "$idir/config.sh" ] || return 1
-  [ -f "$idir/.env" ] || return 1
-  [ -f "$idir/whitelist.json" ] || return 1
-
-  # Verify whitelist matches template
-  diff -q "$fake_app/config/whitelist.json" "$idir/whitelist.json" >/dev/null 2>&1 || return 1
+  [ -f "$pdir/profile.json" ] || return 1
+  [ -f "$pdir/.env" ] || return 1
+  jq empty "$pdir/profile.json" || return 1
 
   return 0
 }
-run_test "MULTI-08: Instance auto-creation directory structure" test_auto_creation_structure
+run_test "MULTI-08: Profile auto-creation directory structure" test_auto_creation_structure
 
 # =========================================================================
 # MULTI-09: Global config.sh contains only APP_DIR and PLATFORM
@@ -311,10 +288,9 @@ test_profile_config_scope() {
   mkdir -p "$pdir" "$tmpdir/ws"
 
   cat > "$pdir/profile.json" <<EOF
-{"workspace":"$tmpdir/ws","repo":"org/scoped"}
+{"workspace":"$tmpdir/ws","secrets":[]}
 EOF
   printf 'ANTHROPIC_API_KEY=test\n' > "$pdir/.env"
-  echo '{"secrets":[]}' > "$pdir/whitelist.json"
 
   local ws
   ws=$(
@@ -352,12 +328,11 @@ test_system_prompt_field() {
   cat > "$pdir/profile.json" <<EOF
 {
   "workspace": "$tmpdir/ws",
-  "repo": "org/sysprompt",
-  "system_prompt": "You are a helpful assistant with access to REPORT_REPO_TOKEN."
+  "system_prompt": "You are a helpful assistant with access to REPORT_REPO_TOKEN.",
+  "secrets": []
 }
 EOF
   printf 'ANTHROPIC_API_KEY=test\n' > "$pdir/.env"
-  echo '{"secrets":[]}' > "$pdir/whitelist.json"
 
   # Verify load_profile_config exports CLAUDE_SECURE_SYSTEM_PROMPT
   local got_prompt
@@ -380,7 +355,7 @@ EOF
 
   # Verify empty system_prompt leaves CLAUDE_SECURE_SYSTEM_PROMPT unset/empty
   cat > "$pdir/profile.json" <<EOF
-{"workspace":"$tmpdir/ws","repo":"org/sysprompt"}
+{"workspace":"$tmpdir/ws","secrets":[]}
 EOF
   local empty_prompt
   empty_prompt=$(

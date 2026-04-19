@@ -1,7 +1,4 @@
 {
   "workspace": "/tmp/claude-secure-test-ws-23-docs",
-  "repo": "owner/docs-test",
-  "docs_repo": "https://github.com/owner/docs-test.git",
-  "docs_branch": "main",
-  "docs_project_dir": "projects/docs-test"
+  "secrets": []
 }

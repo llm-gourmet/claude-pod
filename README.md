@@ -19,7 +19,7 @@ sudo ./install.sh
 sudo ./install.sh --with-webhook
 ```
 
-The installer builds Docker images (the Claude container has the PreToolUse hook baked into `/etc/claude-secure/hooks/` at image-build time from `claude/hooks/`), installs the `claude-secure` CLI to `/usr/local/bin`, copies the project tree to `~/.claude-secure/app/`, and writes a default profile at `~/.claude-secure/profiles/default/` (containing `.env`, `whitelist.json`, `profile.json`).
+The installer builds Docker images (the Claude container has the PreToolUse hook baked into `/etc/claude-secure/hooks/` at image-build time from `claude/hooks/`), installs the `claude-secure` CLI to `/usr/local/bin`, copies the project tree to `~/.claude-secure/app/`, and writes a default profile at `~/.claude-secure/profiles/default/` (containing `.env` and `profile.json`).
 
 On first run it prompts interactively for:
 - Auth choice: OAuth token (recommended — run `claude setup-token` first) or API key
@@ -47,7 +47,7 @@ Everything on the host falls into two trees:
 
 | Path | Owner | Purpose |
 |------|-------|---------|
-| `~/.claude-secure/profiles/<name>/` | user | Per-profile secrets (`.env`), whitelist, and config (`profile.json`) |
+| `~/.claude-secure/profiles/<name>/` | user | Per-profile secrets (`.env`) and config (`profile.json`) |
 | `~/.claude-secure/docs/<name>/` | user | Docs-oriented profiles (e.g. Obsidian vault configs); same structure as `profiles/` |
 | `~/.claude-secure/app/` | user | Copy of the project tree (updated by `claude-secure update`) |
 | `~/.claude-secure/logs/` | user | Structured logs written by the listener (`webhook.jsonl`) |
@@ -85,7 +85,8 @@ Example `.env` for API key + corporate gateway:
 ANTHROPIC_API_KEY=sk-your-api-key
 REAL_ANTHROPIC_BASE_URL=https://yourcompany.com/anthropic/v1
 
-# project secrets (redacted by proxy before reaching LLM context)
+# project secrets — raw values loaded into proxy for redaction
+# add matching entries to profile.json secrets[] for each one
 GITHUB_TOKEN=ghp_xxx
 ```
 
@@ -110,7 +111,7 @@ claude-secure --profile <name> replay <delivery-id>
 
 ### Profiles
 
-A profile is a named workspace with its own secrets, whitelist, and report repo configuration.
+A profile is a named workspace with its own secrets and allowed domains.
 
 ```bash
 # Create (or enter) a profile — prompts for workspace path and credentials
@@ -120,19 +121,31 @@ claude-secure --profile myproject
 Profile directory layout:
 ```
 ~/.claude-secure/profiles/<name>/
-  profile.json      # workspace, repo, report_repo, max_turns, etc.
-  .env              # secrets: GITHUB_TOKEN, etc.
-  whitelist.json    # per-profile domain whitelist
+  profile.json      # workspace, system_prompt, secrets[]
+  .env              # auth token/key and raw secret values
 ```
 
-`profile.json` key fields:
+`profile.json` schema:
+
+```json
+{
+  "workspace": "/path/to/project",
+  "system_prompt": "optional system prompt for every session",
+  "secrets": [
+    {
+      "env_var": "GITHUB_TOKEN",
+      "redacted": "REDACTED_GITHUB",
+      "domains": ["github.com", "api.github.com", "raw.githubusercontent.com"]
+    }
+  ]
+}
+```
 
 | Field | Description |
 |-------|-------------|
 | `workspace` | Absolute path to the project workspace |
-| `repo` | `owner/repo` — used for webhook routing |
-| `system_prompt` | System prompt injected via `--system-prompt` for every session (interactive and headless) |
-| `max_turns` | Max Claude turns per headless spawn |
+| `system_prompt` | Injected via `--system-prompt` for every session (interactive and headless) |
+| `secrets[]` | Per-secret entries: `env_var` (env variable name), `redacted` (opaque token used in LLM context), `domains` (allowed outbound domains for this secret) |
 
 ---
 
@@ -217,22 +230,23 @@ The `claude-internal` Docker network has `internal: true` — no external access
 
 ### 2. Secret redaction (proxy)
 
-Every request to Anthropic is buffered in full, scanned against `whitelist.json`, and secret values replaced with opaque placeholders before forwarding. Responses are scanned in reverse — placeholders restored to real values for Claude to use, but the real values never appear in LLM context sent upstream.
+Every request to Anthropic is buffered in full, scanned against `profile.json`, and secret values replaced with opaque redacted tokens before forwarding. Responses are scanned in reverse — redacted tokens restored to real values for Claude to use, but the real values never appear in LLM context sent upstream.
+
+The `secrets[]` array in `profile.json` drives both redaction and domain enforcement:
 
 ```json
 {
   "secrets": [
     {
-      "placeholder": "PLACEHOLDER_GITHUB",
       "env_var": "GITHUB_TOKEN",
-      "allowed_domains": ["github.com", "api.github.com"]
+      "redacted": "REDACTED_GITHUB",
+      "domains": ["github.com", "api.github.com", "raw.githubusercontent.com"]
     }
-  ],
-  "readonly_domains": ["google.com", "docs.anthropic.com"]
+  ]
 }
 ```
 
-The whitelist is re-read on every request — no restart needed after edits.
+`profile.json` is re-read on every request — no restart needed after edits.
 
 ### 3. PreToolUse hook
 
@@ -240,7 +254,7 @@ Every `Bash`, `WebFetch`, and `WebSearch` tool call passes through a hook script
 
 The hook:
 1. Extracts the target domain from the tool call payload
-2. Checks the domain against `whitelist.json`
+2. Checks the domain against `secrets[].domains[]` in `profile.json`
 3. On allow: generates a UUID call-ID, registers it with the validator, returns allow
 4. On block: returns block with a reason — Claude sees the rejection and cannot retry
 
@@ -330,7 +344,7 @@ export WEBHOOK_TEMPLATES_DIR=/path/to/custom/templates
 
 ### Docs-oriented profiles
 
-Profiles for documentation tools (e.g. an Obsidian vault) can live under `~/.claude-secure/docs/<name>/` instead of `~/.claude-secure/profiles/<name>/`. The structure is identical — `profile.json`, `.env`, `whitelist.json`, `prompts/`. The listener and CLI probe both directories; `profiles/` takes priority when a name collision occurs.
+Profiles for documentation tools (e.g. an Obsidian vault) can live under `~/.claude-secure/docs/<name>/` instead of `~/.claude-secure/profiles/<name>/`. The structure is identical — `profile.json` and `.env`. The listener and CLI probe both directories; `profiles/` takes priority when a name collision occurs.
 
 ```bash
 # Move an existing profile to docs/

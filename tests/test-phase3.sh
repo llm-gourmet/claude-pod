@@ -80,7 +80,7 @@ services:
       - GITHUB_TOKEN=ghp_test_secret_value_12345
       - STRIPE_KEY=sk_test_stripe_secret_67890
       - OPENAI_API_KEY=sk-test-openai-secret-abcde
-      - WHITELIST_PATH=/tmp/whitelist-test.json
+      - PROFILE_PATH=/tmp/profile-test.json
   claude:
     environment:
       - ANTHROPIC_BASE_URL=http://proxy:8080
@@ -112,8 +112,8 @@ if [ "$READY" != "true" ]; then
   exit 1
 fi
 
-# Copy whitelist to writable location inside proxy (WHITELIST_PATH=/tmp/whitelist-test.json)
-docker compose exec -T proxy cp /etc/claude-secure/whitelist.json /tmp/whitelist-test.json
+# Copy profile to writable location inside proxy (PROFILE_PATH=/tmp/profile-test.json)
+docker compose exec -T proxy cp /etc/claude-secure/profile.json /tmp/profile-test.json
 
 # Start mock upstream inside proxy container
 echo "Starting mock upstream server..."
@@ -238,19 +238,19 @@ fi
 report "SECR-03" "Placeholders restored to real values in responses" $SECR03_OK
 
 # =========================================================================
-# SECR-04: Config hot-reload (whitelist changes without restart)
+# SECR-04: Config hot-reload (profile changes without restart)
 # =========================================================================
 # Baseline: secrets are being redacted (already proven by SECR-02)
-# Now remove the GITHUB entry from whitelist inside the proxy container.
-# The override sets WHITELIST_PATH=/tmp/whitelist-test.json (a container-local
+# Now remove the GITHUB entry from profile inside the proxy container.
+# The override sets PROFILE_PATH=/tmp/profile-test.json (a container-local
 # copy created at startup). Proxy re-reads on each request.
 
 # Save original inside container
-docker compose exec -T proxy cp /tmp/whitelist-test.json /tmp/whitelist-test.json.bak 2>/dev/null
+docker compose exec -T proxy cp /tmp/profile-test.json /tmp/profile-test.json.bak 2>/dev/null
 
 # Remove GITHUB entry inside container (proxy re-reads on each request)
 docker compose exec -T proxy sh -c \
-  "node -e \"const d=JSON.parse(require('fs').readFileSync('/tmp/whitelist-test.json','utf8')); d.secrets=d.secrets.filter(s=>s.env_var!=='GITHUB_TOKEN'); require('fs').writeFileSync('/tmp/whitelist-test.json',JSON.stringify(d,null,2))\""
+  "node -e \"const d=JSON.parse(require('fs').readFileSync('/tmp/profile-test.json','utf8')); d.secrets=d.secrets.filter(s=>s.env_var!=='GITHUB_TOKEN'); require('fs').writeFileSync('/tmp/profile-test.json',JSON.stringify(d,null,2))\""
 
 # Clear upstream log
 docker compose exec -T proxy truncate -s 0 /tmp/upstream-requests.log 2>/dev/null
@@ -272,11 +272,11 @@ if echo "$UPSTREAM_LOG3" | grep -q 'ghp_test_secret_value_12345' && \
 fi
 report "SECR-04" "Config hot-reload: removed secret no longer redacted" $SECR04_OK
 
-# Restore original whitelist inside container
+# Restore original profile inside container
 docker compose exec -T proxy sh -c \
-  "cp /tmp/whitelist-test.json.bak /tmp/whitelist-test.json" 2>/dev/null || \
+  "cp /tmp/profile-test.json.bak /tmp/profile-test.json" 2>/dev/null || \
   docker compose exec -T proxy sh -c \
-  "cat /tmp/whitelist-test.json.bak > /tmp/whitelist-test.json" 2>/dev/null
+  "cat /tmp/profile-test.json.bak > /tmp/profile-test.json" 2>/dev/null
 
 # =========================================================================
 # SECR-04b: Config hot-reload -- re-added secret is redacted again
