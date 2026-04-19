@@ -114,29 +114,48 @@ claude-secure replay <name> <delivery-id>
 
 ### Profiles
 
-A profile is a named workspace with its own secrets and allowed domains.
+A profile is a named workspace with its own credentials, secrets, and allowed domains.
+
+#### Creating a profile
 
 ```bash
-# Create a profile — prompts for workspace path and credentials, then exits
-claude-secure --profile myproject
-
-# Start a session for the created profile
-claude-secure start myproject
+claude-secure --profile <name>
 ```
 
-Profile directory layout:
+Name rules: lowercase alphanumeric and hyphens, max 63 characters.
+
+Interactive setup prompts:
+
+1. **Workspace path** — absolute path where the project is mounted inside the container. Default: `~/claude-workspace-<name>`. Created if it doesn't exist.
+2. **Copy credentials** — if another profile with a `.env` already exists, you are offered to copy its auth credentials. Skip to enter new ones.
+3. **Auth method**:
+   - `1` (default) — OAuth token. Run `claude setup-token` first to obtain yours.
+   - `2` — API key. Optionally enter a custom base URL (e.g. a corporate gateway); leave blank for `https://api.anthropic.com`.
+
+The command writes `profile.json` and `.env`, then exits. It does **not** start any containers.
+
+```bash
+# After creation:
+claude-secure start <name>
+```
+
+If the profile already exists the command prints its path and exits without modifying it.
+
+#### Profile directory layout
+
 ```
 ~/.claude-secure/profiles/<name>/
-  profile.json      # workspace, system_prompt, secrets[]
-  .env              # auth token/key and raw secret values
+  profile.json      # workspace path, secrets[], optional system_prompt and repo
+  .env              # auth token/key and raw secret values (mode 600)
 ```
 
-`profile.json` schema:
+#### `profile.json` schema
 
 ```json
 {
   "workspace": "/path/to/project",
-  "system_prompt": "optional system prompt for every session",
+  "system_prompt": "optional — injected via --system-prompt for every session",
+  "repo": "owner/repo",
   "secrets": [
     {
       "env_var": "GITHUB_TOKEN",
@@ -147,11 +166,68 @@ Profile directory layout:
 }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `workspace` | Absolute path to the project workspace |
-| `system_prompt` | Injected via `--system-prompt` for every session (interactive and headless) |
-| `secrets[]` | Per-secret entries: `env_var` (env variable name), `redacted` (opaque token used in LLM context), `domains` (allowed outbound domains for this secret) |
+| Field | Required | Description |
+|-------|----------|-------------|
+| `workspace` | yes | Absolute path mounted as the project workspace |
+| `system_prompt` | no | Injected for every interactive and headless session |
+| `repo` | no | `owner/repo` — used by `claude-secure spawn` to resolve this profile from an incoming webhook event |
+| `secrets[].env_var` | yes | Env variable name (must also appear in `.env`) |
+| `secrets[].redacted` | no | Opaque token substituted in LLM context instead of the real value |
+| `secrets[].domains` | no | Outbound domains the hook allows when this secret is in use |
+
+`profile.json` is re-read on every request — no restart needed after edits.
+
+#### `.env` file
+
+Created by the interactive setup. Holds the auth credential and any additional secrets:
+
+```bash
+# ~/.claude-secure/profiles/<name>/.env
+CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # or ANTHROPIC_API_KEY=...
+# REAL_ANTHROPIC_BASE_URL=https://yourcompany.com/anthropic/v1  # optional
+
+# Add project secrets below — one per line
+# Each env_var must have a matching entry in profile.json secrets[]
+GITHUB_TOKEN=ghp_xxx
+```
+
+Edit `.env` directly to add or rotate secrets. No restart needed for the proxy — it re-reads `profile.json` on every request. The containers do need a restart (`claude-secure stop <name>` then `start <name>`) if you change the auth credential itself.
+
+#### Managing secrets
+
+```bash
+# List secrets configured in a profile
+claude-secure profile <name> secret list
+
+# Add or update a secret
+claude-secure profile <name> secret add <KEY> [<value>] [--redacted <TOKEN>] [--domains d1,d2,...]
+# If <value> is omitted you are prompted silently (recommended to avoid shell history)
+# --redacted defaults to REDACTED_<KEY>
+# --domains is a comma-separated list; omit to leave the domains array empty
+
+# Remove a secret
+claude-secure profile <name> secret remove <KEY>
+```
+
+`secret add` writes the raw value to `.env` (mode 600) and adds the metadata entry to `profile.json secrets[]`. If the key already exists it is replaced in both files. The proxy re-reads `profile.json` on every request, so no restart is needed for redaction to take effect. The containers must be restarted (`stop` + `start`) for the new env var to be visible inside the Claude container.
+
+#### Profile lifecycle commands
+
+```bash
+claude-secure start <name>             # Start interactive session
+claude-secure stop <name>              # Stop containers
+claude-secure stop                     # Stop all profiles
+claude-secure status <name>            # Container status + Claude version
+claude-secure status                   # Status across all profiles
+claude-secure list                     # List profiles and running state
+claude-secure remove <name>            # Stop containers and delete profile config
+                                       # (Docker volumes are preserved)
+claude-secure logs <name>              # Tail all log files for the profile
+claude-secure logs <name> hook         # Hook script decisions only
+claude-secure logs <name> anthropic    # Proxy metadata only
+claude-secure logs <name> iptables     # Validator/iptables events only
+claude-secure logs <name> clear        # Delete log files for the profile
+```
 
 ---
 
@@ -169,6 +245,11 @@ claude-secure stop [name]              # Stop containers (all if no name given)
 claude-secure remove <name>            # Remove profile config and stop containers
 claude-secure logs <name>              # Tail log files [hook|anthropic|iptables|clear]
 claude-secure list                     # List all profiles and running status
+
+# Profile config (secrets)
+claude-secure profile <name> secret list
+claude-secure profile <name> secret add <KEY> [<value>] [--redacted <TOKEN>] [--domains d1,d2]
+claude-secure profile <name> secret remove <KEY>
 
 # Headless and replay
 claude-secure spawn <name> --event '<json>'    # Headless spawn
