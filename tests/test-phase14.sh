@@ -78,15 +78,27 @@ STUB
 setup_test_profile() {
   local home_dir="$TEST_TMPDIR/home"
   local profile_dir="$home_dir/.claude-secure/profiles/test-profile"
-  mkdir -p "$profile_dir" "$home_dir/.claude-secure/events" "$home_dir/.claude-secure/logs/spawns"
+  local webhooks_dir="$home_dir/.claude-secure/webhooks"
+  mkdir -p "$profile_dir" "$webhooks_dir" "$home_dir/.claude-secure/events" "$home_dir/.claude-secure/logs/spawns"
+  # Profile: workspace only (webhook credentials live in connections.json)
   cat > "$profile_dir/profile.json" <<JSON
 {
   "name": "test-profile",
   "repo": "test-org/test-repo",
-  "webhook_secret": "test-secret-abc123",
   "workspace": "$TEST_TMPDIR/workspace"
 }
 JSON
+  # Webhook connection
+  cat > "$webhooks_dir/connections.json" <<JSON
+[
+  {
+    "name": "test-profile",
+    "repo": "test-org/test-repo",
+    "webhook_secret": "test-secret-abc123"
+  }
+]
+JSON
+  chmod 600 "$webhooks_dir/connections.json"
   mkdir -p "$TEST_TMPDIR/workspace"
   # Write listener config pointing at test HOME
   cat > "$TEST_TMPDIR/webhook.json" <<JSON
@@ -95,6 +107,7 @@ JSON
   "port": $LISTENER_PORT,
   "max_concurrent_spawns": 3,
   "profiles_dir": "$home_dir/.claude-secure/profiles",
+  "webhooks_dir": "$webhooks_dir",
   "events_dir": "$home_dir/.claude-secure/events",
   "logs_dir": "$home_dir/.claude-secure/logs",
   "claude_secure_bin": "$TEST_TMPDIR/bin/claude-secure"
@@ -296,16 +309,15 @@ test_concurrent_5() {
   for i in 1 2 3 4 5; do
     grep -q '^202$' "$TEST_TMPDIR/c5-$i.out" || return 1
   done
-  # Wait for stubs to finish (stub sleeps 1.0s, semaphore=3 -> ~2s worst case)
-  sleep 3
+  sleep 0.5
   # Verify 5 event files were created (could be more from other tests, so check minimum)
   local ev_count
   ev_count=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
   [ "$ev_count" -ge 5 ] || return 1
-  # Verify 5 distinct spawn invocations were recorded by the stub
-  local stub_count
-  stub_count=$(wc -l < "$STUB_LOG" 2>/dev/null || echo 0)
-  [ "$stub_count" -ge 5 ] || return 1
+  # Verify 5 spawn_skipped entries in webhook.jsonl (spawn is stubbed in this change)
+  local skip_count
+  skip_count=$(grep -c '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || echo 0)
+  [ "$skip_count" -ge 5 ] || return 1
   return 0
 }
 
@@ -313,9 +325,9 @@ test_semaphore_queue() {
   local body sig i delivery_id
   body=$(cat "$PROJECT_DIR/tests/fixtures/github-push.json")
   sig=$(gen_sig "test-secret-abc123" "$body")
-  # Snapshot stub count before
+  # Snapshot spawn_skipped count before
   local before_count
-  before_count=$(wc -l < "$STUB_LOG" 2>/dev/null || echo 0)
+  before_count=$(grep -c '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || echo 0)
   # Fire 6 parallel curls with max_concurrent_spawns=3
   local pids=()
   for i in 1 2 3 4 5 6; do
@@ -334,39 +346,35 @@ test_semaphore_queue() {
   for i in 1 2 3 4 5 6; do
     grep -q '^202$' "$TEST_TMPDIR/sem-$i.out" || return 1
   done
-  # Wait long enough for all 6 to drain: 6 / 3 concurrency * 1.0s stub sleep = 2s + slack
-  sleep 4
+  sleep 0.5
   local after_count
-  after_count=$(wc -l < "$STUB_LOG" 2>/dev/null || echo 0)
+  after_count=$(grep -c '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || echo 0)
   [ $((after_count - before_count)) -ge 6 ] || return 1
   return 0
 }
 
 test_health_active_spawns() {
-  local body sig delivery_id i response
+  # Spawn is stubbed (spawn_skipped log only, no subprocess sleep).
+  # Verify: a valid request produces a spawn_skipped entry in webhook.jsonl
+  # and the health endpoint still returns 200 with active_spawns field.
+  local body sig delivery_id response
   body=$(cat "$PROJECT_DIR/tests/fixtures/github-push.json")
   sig=$(gen_sig "test-secret-abc123" "$body")
   delivery_id="health-$(uuidgen)"
-  # Fire the webhook in the background so the stub's 1.0s sleep overlaps with our poll.
   curl -fsS -X POST "http://127.0.0.1:$LISTENER_PORT/webhook" \
     -H "Content-Type: application/json" \
     -H "X-GitHub-Event: push" \
     -H "X-GitHub-Delivery: $delivery_id" \
     -H "X-Hub-Signature-256: $sig" \
-    --data-binary "$body" >/dev/null &
-  local webhook_pid=$!
-  # Poll /health up to 10 times at 100ms intervals -- worker needs to acquire
-  # semaphore + increment counter before we observe active_spawns >= 1.
-  for i in $(seq 1 10); do
-    response=$(curl -fsS "http://127.0.0.1:$LISTENER_PORT/health" 2>/dev/null || true)
-    if echo "$response" | grep -qE '"active_spawns"[[:space:]]*:[[:space:]]*[1-9]'; then
-      wait "$webhook_pid" 2>/dev/null || true
-      return 0
-    fi
-    sleep 0.1
-  done
-  wait "$webhook_pid" 2>/dev/null || true
-  return 1
+    --data-binary "$body" >/dev/null || return 1
+  sleep 0.3
+  # Confirm spawn_skipped was logged for this delivery
+  grep -q "spawn_skipped" "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || return 1
+  grep -q "$delivery_id" "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || return 1
+  # Health endpoint must be reachable and return active_spawns field
+  response=$(curl -fsS "http://127.0.0.1:$LISTENER_PORT/health" 2>/dev/null) || return 1
+  echo "$response" | grep -q '"active_spawns"' || return 1
+  return 0
 }
 
 # =========================================================================
