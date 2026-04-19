@@ -52,7 +52,7 @@ Everything on the host falls into two trees:
 | `~/.claude-secure/app/` | user | Copy of the project tree (updated by `claude-secure update`) |
 | `~/.claude-secure/logs/` | user | Structured logs written by the listener (`webhook.jsonl`) |
 | `~/.claude-secure/webhooks/webhook.json` | user (600) | Webhook listener runtime config: bind address, port, operational settings |
-| `~/.claude-secure/profiles/<name>/profile.json` | user | Also holds `github_token` (per-repo GitHub PAT for TODO detection) and `webhook_secret` |
+| `~/.claude-secure/webhooks/connections.json` | user (600) | Webhook connections: one entry per repo with `webhook_secret`, optional `github_token` and event filters |
 | `/etc/systemd/system/claude-secure-webhook.service` | root | Systemd unit for the webhook listener (runs as installing user via `User=`) |
 | `/opt/claude-secure/` | root | Installed app files: `webhook/listener.py`, templates, reaper script |
 | `/usr/local/bin/claude-secure` | root | CLI wrapper |
@@ -252,7 +252,41 @@ The validator shares the claude container's network namespace (`network_mode: se
 
 ## Webhook Listener
 
-A single listener process on the VPS handles all repos. There is no second listener — GitHub webhooks from every repo hit port 9000, and the listener routes each event by matching `repository.full_name` in the payload against each profile's `repo` field. Every profile gets its own `webhook_secret`; HMAC is verified per-profile before dispatch.
+A single listener process on the VPS handles all repos. There is no second listener — GitHub webhooks from every repo hit port 9000, and the listener routes each event by matching `repository.full_name` against entries in `~/.claude-secure/webhooks/connections.json`. Every connection has its own `webhook_secret`; HMAC is verified per-connection before dispatch.
+
+### Connections
+
+Webhook connections are stored independently of Claude spawn profiles in `~/.claude-secure/webhooks/connections.json` (mode 600, directory mode 700).
+
+**Connection fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Unique identifier (case-sensitive) |
+| `repo` | yes | `owner/repo` — matched against incoming `repository.full_name` |
+| `webhook_secret` | yes | HMAC-SHA256 secret configured in GitHub |
+| `github_token` | no | GitHub PAT for fetching commit diffs (TODO detection) |
+| `webhook_event_filter` | no | Per-event-type filter config |
+| `webhook_bot_users` | no | List of bot usernames to ignore |
+
+**Managing connections:**
+
+```bash
+# Add a connection
+claude-secure webhook-listener --add-connection \
+  --name myrepo --repo org/myrepo --webhook-secret <secret>
+
+# Set GitHub PAT for diff-filter TODO detection
+claude-secure webhook-listener --set-token <github-pat> --name myrepo
+
+# List connections (secret and token are redacted)
+claude-secure webhook-listener --list-connections
+
+# Remove a connection
+claude-secure webhook-listener --remove-connection myrepo
+```
+
+> **Note:** Spawn is currently stubbed — the listener receives and validates webhooks but does not yet invoke `claude-secure spawn`. Profile-based spawning is planned for a future change.
 
 ### Status
 
@@ -276,15 +310,15 @@ claude-secure webhook-listener --set-port <port>          # Port (default: 9000)
 
 Bind and port are persisted to `~/.claude-secure/webhooks/webhook.json`. Override the path with `$WEBHOOK_CONFIG`.
 
-#### GitHub token (per repo)
+#### GitHub token (per connection)
 
-The listener uses a GitHub PAT to fetch commit diffs for TODO detection. Each profile stores its own token, so different repos can use different PATs.
+The listener uses a GitHub PAT to fetch commit diffs for TODO detection. Each connection stores its own token.
 
 ```bash
-claude-secure webhook-listener --set-token <github-pat> --profile <name>
+claude-secure webhook-listener --set-token <github-pat> --name <connection-name>
 ```
 
-Persisted to `~/.claude-secure/profiles/<name>/profile.json`. If only one profile exists, `--profile` can be omitted. Replace only when rotating the PAT.
+Persisted to `~/.claude-secure/webhooks/connections.json` in the named connection's entry. Replace only when rotating the PAT.
 
 #### Template directory
 
@@ -310,27 +344,43 @@ The `docs_dir` key in `~/.claude-secure/webhooks/webhook.json` points at the doc
 2. Restart the listener: `sudo systemctl restart claude-secure-webhook`
 3. Verify: `claude-secure webhook-listener status`
 
-### Adding a second repo
+### Adding a repo
 
-Each repo gets its own profile with its own `webhook_secret` and `github_token`. The listener port stays unchanged.
+Each repo gets its own connection entry with its own `webhook_secret`. The listener port stays unchanged.
 
-1. Create a profile with `repo` set to the new `owner/repo`:
+1. Add a connection:
    ```bash
-   claude-secure --profile myproject2
-   # enter owner/repo when prompted
+   claude-secure webhook-listener --add-connection \
+     --name myrepo --repo org/myrepo --webhook-secret <secret>
+   # optionally set a PAT for TODO diff detection:
+   claude-secure webhook-listener --set-token <pat> --name myrepo
    ```
-2. Add `webhook_secret` and optionally a repo-specific `github_token` to the profile:
-   ```bash
-   # ~/.claude-secure/profiles/myproject2/profile.json
-   # add: "webhook_secret": "<secret>"
-   claude-secure webhook-listener --set-token <pat> --profile myproject2
-   ```
-3. Register a GitHub webhook on the repo:
-   - **URL:** `https://<vps>:9000/`
-   - **Secret:** same value as `webhook_secret` above
+2. Register a GitHub webhook on the repo:
+   - **URL:** `https://<vps>:9000/webhook`
+   - **Secret:** same value as `--webhook-secret` above
    - **Content type:** `application/json`
 
-No new listener, no new port — the existing systemd service routes events by matching `repository.full_name` against each profile's `repo` field.
+No new listener, no new port — the existing systemd service routes events by `repo` field in `connections.json`.
+
+### Migrating from profile.json webhook fields
+
+If you have existing `webhook_secret` / `github_token` in a `profile.json`, migrate manually:
+
+```bash
+# 1. Find the values
+cat ~/.claude-secure/profiles/<name>/profile.json | jq '{repo, webhook_secret, github_token}'
+
+# 2. Add a connection
+claude-secure webhook-listener --add-connection \
+  --name <name> --repo <repo> --webhook-secret <webhook_secret>
+claude-secure webhook-listener --set-token <github_token> --name <name>
+
+# 3. Optionally remove the old fields from profile.json (no longer read by listener)
+
+# 4. Restart the listener
+sudo systemctl restart claude-secure-webhook
+claude-secure webhook-listener status
+```
 
 ---
 

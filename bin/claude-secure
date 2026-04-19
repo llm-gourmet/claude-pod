@@ -1969,6 +1969,42 @@ ASKPASS
 }
 
 # =========================================================================
+# webhook-connections: manage ~/.claude-secure/webhooks/connections.json
+# =========================================================================
+
+_webhook_connections_file() {
+  echo "$CONFIG_DIR/webhooks/connections.json"
+}
+
+_webhook_read_connections() {
+  local f; f=$(_webhook_connections_file)
+  if [ ! -f "$f" ]; then echo "[]"; return 0; fi
+  cat "$f"
+}
+
+_webhook_write_connections() {
+  local json="$1"
+  local dir="$CONFIG_DIR/webhooks"
+  local f="$dir/connections.json"
+  if [ ! -d "$dir" ]; then mkdir -p "$dir"; chmod 700 "$dir"; fi
+  local tmp; tmp=$(mktemp "$dir/connections.XXXXXXXX.json")
+  printf '%s\n' "$json" > "$tmp"
+  mv "$tmp" "$f"
+  chmod 600 "$f"
+}
+
+_webhook_find_connection() {
+  local name="$1"
+  local connections; connections=$(_webhook_read_connections)
+  local conn; conn=$(printf '%s' "$connections" | jq -r --arg n "$name" '.[] | select(.name == $n) | @json' 2>/dev/null | head -1)
+  if [ -z "$conn" ]; then
+    echo "Error: connection '$name' not found. Run --list-connections to see available connections." >&2
+    return 1
+  fi
+  echo "$conn"
+}
+
+# =========================================================================
 # webhook-listener: configure and inspect the webhook listener service
 # =========================================================================
 
@@ -2027,25 +2063,34 @@ _webhook_json_set_key() {
 }
 
 cmd_webhook_listener() {
-  local set_token="" set_bind="" set_port="" profile_name=""
+  local set_token="" set_bind="" set_port="" conn_name=""
+  local add_connection=0 remove_connection="" list_connections=0
+  local conn_repo="" conn_secret=""
   local subcmd=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --set-token) set_token="$2"; shift 2 ;;
-      --set-bind)  set_bind="$2";  shift 2 ;;
-      --set-port)  set_port="$2";  shift 2 ;;
-      --profile)   profile_name="$2"; shift 2 ;;
+      --set-token)         set_token="$2";         shift 2 ;;
+      --set-bind)          set_bind="$2";           shift 2 ;;
+      --set-port)          set_port="$2";           shift 2 ;;
+      --name)              conn_name="$2";          shift 2 ;;
+      --add-connection)    add_connection=1;        shift ;;
+      --remove-connection) remove_connection="$2";  shift 2 ;;
+      --list-connections)  list_connections=1;      shift ;;
+      --repo)              conn_repo="$2";          shift 2 ;;
+      --webhook-secret)    conn_secret="$2";        shift 2 ;;
       --help|-h)
         echo "Usage: claude-secure webhook-listener [subcommand]"
-        echo "       claude-secure webhook-listener --set-token <pat> --profile <name>"
+        echo "       claude-secure webhook-listener --add-connection --name <n> --repo <r> --webhook-secret <s>"
+        echo "       claude-secure webhook-listener --remove-connection <name>"
+        echo "       claude-secure webhook-listener --list-connections"
+        echo "       claude-secure webhook-listener --set-token <pat> --name <name>"
         echo "       claude-secure webhook-listener --set-bind <addr>"
         echo "       claude-secure webhook-listener --set-port <port>"
         echo "       claude-secure webhook-listener status"
         echo ""
-        echo "Configure the webhook listener. Bind/port are persisted to"
-        echo "~/.claude-secure/webhooks/webhook.json. GitHub token is stored"
-        echo "per-profile in ~/.claude-secure/profiles/<name>/profile.json."
+        echo "Connections are stored in ~/.claude-secure/webhooks/connections.json."
+        echo "Bind/port are persisted to ~/.claude-secure/webhooks/webhook.json."
         return 0
         ;;
       status) subcmd="status"; shift ;;
@@ -2056,39 +2101,69 @@ cmd_webhook_listener() {
 
   local WEBHOOK_JSON="${WEBHOOK_CONFIG:-$HOME/.claude-secure/webhooks/webhook.json}"
 
-  if [ -n "$set_token" ]; then
-    # Resolve target profile — search profiles/ and docs/ combined.
-    if [ -z "$profile_name" ]; then
-      local profiles_count docs_count total_count
-      profiles_count=$(find "$CONFIG_DIR/profiles" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
-      docs_count=$(find "$CONFIG_DIR/docs" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
-      total_count=$(( profiles_count + docs_count ))
-      if [ "$total_count" -eq 1 ]; then
-        profile_name=$(
-          { find "$CONFIG_DIR/profiles" -maxdepth 1 -mindepth 1 -type d 2>/dev/null;
-            find "$CONFIG_DIR/docs"     -maxdepth 1 -mindepth 1 -type d 2>/dev/null; } \
-          | xargs -I{} basename {}
-        )
-      else
-        echo "Error: --profile <name> is required when multiple profiles exist." >&2
-        echo "Available profiles:" >&2
-        { find "$CONFIG_DIR/profiles" -maxdepth 1 -mindepth 1 -type d 2>/dev/null;
-          find "$CONFIG_DIR/docs"     -maxdepth 1 -mindepth 1 -type d 2>/dev/null; } \
-          | xargs -I{} basename {} | sort >&2
-        return 1
-      fi
-    fi
-    local pjson
-    pjson="$(resolve_profile_dir "$profile_name")/profile.json"
-    if [ ! -f "$pjson" ]; then
-      echo "Error: profile '$profile_name' not found at $pjson" >&2
+  # --add-connection
+  if [ "$add_connection" -eq 1 ]; then
+    if [ -z "$conn_name" ] || [ -z "$conn_repo" ] || [ -z "$conn_secret" ]; then
+      echo "Error: --add-connection requires --name, --repo, and --webhook-secret" >&2
       return 1
     fi
-    local tmp
-    tmp=$(mktemp)
-    jq --arg t "$set_token" '.github_token = $t' "$pjson" > "$tmp" && mv "$tmp" "$pjson"
-    chmod 600 "$pjson"
-    echo "Set github_token=<redacted> in profile '$profile_name'"
+    local connections; connections=$(_webhook_read_connections)
+    local existing; existing=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" '.[] | select(.name == $n) | .name' 2>/dev/null)
+    if [ -n "$existing" ]; then
+      echo "Error: connection '$conn_name' already exists" >&2
+      return 1
+    fi
+    local new_conn; new_conn=$(jq -n --arg n "$conn_name" --arg r "$conn_repo" \
+      --arg s "$conn_secret" '{name:$n,repo:$r,webhook_secret:$s}')
+    local updated; updated=$(printf '%s' "$connections" | jq --argjson c "$new_conn" '. + [$c]')
+    _webhook_write_connections "$updated"
+    echo "Added connection '$conn_name'"
+    return 0
+  fi
+
+  # --remove-connection
+  if [ -n "$remove_connection" ]; then
+    local connections; connections=$(_webhook_read_connections)
+    local existing; existing=$(printf '%s' "$connections" | jq -r --arg n "$remove_connection" '.[] | select(.name == $n) | .name' 2>/dev/null)
+    if [ -z "$existing" ]; then
+      echo "Error: connection '$remove_connection' not found" >&2
+      return 1
+    fi
+    local updated; updated=$(printf '%s' "$connections" | jq --arg n "$remove_connection" '[.[] | select(.name != $n)]')
+    _webhook_write_connections "$updated"
+    echo "Removed connection '$remove_connection'"
+    return 0
+  fi
+
+  # --list-connections
+  if [ "$list_connections" -eq 1 ]; then
+    local connections; connections=$(_webhook_read_connections)
+    local count; count=$(printf '%s' "$connections" | jq 'length' 2>/dev/null)
+    if [ "${count:-0}" -eq 0 ]; then
+      echo "No connections configured."
+      return 0
+    fi
+    printf '%s' "$connections" | jq -r '.[] | "\(.name)  \(.repo)"'
+    return 0
+  fi
+
+  # --set-token
+  if [ -n "$set_token" ]; then
+    if [ -z "$conn_name" ]; then
+      echo "Error: --name <name> is required with --set-token" >&2
+      return 1
+    fi
+    local connections; connections=$(_webhook_read_connections)
+    local existing; existing=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" '.[] | select(.name == $n) | .name' 2>/dev/null)
+    if [ -z "$existing" ]; then
+      echo "Error: connection '$conn_name' not found" >&2
+      return 1
+    fi
+    local updated; updated=$(printf '%s' "$connections" | jq --arg n "$conn_name" --arg t "$set_token" \
+      '[.[] | if .name == $n then .github_token = $t else . end]')
+    _webhook_write_connections "$updated"
+    echo "Set github_token=<redacted> in connection '$conn_name'"
+    return 0
   fi
 
   if [ -n "$set_bind" ]; then
@@ -2101,14 +2176,14 @@ cmd_webhook_listener() {
     echo "Set port=$set_port"
   fi
 
-  if [ -n "$set_token" ] || [ -n "$set_bind" ] || [ -n "$set_port" ]; then
+  if [ -n "$set_bind" ] || [ -n "$set_port" ]; then
     return 0
   fi
 
   case "${subcmd:-}" in
     status) _webhook_listener_status ;;
     "")
-      echo "Usage: claude-secure webhook-listener [status|--set-token|--set-bind|--set-port]" >&2
+      echo "Usage: claude-secure webhook-listener [status|--add-connection|--set-token|--set-bind|--set-port]" >&2
       echo "Run 'claude-secure webhook-listener --help' for more information." >&2
       return 1
       ;;
