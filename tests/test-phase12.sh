@@ -535,7 +535,7 @@ DOCKER
 run_test "STOP-01: stop (no --profile) calls docker compose down for each profile" test_stop_01
 
 # =========================================================================
-# STOP-02: stop with --profile only stops that profile (regression)
+# STOP-02: stop <name> only stops that profile (regression)
 # =========================================================================
 test_stop_02() {
   local tmpdir
@@ -561,14 +561,14 @@ DOCKER
   HOME="$tmpdir" \
   CONFIG_DIR="$cfg" \
   PATH="$fake_bin:$PATH" \
-    bash "$PROJECT_DIR/bin/claude-secure" --profile alpha stop 2>/dev/null
+    bash "$PROJECT_DIR/bin/claude-secure" stop alpha 2>/dev/null
 
   # Only alpha must be stopped
   grep -q "^claude-alpha$" "$down_log" || return 1
   grep -q "^claude-beta$"  "$down_log" && return 1
   return 0
 }
-run_test "STOP-02: stop --profile X only stops profile X, not others" test_stop_02
+run_test "STOP-02: stop <name> only stops profile X, not others" test_stop_02
 
 # =========================================================================
 # SESS-01: interactive session auto-stops container after Claude exits

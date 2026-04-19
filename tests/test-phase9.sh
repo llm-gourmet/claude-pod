@@ -374,6 +374,63 @@ EOF
 run_test "MULTI-10: system_prompt field exported as CLAUDE_SECURE_SYSTEM_PROMPT" test_system_prompt_field
 
 # =========================================================================
+# MULTI-11: --profile <name> exits without starting containers
+# =========================================================================
+test_profile_flag_no_containers() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf '$tmpdir'" RETURN
+  local cfg="$tmpdir/.claude-secure"
+  mkdir -p "$cfg/profiles"
+
+  local fake_bin="$tmpdir/bin"
+  local docker_log="$tmpdir/docker.log"
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/docker" <<DOCKER
+#!/bin/bash
+echo "\$*" >> "$docker_log"
+exit 0
+DOCKER
+  chmod +x "$fake_bin/docker"
+
+  local ws="$tmpdir/ws"
+  mkdir -p "$ws"
+
+  # Inputs: workspace path, auth method (2=API key), API key, base URL (empty=default)
+  printf '%s\n%s\n%s\n%s\n' "$ws" "2" "test-api-key-dummy" "" | \
+    HOME="$tmpdir" CONFIG_DIR="$cfg" PATH="$fake_bin:$PATH" \
+      bash "$PROJECT_DIR/bin/claude-secure" --profile newprof 2>/dev/null
+
+  # Profile should be created
+  [ -f "$cfg/profiles/newprof/profile.json" ] || return 1
+
+  # docker compose up must NOT have been called
+  if [ -f "$docker_log" ] && grep -q "compose up" "$docker_log"; then
+    return 1
+  fi
+  return 0
+}
+run_test "MULTI-11: --profile exits without starting containers" test_profile_flag_no_containers
+
+# =========================================================================
+# MULTI-12: start <name> with unknown profile prints error and exits non-zero
+# =========================================================================
+test_start_unknown_profile() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf '$tmpdir'" RETURN
+  local cfg="$tmpdir/.claude-secure"
+  mkdir -p "$cfg/profiles"
+
+  local output
+  output=$(HOME="$tmpdir" CONFIG_DIR="$cfg" \
+    bash "$PROJECT_DIR/bin/claude-secure" start nonexistent 2>&1) && return 1
+  echo "$output" | grep -qi "not found\|does not exist" || return 1
+  return 0
+}
+run_test "MULTI-12: start with unknown profile exits non-zero with error" test_start_unknown_profile
+
+# =========================================================================
 # Summary
 # =========================================================================
 echo ""
