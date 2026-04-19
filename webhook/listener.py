@@ -226,6 +226,7 @@ class Config:
         self.port = int(data.get("port", 9000))
         self.max_concurrent_spawns = int(data.get("max_concurrent_spawns", 3))
         self.profiles_dir = pathlib.Path(data["profiles_dir"])
+        self.docs_dir = pathlib.Path(data["docs_dir"]) if data.get("docs_dir") else None
         self.events_dir = pathlib.Path(data["events_dir"])
         self.logs_dir = pathlib.Path(data["logs_dir"])
         self.claude_secure_bin = data.get(
@@ -291,8 +292,15 @@ def log_event(**kwargs):
 # ---------------------------------------------------------------------------
 # Profile resolution (D-08, Pattern 4)
 # ---------------------------------------------------------------------------
-def resolve_profile_by_repo(profiles_dir: pathlib.Path, repo_full_name: str):
-    """Scan profiles_dir for a profile whose `repo` matches repo_full_name.
+def resolve_profile_by_repo(
+    profiles_dir: pathlib.Path,
+    repo_full_name: str,
+    docs_dir: "pathlib.Path | None" = None,
+):
+    """Scan profiles_dir (then docs_dir) for a profile whose `repo` matches repo_full_name.
+
+    profiles_dir is checked first so project profiles take priority over docs
+    profiles when both directories contain a profile for the same repo.
 
     Returns dict {name, repo, webhook_secret, webhook_event_filter,
     webhook_bot_users} or None. The filter + bot_users fields are loaded
@@ -303,28 +311,29 @@ def resolve_profile_by_repo(profiles_dir: pathlib.Path, repo_full_name: str):
     """
     if not repo_full_name:
         return None
-    if not profiles_dir.exists():
-        return None
-    for profile_json in profiles_dir.glob("*/profile.json"):
-        try:
-            data = json.loads(profile_json.read_text())
-        except (OSError, json.JSONDecodeError):
-            # Profile mid-write or unreadable -- skip and continue
+    for search_dir in [profiles_dir, docs_dir]:
+        if search_dir is None or not search_dir.exists():
             continue
-        if data.get("repo") == repo_full_name:
-            secret = data.get("webhook_secret")
-            if not secret:
-                # Profile exists but has no webhook secret configured
-                return None
-            return {
-                "name": profile_json.parent.name,
-                "repo": repo_full_name,
-                "webhook_secret": secret,
-                "webhook_event_filter": data.get("webhook_event_filter") or {},
-                "webhook_bot_users": data.get("webhook_bot_users") or [],
-                "todo_path_pattern": data.get("todo_path_pattern") or "",
-                "github_token": data.get("github_token") or "",
-            }
+        for profile_json in search_dir.glob("*/profile.json"):
+            try:
+                data = json.loads(profile_json.read_text())
+            except (OSError, json.JSONDecodeError):
+                # Profile mid-write or unreadable -- skip and continue
+                continue
+            if data.get("repo") == repo_full_name:
+                secret = data.get("webhook_secret")
+                if not secret:
+                    # Profile exists but has no webhook secret configured
+                    return None
+                return {
+                    "name": profile_json.parent.name,
+                    "repo": repo_full_name,
+                    "webhook_secret": secret,
+                    "webhook_event_filter": data.get("webhook_event_filter") or {},
+                    "webhook_bot_users": data.get("webhook_bot_users") or [],
+                    "todo_path_pattern": data.get("todo_path_pattern") or "",
+                    "github_token": data.get("github_token") or "",
+                }
     return None
 
 
@@ -512,7 +521,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         if isinstance(repo_obj, dict):
             repo = repo_obj.get("full_name")
 
-        profile = resolve_profile_by_repo(_config.profiles_dir, repo)
+        profile = resolve_profile_by_repo(_config.profiles_dir, repo, _config.docs_dir)
 
         # D-11: unknown repo -> 404 BEFORE HMAC check
         if profile is None:

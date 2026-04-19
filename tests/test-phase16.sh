@@ -266,6 +266,35 @@ test_installer_ships_report_templates() {
   return 0
 }
 
+test_resolve_report_template_from_docs_dir() {
+  # resolve_report_template should find templates under docs/<profile>/report-templates/
+  # when not present under profiles/<profile>/report-templates/.
+  local home_dir="$TEST_TMPDIR/home"
+  local docs_reports="$home_dir/.claude-secure/docs/test-profile/report-templates"
+  mkdir -p "$docs_reports"
+  local marker="DOCS_REPORT_$(uuidgen | tr -d -)"
+  printf '%s\n' "$marker content" > "$docs_reports/push.md"
+
+  local result rc
+  result=$(
+    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export CONFIG_DIR="$home_dir/.claude-secure"
+    export HOME="$home_dir"
+    export PROFILE="test-profile"
+    # shellcheck disable=SC1090
+    source "$PROJECT_DIR/bin/claude-secure" 2>&1
+    unset __CLAUDE_SECURE_SOURCE_ONLY
+    resolve_report_template "push"
+  )
+  rc=$?
+
+  rm -rf "$docs_reports"
+  [ $rc -eq 0 ] || return 1
+  [ -f "$result" ] || return 1
+  grep -q "$marker" "$result" || return 1
+  return 0
+}
+
 
 # =========================================================================
 # Helper: run do_spawn end-to-end in a subshell with fake claude stdout.
@@ -677,6 +706,7 @@ main() {
   run_test "templates exist"                    test_templates_exist
   run_test "no force-push in bin"               test_no_force_push_grep
   run_test "installer ships report templates"   test_installer_ships_report_templates
+  run_test "report template from docs/ dir"     test_resolve_report_template_from_docs_dir
   echo ""
 
   echo "--- OPS-02: Audit log ---"
