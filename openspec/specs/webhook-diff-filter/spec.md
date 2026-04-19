@@ -1,7 +1,7 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Listener fetches commit patch and filters TODO-only spawns
-When a push event matches a profile that has `todo_path_pattern` configured and a `github_token` is present in `webhook.json`, the listener SHALL fetch the commit patch from the GitHub API and evaluate whether the change contains a meaningful TODO modification before spawning.
+When a push event matches a connection that has `todo_path_pattern` configured and a `github_token` is present in `connections.json`, the listener SHALL fetch the commit patch from the GitHub API and evaluate whether the change contains a meaningful TODO modification before spawning.
 
 #### Scenario: New open todo item triggers spawn
 - **WHEN** a commit modifies `projects/JAD/TODOS.md` and the patch contains a line `+- [ ] some new task`
@@ -23,15 +23,15 @@ When a push event matches a profile that has `todo_path_pattern` configured and 
 - **WHEN** the GitHub API call to fetch the commit patch returns a non-200 status or raises a network error
 - **THEN** the listener logs a warning and permits the spawn (fail-open to avoid silent suppression)
 
-#### Scenario: Profile without todo_path_pattern is unaffected
-- **WHEN** a profile has no `todo_path_pattern` field in `profile.json`
+#### Scenario: Connection without todo_path_pattern is unaffected
+- **WHEN** a connection has no `todo_path_pattern` field in `connections.json`
 - **THEN** the diff filter is not invoked regardless of whether `github_token` is set
 
-### Requirement: github_token stored in webhook.json, never in container
-The `github_token` field in `/etc/claude-secure/webhook.json` SHALL be the only place the PAT is stored. It SHALL NOT be injected into any container environment variable, prompt template, or event file.
+### Requirement: github_token stored in connections.json, never in container
+The `github_token` field in `~/.claude-secure/webhooks/connections.json` SHALL be the only place the PAT is stored. It SHALL NOT be injected into any container environment variable, prompt template, or event file.
 
 #### Scenario: Token absent from spawn log
-- **WHEN** a spawn is triggered after a diff-filter pass
+- **WHEN** a webhook event is processed after a diff-filter pass
 - **THEN** the spawn log (`logs/spawns/<delivery_id>.log`) contains no occurrence of the PAT value
 
 #### Scenario: Token absent from event file
