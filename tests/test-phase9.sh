@@ -37,17 +37,16 @@ echo "========================================"
 echo ""
 
 # =========================================================================
-# MULTI-01: spawn requires --profile
-# Running 'spawn' without --profile should exit non-zero with error message
+# MULTI-01: spawn requires a profile name
+# Running 'spawn' without a name should exit non-zero with error message
 # =========================================================================
 test_profile_required_for_spawn() {
   local output
   output=$(bash "$PROJECT_DIR/bin/claude-secure" spawn 2>&1) && return 1
-  # Verify error message mentions --profile
   echo "$output" | grep -qi "profile" || return 1
   return 0
 }
-run_test "MULTI-01: --profile required for spawn" test_profile_required_for_spawn
+run_test "MULTI-01: profile name required for spawn" test_profile_required_for_spawn
 
 # =========================================================================
 # MULTI-02: DNS-safe instance name validation
@@ -374,7 +373,7 @@ EOF
 run_test "MULTI-10: system_prompt field exported as CLAUDE_SECURE_SYSTEM_PROMPT" test_system_prompt_field
 
 # =========================================================================
-# MULTI-11: --profile <name> exits without starting containers
+# MULTI-11: profile create <name> exits without starting containers
 # =========================================================================
 test_profile_flag_no_containers() {
   local tmpdir
@@ -399,7 +398,7 @@ DOCKER
   # Inputs: workspace path, auth method (2=API key), API key, base URL (empty=default)
   printf '%s\n%s\n%s\n%s\n' "$ws" "2" "test-api-key-dummy" "" | \
     HOME="$tmpdir" CONFIG_DIR="$cfg" PATH="$fake_bin:$PATH" \
-      bash "$PROJECT_DIR/bin/claude-secure" --profile newprof 2>/dev/null
+      bash "$PROJECT_DIR/bin/claude-secure" profile create newprof 2>/dev/null
 
   # Profile should be created
   [ -f "$cfg/profiles/newprof/profile.json" ] || return 1
@@ -410,7 +409,7 @@ DOCKER
   fi
   return 0
 }
-run_test "MULTI-11: --profile exits without starting containers" test_profile_flag_no_containers
+run_test "MULTI-11: profile create exits without starting containers" test_profile_flag_no_containers
 
 # =========================================================================
 # MULTI-12: start <name> with unknown profile prints error and exits non-zero
