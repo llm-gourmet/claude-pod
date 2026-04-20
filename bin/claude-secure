@@ -2338,9 +2338,9 @@ _webhook_json_set_key() {
 }
 
 cmd_webhook_listener() {
-  local set_token="" set_bind="" set_port="" conn_name=""
+  local set_token="" set_bind="" set_port="" set_profile="" conn_name=""
   local add_connection=0 remove_connection="" list_connections=0
-  local conn_repo="" conn_secret=""
+  local conn_repo="" conn_secret="" conn_profile=""
   local subcmd=""
 
   while [[ $# -gt 0 ]]; do
@@ -2348,7 +2348,9 @@ cmd_webhook_listener() {
       --set-token)         set_token="$2";         shift 2 ;;
       --set-bind)          set_bind="$2";           shift 2 ;;
       --set-port)          set_port="$2";           shift 2 ;;
+      --set-profile)       set_profile="$2";        shift 2 ;;
       --name)              conn_name="$2";          shift 2 ;;
+      --profile)           conn_profile="$2";       shift 2 ;;
       --add-connection)    add_connection=1;        shift ;;
       --remove-connection) remove_connection="$2";  shift 2 ;;
       --list-connections)  list_connections=1;      shift ;;
@@ -2356,10 +2358,10 @@ cmd_webhook_listener() {
       --webhook-secret)    conn_secret="$2";        shift 2 ;;
       --help|-h)
         echo "Usage: claude-secure webhook-listener [subcommand]"
-        echo "       claude-secure webhook-listener --add-connection --name <n> --repo <r> --webhook-secret <s>"
+        echo "       claude-secure webhook-listener --add-connection --name <n> --repo <r> --webhook-secret <s> [--profile <p>]"
         echo "       claude-secure webhook-listener --remove-connection <name>"
         echo "       claude-secure webhook-listener --list-connections"
-        echo "       claude-secure webhook-listener --set-token <pat> --name <name>"
+        echo "       claude-secure webhook-listener --set-profile <profile> --name <name>"
         echo "       claude-secure webhook-listener --set-bind <addr>"
         echo "       claude-secure webhook-listener --set-port <port>"
         echo "       claude-secure webhook-listener status"
@@ -2390,6 +2392,9 @@ cmd_webhook_listener() {
     fi
     local new_conn; new_conn=$(jq -n --arg n "$conn_name" --arg r "$conn_repo" \
       --arg s "$conn_secret" '{name:$n,repo:$r,webhook_secret:$s}')
+    if [ -n "$conn_profile" ]; then
+      new_conn=$(printf '%s' "$new_conn" | jq --arg p "$conn_profile" '. + {profile:$p}')
+    fi
     local updated; updated=$(printf '%s' "$connections" | jq --argjson c "$new_conn" '. + [$c]')
     _webhook_write_connections "$updated"
     echo "Added connection '$conn_name'"
@@ -2418,7 +2423,26 @@ cmd_webhook_listener() {
       echo "No connections configured."
       return 0
     fi
-    printf '%s' "$connections" | jq -r '.[] | "\(.name)  \(.repo)"'
+    printf '%s' "$connections" | jq -r '.[] | "\(.name)  \(.repo)" + (if .profile and .profile != .name then "  (profile: \(.profile))" else "" end)'
+    return 0
+  fi
+
+  # --set-profile
+  if [ -n "$set_profile" ]; then
+    if [ -z "$conn_name" ]; then
+      echo "Error: --name <name> is required with --set-profile" >&2
+      return 1
+    fi
+    local connections; connections=$(_webhook_read_connections)
+    local existing; existing=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" '.[] | select(.name == $n) | .name' 2>/dev/null)
+    if [ -z "$existing" ]; then
+      echo "Error: connection '$conn_name' not found" >&2
+      return 1
+    fi
+    local updated; updated=$(printf '%s' "$connections" | jq --arg n "$conn_name" --arg p "$set_profile" \
+      '[.[] | if .name == $n then .profile = $p else . end]')
+    _webhook_write_connections "$updated"
+    echo "Set profile='$set_profile' for connection '$conn_name'"
     return 0
   fi
 

@@ -75,9 +75,10 @@ claude-secure help                    # Show all commands
 
 # Webhook listener
 claude-secure webhook-listener status
-claude-secure webhook-listener --add-connection --name <n> --repo owner/repo --webhook-secret <s>
+claude-secure webhook-listener --add-connection --name <n> --repo owner/repo --webhook-secret <s> [--profile <p>]
 claude-secure webhook-listener --remove-connection <name>
 claude-secure webhook-listener --list-connections
+claude-secure webhook-listener --set-profile <profile> --name <name>
 claude-secure webhook-listener --set-bind <addr>
 claude-secure webhook-listener --set-port <port>
 
@@ -213,16 +214,24 @@ Connections are stored in `~/.claude-secure/webhooks/connections.json` (mode 600
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | yes | Unique identifier |
+| `name` | yes | Unique connection identifier |
 | `repo` | yes | `owner/repo` — matched against incoming `repository.full_name` |
 | `webhook_secret` | yes | HMAC-SHA256 secret configured in GitHub |
+| `profile` | no | Profile name to spawn — defaults to `name` if omitted |
 
 ```bash
-# Add a connection
+# Add a connection (profile defaults to name)
 claude-secure webhook-listener --add-connection \
   --name myrepo --repo org/myrepo --webhook-secret <secret>
 
-# List connections (secret redacted)
+# Add a connection with a different profile name
+claude-secure webhook-listener --add-connection \
+  --name myrepo --repo org/myrepo --webhook-secret <secret> --profile myrepo-docs
+
+# Change the profile for an existing connection
+claude-secure webhook-listener --set-profile myrepo-docs --name myrepo
+
+# List connections (secret redacted; profile shown when it differs from name)
 claude-secure webhook-listener --list-connections
 
 # Remove a connection

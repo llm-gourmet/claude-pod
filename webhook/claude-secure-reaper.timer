@@ -7,7 +7,7 @@
 
 [Unit]
 Description=claude-secure reaper periodic timer
-Documentation=https://github.com/llm-gourmet/claude-secure
+Documentation=https://github.com/llm-gourmet/claude-pod
 
 [Timer]
 # Fire 2 minutes after boot, then every 5 minutes from previous activation.
