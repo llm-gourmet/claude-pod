@@ -11,10 +11,10 @@ Was ist die Idee? 2–4 Sätze.
 Warum ist das interessant? Welches Problem löst es?
 
 ## Offene Fragen
-- ?
+- [ ] ?
 
-## Notizen
-*Dieser Abschnitt wächst. Gedanken, Recherchen, Verworfenes.*
+## Details
+- [Detail-Name](detail-name.md)
 
 ---
 
