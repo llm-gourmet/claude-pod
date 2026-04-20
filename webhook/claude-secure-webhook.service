@@ -32,6 +32,7 @@ SyslogIdentifier=claude-secure-webhook
 
 User=__WEBHOOK_USER__
 Group=__WEBHOOK_GROUP__
+Environment=HOME=__WEBHOOK_HOME__
 
 # === D-11 (Phase 17): Safe-subset systemd hardening ===
 # Each directive below was verified compatible with the listener's docker compose
