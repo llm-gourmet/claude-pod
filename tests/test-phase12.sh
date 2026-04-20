@@ -452,7 +452,7 @@ test_noinstance_01() {
 run_test "NOINSTANCE-01: --instance flag produces error" test_noinstance_01
 
 # =========================================================================
-# STAT-01: status without --profile shows claude-*/cs-* containers only
+# STAT-01: status (no name) shows claude-*/cs-* containers only
 # =========================================================================
 test_stat_01() {
   local tmpdir
@@ -496,10 +496,10 @@ DOCKER
 
   return 0
 }
-run_test "STAT-01: status (no --profile) filters to claude-*/cs-* containers" test_stat_01
+run_test "STAT-01: status (no name) filters to claude-*/cs-* containers" test_stat_01
 
 # =========================================================================
-# STOP-01: stop without --profile calls docker compose down for every profile
+# STOP-01: stop (no name) calls docker compose down for every profile
 # =========================================================================
 test_stop_01() {
   local tmpdir
@@ -532,7 +532,7 @@ DOCKER
   grep -q "^claude-beta$"  "$down_log" || return 1
   return 0
 }
-run_test "STOP-01: stop (no --profile) calls docker compose down for each profile" test_stop_01
+run_test "STOP-01: stop (no name) calls docker compose down for each profile" test_stop_01
 
 # =========================================================================
 # STOP-02: stop <name> only stops that profile (regression)

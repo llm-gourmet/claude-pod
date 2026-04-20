@@ -92,7 +92,7 @@ validate_profile() {
 
   if [ ! -d "$pdir" ]; then
     echo "ERROR: Profile '$name' does not exist at $pdir" >&2
-    echo "Run: claude-secure --profile $name  (to create interactively)" >&2
+    echo "Run: claude-secure profile create $name" >&2
     return 1
   fi
   if [ ! -f "$pdir/profile.json" ]; then
@@ -374,7 +374,7 @@ require_profile_arg() {
   local pdir
   pdir=$(resolve_profile_dir "$name")
   if [ ! -f "$pdir/profile.json" ]; then
-    echo "ERROR: profile '$name' not found. Run: claude-secure --profile $name" >&2
+    echo "ERROR: profile '$name' not found. Run: claude-secure profile create $name" >&2
     exit 1
   fi
   PROFILE="$name"
@@ -453,17 +453,41 @@ list_profiles() {
 }
 
 cmd_profile() {
-  local prof_name="${1:-}"
+  local first="${1:-}"
+
+  # profile create <name>
+  if [ "$first" = "create" ]; then
+    local prof_name="${2:-}"
+    if [ -z "$prof_name" ]; then
+      echo "ERROR: profile name is required" >&2
+      echo "Usage: claude-secure profile create <name>" >&2
+      exit 1
+    fi
+    validate_profile_name "$prof_name"
+    local prof_dir
+    prof_dir=$(resolve_profile_dir "$prof_name")
+    if [ -d "$prof_dir" ] && [ -f "$prof_dir/profile.json" ]; then
+      echo "Profile '$prof_name' already exists at $prof_dir"
+    else
+      create_profile "$prof_name"
+    fi
+    echo "Run 'claude-secure start $prof_name' to start a session."
+    exit 0
+  fi
+
+  # profile <name> [subcommand ...]
+  local prof_name="$first"
   if [ -z "$prof_name" ]; then
-    echo "ERROR: profile name is required" >&2
-    echo "Usage: claude-secure profile <name> secret <add|remove|list> [args...]" >&2
+    echo "ERROR: profile name or 'create' is required" >&2
+    echo "Usage: claude-secure profile create <name>" >&2
+    echo "       claude-secure profile <name> [secret|system-prompt] [args...]" >&2
     exit 1
   fi
   validate_profile_name "$prof_name"
   local prof_dir
   prof_dir=$(resolve_profile_dir "$prof_name")
   if [ ! -f "$prof_dir/profile.json" ]; then
-    echo "ERROR: Profile '$prof_name' not found. Run: claude-secure --profile $prof_name" >&2
+    echo "ERROR: Profile '$prof_name' not found. Run: claude-secure profile create $prof_name" >&2
     exit 1
   fi
   local subcmd="${2:-}"
@@ -503,9 +527,20 @@ cmd_profile() {
       esac
       ;;
     "")
-      echo "ERROR: Subcommand required: secret, system-prompt" >&2
-      echo "Usage: claude-secure profile <name> <secret|system-prompt> <action>" >&2
-      exit 1
+      # Bare: show profile info
+      local workspace secret_count running_state
+      workspace=$(jq -r '.workspace // "(not set)"' "$prof_dir/profile.json" 2>/dev/null)
+      secret_count=$(jq '.secrets | length' "$prof_dir/profile.json" 2>/dev/null || echo 0)
+      if COMPOSE_PROJECT_NAME="claude-$prof_name" docker compose -f "$APP_DIR/docker-compose.yml" ps --status running --format '{{.Service}}' 2>/dev/null | grep -q '^claude$'; then
+        running_state="running"
+      else
+        running_state="stopped"
+      fi
+      echo "Profile: $prof_name"
+      echo "  Path:      $prof_dir"
+      echo "  Workspace: $workspace"
+      echo "  Secrets:   $secret_count configured"
+      echo "  Status:    $running_state"
       ;;
     *)
       echo "ERROR: Unknown subcommand '$subcmd'. Use: secret, system-prompt" >&2
@@ -1459,7 +1494,7 @@ do_spawn() {
       local _spawn_pdir
       _spawn_pdir=$(resolve_profile_dir "$PROFILE")
       if [ ! -f "$_spawn_pdir/profile.json" ]; then
-        echo "ERROR: profile '$PROFILE' not found. Run: claude-secure --profile $PROFILE" >&2
+        echo "ERROR: profile '$PROFILE' not found. Run: claude-secure profile create $PROFILE" >&2
         _spawn_error_audit "spawn: profile '$PROFILE' not found"
         return 1
       fi
@@ -1502,7 +1537,7 @@ do_spawn() {
   # Validate event JSON is provided and valid
   if [ -z "$EVENT_JSON" ]; then
     echo "ERROR: --event or --event-file is required for spawn" >&2
-    echo "Usage: claude-secure spawn --profile <name> --event '<json>'" >&2
+    echo "Usage: claude-secure spawn <name> --event '<json>'" >&2
     _spawn_error_audit "spawn: --event or --event-file is required"
     return 1
   fi
@@ -1741,7 +1776,7 @@ do_replay() {
     local repo
     repo=$(jq -r '.repository.full_name // empty' "$event_file")
     if [ -z "$repo" ]; then
-      echo "ERROR: cannot determine repository from $event_file -- pass --profile" >&2
+      echo "ERROR: cannot determine repository from $event_file -- pass profile name: claude-secure replay <name> <delivery-id>" >&2
       return 1
     fi
     explicit_profile=$(resolve_profile_by_repo "$repo") || return 1
@@ -2464,18 +2499,16 @@ else
   unset _SELF_DIR _CANDIDATE_APP_DIR
 fi
 
-# Parse --profile flag (replaces --instance)
-PROFILE=""
+# Parse args; reject removed flags with helpful messages
 ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile)
-      if [ -z "${2:-}" ]; then
-        echo "ERROR: --profile requires a name" >&2; exit 1
-      fi
-      PROFILE="$2"; shift 2 ;;
+      _profile_hint="${2:-<name>}"
+      echo "ERROR: --profile flag removed. Use: claude-secure profile create $_profile_hint" >&2
+      exit 1 ;;
     --instance)
-      echo "ERROR: --instance is no longer supported. Use --profile instead." >&2
+      echo "ERROR: --instance is no longer supported. Use: claude-secure profile create <name>" >&2
       exit 1 ;;
     *) ARGS+=("$1"); shift ;;
   esac
@@ -2483,43 +2516,16 @@ done
 
 FIRST_ARG="${ARGS[0]:-}"
 
-# Validate profile name if provided
-if [ -n "$PROFILE" ]; then
-  validate_profile_name "$PROFILE"
-fi
-
-# Profile resolution: --profile is create-only, then exit
-if [ -n "$PROFILE" ]; then
-  PROFILE_DIR="$CONFIG_DIR/profiles/$PROFILE"
-  if [ -d "$PROFILE_DIR" ] && [ -f "$PROFILE_DIR/profile.json" ]; then
-    echo "Profile '$PROFILE' already exists at $PROFILE_DIR"
-  else
-    create_profile "$PROFILE"
-  fi
-  echo "Run 'claude-secure start $PROFILE' to start a session."
-  exit 0
-else
-  # No --profile: superuser mode (allowed for most commands). Exceptions:
-  #   - list/help/-h/--help: no config needed.
-  #   - replay: resolves its own profile from the event file before exec-ing
-  #     spawn, so skipping superuser load here avoids the interactive prompt.
-  #   - reap: Phase 17 background/timer-driven, must never prompt. Uses
-  #     LOG_DIR/CONFIG_DIR defaults and walks docker ps directly; no profile
-  #     config or profile merge is required. load_superuser_config would
-  #     `read -rp` for DEFAULT_WORKSPACE when config.sh is absent and block
-  #     forever in a non-interactive service context.
-  #   - spawn: requires --profile; if called without one do_spawn will print
-  #     its own error. Superuser merge is not valid for spawn.
-  #   - status: reads docker ps only; no workspace config needed.
-  case "$FIRST_ARG" in
-    list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs|webhook-listener|start|stop|remove|logs|profile)
-      : # skip superuser load
-      ;;
-    *)
-      load_superuser_config
-      ;;
-  esac
-fi
+# Superuser mode (allowed for most commands). Skip config load for commands
+# that don't need a merged workspace or that manage their own profile resolution.
+case "$FIRST_ARG" in
+  list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs|webhook-listener|start|stop|remove|logs|profile)
+    : # skip superuser load
+    ;;
+  *)
+    load_superuser_config
+    ;;
+esac
 
 # Parse log flags
 parse_log_flags "${ARGS[@]}"
@@ -2610,32 +2616,23 @@ case "$CMD" in
     exit 0
     ;;
   upgrade)
-    # Without --profile: upgrade all profiles.
-    # With --profile: upgrade only that profile (COMPOSE_PROJECT_NAME already set).
-    if [ -n "$PROFILE" ]; then
-      echo "Upgrading Claude Code for profile $PROFILE..."
-      docker compose -f "$APP_DIR/docker-compose.yml" build --no-cache --pull claude
-      echo ""
-      echo "Upgrade complete. Restart with: claude-secure --profile $PROFILE"
-    else
-      echo "Upgrading Claude Code for all profiles..."
-      shopt -s nullglob
-      _upgrade_count=0
-      for _pdir in "$CONFIG_DIR/profiles"/*/; do
-        _pname=$(basename "$_pdir")
-        echo "  [$_pname] upgrading..."
-        COMPOSE_PROJECT_NAME="claude-$_pname" \
-          docker compose -f "$APP_DIR/docker-compose.yml" build --no-cache --pull claude
-        _upgrade_count=$((_upgrade_count + 1))
-      done
-      shopt -u nullglob
-      if [ "$_upgrade_count" -eq 0 ]; then
-        echo "  No profiles found; rebuilding default image..."
+    echo "Upgrading Claude Code for all profiles..."
+    shopt -s nullglob
+    _upgrade_count=0
+    for _pdir in "$CONFIG_DIR/profiles"/*/; do
+      _pname=$(basename "$_pdir")
+      echo "  [$_pname] upgrading..."
+      COMPOSE_PROJECT_NAME="claude-$_pname" \
         docker compose -f "$APP_DIR/docker-compose.yml" build --no-cache --pull claude
-      fi
-      echo ""
-      echo "Upgrade complete. ${_upgrade_count} profile image(s) upgraded."
+      _upgrade_count=$((_upgrade_count + 1))
+    done
+    shopt -u nullglob
+    if [ "$_upgrade_count" -eq 0 ]; then
+      echo "  No profiles found; rebuilding default image..."
+      docker compose -f "$APP_DIR/docker-compose.yml" build --no-cache --pull claude
     fi
+    echo ""
+    echo "Upgrade complete. ${_upgrade_count} profile image(s) upgraded."
     ;;
   list)
     list_profiles
@@ -2692,20 +2689,9 @@ case "$CMD" in
   help|--help|-h)
     echo "Usage: claude-secure <command> [args] [log flags]"
     echo ""
-    echo "Profile commands:"
-    echo "  --profile <name>   Create a profile interactively, then exit"
-    echo "  start <name>       Start an interactive Claude Code session for a profile"
-    echo "  spawn <name>       Run a headless Claude Code session for a profile"
-    echo "  replay <name> <delivery-id>  Re-run a persisted webhook delivery"
-    echo ""
-    echo "Profile management:"
-    echo "  status [name]      Show container status (all profiles if no name given)"
-    echo "  stop [name]        Stop containers (all profiles if no name given)"
-    echo "  remove <name>      Remove profile config and stop containers"
-    echo "  logs <name>        Tail log files [hook|anthropic|iptables|clear]"
-    echo "  list               List all profiles and their status"
-    echo ""
-    echo "Profile config:"
+    echo "Profile:"
+    echo "  profile create <name>  Create a profile interactively, then exit"
+    echo "  profile <name>         Show profile info (workspace, secrets, status)"
     echo "  profile <name> secret list"
     echo "  profile <name> secret add <KEY> [<value>] [--redacted <TOKEN>] [--domains d1,d2,...]"
     echo "  profile <name> secret remove <KEY>"
@@ -2713,11 +2699,23 @@ case "$CMD" in
     echo "  profile <name> system-prompt get"
     echo "  profile <name> system-prompt clear"
     echo ""
-    echo "System commands:"
-    echo "  update             Pull latest claude-secure, update CLI, rebuild all images"
+    echo "Session:"
+    echo "  start <name>       Start an interactive Claude Code session"
+    echo "  spawn <name>       Run a headless Claude Code session"
+    echo "  replay <name> <delivery-id>  Re-run a persisted webhook delivery"
+    echo ""
+    echo "Management:"
+    echo "  status [name]      Container status (all profiles if no name given)"
+    echo "  stop [name]        Stop containers (all profiles if no name given)"
+    echo "  remove <name>      Remove profile config and stop containers"
+    echo "  logs <name>        Tail log files [hook|anthropic|iptables|clear]"
+    echo "  list               List all profiles and their status"
+    echo ""
+    echo "System:"
+    echo "  update             Pull latest claude-secure, rebuild all images"
     echo "  upgrade            Upgrade Claude Code to latest version"
     echo "  reap               Clean up orphaned spawn containers and stale event files"
-    echo "  bootstrap-docs <path>  Scaffold project docs in configured remote repo"
+    echo "  bootstrap-docs     Scaffold project docs in configured remote repo"
     echo "  webhook-listener   Configure and inspect the webhook listener service"
     echo "  help               Show this help message"
     echo ""
@@ -2728,13 +2726,13 @@ case "$CMD" in
     echo "  --dry-run              Show resolved prompt without executing"
     echo ""
     echo "Log flags (append to any command):"
-    echo "  log:hook       Enable hook script logging"
-    echo "  log:anthropic  Enable proxy logging (metadata only)"
-    echo "  log:bodies     Enable proxy logging with full request/response bodies"
-    echo "  log:iptables   Enable validator/iptables logging"
-    echo "  log:all        Enable all logging (metadata, no bodies)"
+    echo "  log:hook       Hook script decisions"
+    echo "  log:anthropic  Proxy metadata"
+    echo "  log:bodies     Proxy full request/response bodies"
+    echo "  log:iptables   Validator/iptables events"
+    echo "  log:all        All logging (metadata, no bodies)"
     echo ""
-    echo "Profile names must be DNS-safe (lowercase alphanumeric and hyphens)."
+    echo "Profile names: lowercase alphanumeric and hyphens, max 63 characters."
     echo "Run without arguments for superuser mode (merged access to all profiles)."
     ;;
   bootstrap-docs)
