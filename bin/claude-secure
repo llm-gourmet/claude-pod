@@ -2036,9 +2036,12 @@ _bootstrap_docs_find_templates() {
   local self_dir
   self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   local dev_templates="$self_dir/../scripts/templates"
+  local app_templates="${APP_DIR:-}/scripts/templates"
   local installed_templates="/usr/local/share/claude-secure/scripts/templates"
   if [ -d "$dev_templates" ]; then
     echo "$dev_templates"
+  elif [ -n "${APP_DIR:-}" ] && [ -d "$app_templates" ]; then
+    echo "$app_templates"
   elif [ -d "$installed_templates" ]; then
     echo "$installed_templates"
   else
