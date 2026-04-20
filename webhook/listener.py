@@ -16,7 +16,6 @@ thread than serve_forever() or it deadlocks for 90s until systemd SIGKILLs.
 """
 import argparse
 import datetime
-import fnmatch
 import hashlib
 import hmac
 import json
@@ -27,66 +26,8 @@ import signal
 import subprocess
 import sys
 import threading
-import urllib.error
-import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-
-# ---------------------------------------------------------------------------
-# Event filter (Phase 15: D-05..D-10)
-# ---------------------------------------------------------------------------
-# D-06: Sane defaults when profile.webhook_event_filter is omitted.
-# Empty arrays for labels/workflows mean "match anything in that category".
-DEFAULT_FILTER = {
-    "issues": {"actions": ["opened", "labeled"], "labels": []},
-    "push": {"branches": ["main", "master"]},
-    "workflow_run": {"conclusions": ["failure"], "workflows": []},
-}
-
-
-# ---------------------------------------------------------------------------
-# Diff filter helpers (webhook-diff-filter feature, D-02..D-05)
-# ---------------------------------------------------------------------------
-
-def fetch_commit_patch(repo: str, sha: str, token: str) -> str:
-    """Fetch unified diff for a commit from the GitHub API.
-
-    Returns raw diff string. Raises urllib.error.URLError / HTTPError on failure.
-    """
-    url = f"https://api.github.com/repos/{repo}/commits/{sha}"
-    req = urllib.request.Request(
-        url,
-        headers={
-            "Accept": "application/vnd.github.v3.diff",
-            "Authorization": f"Bearer {token}",
-            "User-Agent": "claude-secure-webhook/1.0",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return resp.read().decode("utf-8", errors="replace")
-
-
-def has_meaningful_todo_change(patch: str, path_pattern: str) -> bool:
-    """Return True if the unified diff adds an unchecked TODO item in a matching file.
-
-    D-05 heuristic: any added line ('+' prefix) starting with '- [ ]' in a file
-    matching path_pattern triggers spawn. Checkbox-only commits produce only
-    '+- [x] ...' lines — no '+- [ ] ' lines — so they return False.
-    """
-    in_matching_file = False
-    for line in patch.splitlines():
-        if line.startswith("diff --git "):
-            parts = line.split(" ")
-            if len(parts) >= 4:
-                bpath = parts[-1]
-                if bpath.startswith("b/"):
-                    bpath = bpath[2:]
-                in_matching_file = fnmatch.fnmatch(bpath, path_pattern)
-        elif in_matching_file and line.startswith("+") and not line.startswith("+++"):
-            if line[1:].startswith("- [ ]"):
-                return True
-    return False
 
 
 def compute_event_type(headers, payload: dict) -> str:
@@ -109,110 +50,6 @@ def compute_event_type(headers, payload: dict) -> str:
     if isinstance(action, str) and action:
         return f"{base}-{action}"
     return base
-
-
-def apply_event_filter(profile: dict, event_type: str, payload: dict, config=None):
-    """Return (allowed: bool, reason: str). `reason` is empty when allowed.
-
-    D-05..D-10. Zero I/O: takes the already-loaded profile dict, does dict
-    lookups only. Sub-millisecond per call (Pitfall 3).
-    """
-    base = event_type.split("-", 1)[0]
-    fcfg = (profile.get("webhook_event_filter") or {}).get(base)
-    if fcfg is None:
-        fcfg = DEFAULT_FILTER.get(base)
-    if fcfg is None:
-        # Unknown base event type -- not an error, just filter out (D-04).
-        # This catches `ping` and any other event GitHub may add.
-        return (False, f"unsupported_event:{base}")
-
-    if base == "issues":
-        action = payload.get("action", "") if isinstance(payload, dict) else ""
-        if fcfg.get("actions") and action not in fcfg["actions"]:
-            return (False, f"issue_action_not_matched:{action}")
-        required_labels = fcfg.get("labels") or []
-        if required_labels:
-            issue = payload.get("issue") or {}
-            labels = {
-                lbl.get("name", "")
-                for lbl in issue.get("labels", [])
-                if isinstance(lbl, dict)
-            }
-            if not labels.intersection(required_labels):
-                return (False, "issue_labels_not_matched")
-        return (True, "")
-
-    if base == "push":
-        # D-09: Loop prevention FIRST (before branch matching), so a bot
-        # push to main is still filtered.
-        bot_users = profile.get("webhook_bot_users") or []
-        pusher = ((payload.get("pusher") or {}).get("name") or "")
-        if pusher and pusher in bot_users:
-            return (False, "loop_prevention")
-        ref = payload.get("ref", "") or ""
-        if ref.startswith("refs/heads/"):
-            branch = ref[len("refs/heads/"):]
-        else:
-            branch = ref
-        allowed_branches = fcfg.get("branches") or []
-        if allowed_branches and branch not in allowed_branches:
-            return (False, f"branch_not_matched:{branch}")
-
-        # D-04: opt-in diff filter when profile has todo_path_pattern and
-        # github_token. Fail-open on any API error.
-        todo_pattern = profile.get("todo_path_pattern") or ""
-        github_token = profile.get("github_token") or ""
-        if todo_pattern and github_token:
-            repo_name = profile.get("repo") or ""
-            commits = (payload.get("commits") if isinstance(payload, dict) else []) or []
-            if not isinstance(commits, list):
-                commits = []
-            has_todo_files = any(
-                fnmatch.fnmatch(f, todo_pattern)
-                for commit in commits
-                if isinstance(commit, dict)
-                for f in (
-                    list(commit.get("added") or []) + list(commit.get("modified") or [])
-                )
-                if isinstance(f, str)
-            )
-            if has_todo_files:
-                sha = (payload.get("after") or "") if isinstance(payload, dict) else ""
-                null_sha = "0" * 40
-                if sha and sha != null_sha and repo_name:
-                    try:
-                        patch = fetch_commit_patch(repo_name, sha, github_token)
-                        if not has_meaningful_todo_change(patch, todo_pattern):
-                            return (False, "todo_no_meaningful_change")
-                    except Exception as exc:
-                        logging.getLogger("webhook").warning(
-                            "diff_filter_api_error repo=%s sha=%s: %s",
-                            repo_name, sha[:8] if sha else "", exc,
-                        )
-
-        return (True, "")
-
-    if base == "workflow_run":
-        action = payload.get("action") if isinstance(payload, dict) else None
-        if action != "completed":
-            return (False, f"workflow_action_not_completed:{action}")
-        wr = payload.get("workflow_run") or {}
-        conclusion = wr.get("conclusion") or ""
-        allowed_conclusions = fcfg.get("conclusions") or []
-        if allowed_conclusions and conclusion not in allowed_conclusions:
-            return (False, f"workflow_conclusion_not_matched:{conclusion}")
-        allowed_workflows = fcfg.get("workflows") or []
-        if allowed_workflows:
-            wf_name = (
-                (payload.get("workflow") or {}).get("name")
-                or wr.get("name")
-                or ""
-            )
-            if wf_name not in allowed_workflows:
-                return (False, f"workflow_name_not_matched:{wf_name}")
-        return (True, "")
-
-    return (False, f"unsupported_event:{base}")
 
 
 # ---------------------------------------------------------------------------
@@ -299,8 +136,9 @@ def resolve_connection_by_repo(
 ):
     """Read connections.json and return the entry whose `repo` matches repo_full_name.
 
-    Returns dict {name, repo, webhook_secret, webhook_event_filter,
-    webhook_bot_users, todo_path_pattern, github_token} or None.
+    Returns dict {name, repo, webhook_secret} or None.
+    Extra fields in connections.json (webhook_event_filter, github_token, etc.)
+    are silently ignored for backward compatibility.
     """
     if not repo_full_name or webhooks_dir is None:
         return None
@@ -318,10 +156,6 @@ def resolve_connection_by_repo(
                 "name": entry["name"],
                 "repo": repo_full_name,
                 "webhook_secret": secret,
-                "webhook_event_filter": entry.get("webhook_event_filter") or {},
-                "webhook_bot_users": entry.get("webhook_bot_users") or [],
-                "todo_path_pattern": entry.get("todo_path_pattern") or "",
-                "github_token": entry.get("github_token") or "",
             }
     return None
 
@@ -428,17 +262,37 @@ def spawn_async(connection_name: str, event_path: pathlib.Path, delivery_id: str
 
 
 def _spawn_worker(connection_name: str, event_path: pathlib.Path, delivery_id: str):
-    """Worker thread: acquire semaphore, log spawn_skipped (spawn wired in future change)."""
+    """Worker thread: acquire semaphore, call claude-secure spawn, log outcome."""
     global _active_spawns
     _spawn_semaphore.acquire()  # may block if saturated (D-15)
     with _active_lock:
         _active_spawns += 1
     try:
-        log_event(
-            event="spawn_skipped",
-            connection=connection_name,
-            delivery_id=delivery_id,
-        )
+        log_event(event="spawn_start", connection=connection_name, delivery_id=delivery_id)
+        log_path = _config.logs_dir / f"spawn-{delivery_id[:12]}.log"
+        try:
+            result = subprocess.run(
+                [_config.claude_secure_bin, "spawn", connection_name, "--event-file", str(event_path)],
+                capture_output=True,
+                text=True,
+            )
+            log_path.write_text(result.stdout + result.stderr)
+            if result.returncode == 0:
+                log_event(event="spawn_done", connection=connection_name, delivery_id=delivery_id)
+            else:
+                log_event(
+                    event="spawn_error",
+                    connection=connection_name,
+                    delivery_id=delivery_id,
+                    exit_code=result.returncode,
+                )
+        except Exception as exc:
+            log_event(
+                event="spawn_exception",
+                connection=connection_name,
+                delivery_id=delivery_id,
+                error=str(exc),
+            )
     finally:
         with _active_lock:
             _active_spawns -= 1
@@ -568,23 +422,6 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         # D-01: composite event type from header + payload.action
         event_type = compute_event_type(self.headers, payload)
-
-        # D-05..D-10: per-profile filter between HMAC and persist.
-        # D-07: filtered events log + return 202 WITHOUT persisting or spawning.
-        allowed, reason = apply_event_filter(profile, event_type, payload, config=_config)
-        if not allowed:
-            log_event(
-                event="filtered",
-                profile=profile["name"],
-                repo=repo,
-                delivery_id=delivery_id,
-                event_type=event_type,
-                reason=reason,
-                status_code=202,
-            )
-            return self._send_json(
-                202, {"status": "filtered", "reason": reason}
-            )
 
         try:
             event_path = persist_event(

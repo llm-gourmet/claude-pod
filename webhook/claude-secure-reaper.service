@@ -9,7 +9,7 @@
 
 [Unit]
 Description=claude-secure orphaned container reaper
-Documentation=https://github.com/igorthetigor/claude-secure
+Documentation=https://github.com/llm-gourmet/claude-secure
 After=docker.service
 Requires=docker.service
 

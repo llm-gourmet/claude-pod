@@ -275,9 +275,8 @@ scenario_hmac_rejection() {
 # POSTs 3 HMAC-valid payloads in parallel against the Phase 14 Semaphore(3)
 # bound and asserts:
 #   - 3 'routed' lines appear in webhook.jsonl (jq-parseable, no corruption)
-# Spawn is currently stubbed (spawn_skipped); bare-repo commit check omitted
-# until spawn activation. D-12 gate: proves D-11 hardening did not break
-# the routing pipeline for valid concurrent webhooks.
+# Spawn calls claude-secure via subprocess. D-12 gate: proves D-11 hardening
+# did not break the routing pipeline for valid concurrent webhooks.
 # -------------------------------------------------------------------------
 scenario_concurrent_execution() {
   local secret="e2e-test-secret"
@@ -299,10 +298,9 @@ scenario_concurrent_execution() {
   done
   wait
 
-  # Poll for 3 'routed' lines in webhook.jsonl. Spawn is currently stubbed
-  # (spawn_skipped), so we verify the routing pipeline rather than execution
-  # audit lines. The semaphore and concurrent-write correctness are still
-  # exercised by the 3 parallel requests hitting the listener together.
+  # Poll for 3 'routed' lines in webhook.jsonl. We verify the routing pipeline.
+  # The semaphore and concurrent-write correctness are exercised by the 3
+  # parallel requests hitting the listener together.
   local jsonl="$CONFIG_DIR/logs/webhook.jsonl"
   local deadline=$((SECONDS + 10))
   local n=0
