@@ -9,7 +9,7 @@
 
 [Unit]
 Description=claude-secure GitHub webhook listener
-Documentation=https://github.com/llm-gourmet/claude-secure
+Documentation=https://github.com/llm-gourmet/claude-pod
 After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service
