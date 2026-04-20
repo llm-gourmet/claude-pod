@@ -78,7 +78,6 @@ claude-secure webhook-listener status
 claude-secure webhook-listener --add-connection --name <n> --repo owner/repo --webhook-secret <s>
 claude-secure webhook-listener --remove-connection <name>
 claude-secure webhook-listener --list-connections
-claude-secure webhook-listener --set-token <github-pat> --name <n>
 claude-secure webhook-listener --set-bind <addr>
 claude-secure webhook-listener --set-port <port>
 
@@ -217,19 +216,13 @@ Connections are stored in `~/.claude-secure/webhooks/connections.json` (mode 600
 | `name` | yes | Unique identifier |
 | `repo` | yes | `owner/repo` — matched against incoming `repository.full_name` |
 | `webhook_secret` | yes | HMAC-SHA256 secret configured in GitHub |
-| `github_token` | no | GitHub PAT for fetching commit diffs (TODO detection) |
-| `webhook_event_filter` | no | Per-event-type filter config |
-| `webhook_bot_users` | no | Bot usernames to ignore |
 
 ```bash
 # Add a connection
 claude-secure webhook-listener --add-connection \
   --name myrepo --repo org/myrepo --webhook-secret <secret>
 
-# Set GitHub PAT for diff-filter TODO detection
-claude-secure webhook-listener --set-token <pat> --name myrepo
-
-# List connections (secrets and tokens redacted)
+# List connections (secret redacted)
 claude-secure webhook-listener --list-connections
 
 # Remove a connection
@@ -264,7 +257,6 @@ Settings persisted to `~/.claude-secure/webhooks/webhook.json`.
    ```bash
    claude-secure webhook-listener --add-connection \
      --name myrepo --repo org/myrepo --webhook-secret <secret>
-   claude-secure webhook-listener --set-token <pat> --name myrepo  # optional
    ```
 2. Register a GitHub webhook on the repo:
    - **URL:** `https://<host>:9000/webhook`

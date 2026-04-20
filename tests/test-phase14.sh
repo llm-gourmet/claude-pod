@@ -308,14 +308,16 @@ test_concurrent_5() {
   for i in 1 2 3 4 5; do
     grep -q '^202$' "$TEST_TMPDIR/c5-$i.out" || return 1
   done
-  sleep 0.5
+  # Wait for all 5 spawns to complete. Phase14 stub sleeps 1.0s; with
+  # max_concurrent_spawns=3, last batch finishes at ~2.0s. Sleep 2.5s.
+  sleep 2.5
   # Verify 5 event files were created (could be more from other tests, so check minimum)
   local ev_count
   ev_count=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
   [ "$ev_count" -ge 5 ] || return 1
-  # Verify 5 spawn_skipped entries in webhook.jsonl (spawn is stubbed in this change)
+  # Verify 5 spawn_done entries in webhook.jsonl
   local skip_count
-  skip_count=$(grep -c '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || echo 0)
+  skip_count=$(grep -c '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || echo 0)
   [ "$skip_count" -ge 5 ] || return 1
   return 0
 }
@@ -324,9 +326,9 @@ test_semaphore_queue() {
   local body sig i delivery_id
   body=$(cat "$PROJECT_DIR/tests/fixtures/github-push.json")
   sig=$(gen_sig "test-secret-abc123" "$body")
-  # Snapshot spawn_skipped count before
+  # Snapshot spawn_done count before
   local before_count
-  before_count=$(grep -c '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || echo 0)
+  before_count=$(grep -c '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || echo 0)
   # Fire 6 parallel curls with max_concurrent_spawns=3
   local pids=()
   for i in 1 2 3 4 5 6; do
@@ -345,17 +347,18 @@ test_semaphore_queue() {
   for i in 1 2 3 4 5 6; do
     grep -q '^202$' "$TEST_TMPDIR/sem-$i.out" || return 1
   done
-  sleep 0.5
+  # Wait for all 6 spawns to complete. Stub sleeps 1.0s; with 3 slots,
+  # last batch finishes at ~2.0s. Sleep 2.5s to avoid flakiness.
+  sleep 2.5
   local after_count
-  after_count=$(grep -c '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || echo 0)
+  after_count=$(grep -c '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || echo 0)
   [ $((after_count - before_count)) -ge 6 ] || return 1
   return 0
 }
 
 test_health_active_spawns() {
-  # Spawn is stubbed (spawn_skipped log only, no subprocess sleep).
-  # Verify: a valid request produces a spawn_skipped entry in webhook.jsonl
-  # and the health endpoint still returns 200 with active_spawns field.
+  # Verify: a valid request produces spawn_start in webhook.jsonl (subprocess
+  # is running) and the health endpoint still returns 200 with active_spawns.
   local body sig delivery_id response
   body=$(cat "$PROJECT_DIR/tests/fixtures/github-push.json")
   sig=$(gen_sig "test-secret-abc123" "$body")
@@ -367,8 +370,8 @@ test_health_active_spawns() {
     -H "X-Hub-Signature-256: $sig" \
     --data-binary "$body" >/dev/null || return 1
   sleep 0.3
-  # Confirm spawn_skipped was logged for this delivery
-  grep -q "spawn_skipped" "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || return 1
+  # Confirm spawn_start was logged for this delivery (logged before subprocess.run)
+  grep -q "spawn_start" "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || return 1
   grep -q "$delivery_id" "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || return 1
   # Health endpoint must be reachable and return active_spawns field
   response=$(curl -fsS "http://127.0.0.1:$LISTENER_PORT/health" 2>/dev/null) || return 1

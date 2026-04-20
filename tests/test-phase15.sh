@@ -231,10 +231,10 @@ post_webhook() {
 # =========================================================================
 
 test_issues_opened_routes() {
-  # Green after Plan 15-02.
+  # Green after Plan 15-02 / webhook-claude-filter.
   local body status stub_before
   body=$(cat "$PROJECT_DIR/tests/fixtures/github-issues-opened.json")
-  stub_before=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_before=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
   status=$(post_webhook issues "$body" "issues-opened")
   [ "$status" = "202" ] || { echo "expected 202, got $status" >&2; return 1; }
   sleep 0.3
@@ -243,19 +243,18 @@ test_issues_opened_routes() {
   ev_file=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | head -n1)
   [ -n "$ev_file" ] || return 1
   jq -e '.event_type == "issues-opened"' "$ev_file" >/dev/null || return 1
-  # Stub must record a --event-file invocation
+  # Stub must have been called (spawn_done logged after stub exits 0)
   local stub_after
-  stub_after=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_after=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
   [ "$stub_after" -gt "$stub_before" ] || return 1
-  grep -q '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || return 1
   return 0
 }
 
 test_issues_labeled_routes() {
-  # Green after Plan 15-02.
+  # Green after Plan 15-02 / webhook-claude-filter.
   local body status stub_before
   body=$(cat "$PROJECT_DIR/tests/fixtures/github-issues-labeled.json")
-  stub_before=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_before=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
   status=$(post_webhook issues "$body" "issues-labeled")
   [ "$status" = "202" ] || return 1
   sleep 0.3
@@ -265,33 +264,8 @@ test_issues_labeled_routes() {
   [ -n "$ev_file" ] || return 1
   jq -e '.event_type == "issues-labeled"' "$ev_file" >/dev/null || return 1
   local stub_after
-  stub_after=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_after=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
   [ "$stub_after" -gt "$stub_before" ] || return 1
-  return 0
-}
-
-test_issues_closed_filtered() {
-  # Green after Plan 15-02. Derives a closed fixture via jq from opened.
-  local body status stub_before ev_before
-  body=$(jq -c '.action="closed"' "$PROJECT_DIR/tests/fixtures/github-issues-opened.json")
-  stub_before=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
-  ev_before=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
-  status=$(post_webhook issues "$body" "issues-closed")
-  [ "$status" = "202" ] || { echo "expected 202, got $status" >&2; return 1; }
-  sleep 0.3
-  # NO new event file
-  local ev_after
-  ev_after=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
-  [ "$ev_after" = "$ev_before" ] || return 1
-  # webhook.jsonl must have a filtered entry
-  local log="$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl"
-  [ -f "$log" ] || return 1
-  grep -q 'event.*filtered' "$log" || return 1
-  grep -q 'issue_action_not_matched' "$log" || return 1
-  # Stub must NOT have been invoked
-  local stub_after
-  stub_after=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
-  [ "$stub_after" = "$stub_before" ] || return 1
   return 0
 }
 
@@ -311,7 +285,7 @@ test_default_template_issues_opened_exists() {
 test_push_main_routes() {
   local body status stub_before
   body=$(cat "$PROJECT_DIR/tests/fixtures/github-push.json")
-  stub_before=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_before=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
   status=$(post_webhook push "$body" "push-main")
   [ "$status" = "202" ] || return 1
   sleep 0.3
@@ -319,64 +293,14 @@ test_push_main_routes() {
   ev_file=$(ls -t "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | head -n1)
   [ -n "$ev_file" ] || return 1
   local stub_after
-  stub_after=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_after=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
   [ "$stub_after" -gt "$stub_before" ] || return 1
-  return 0
-}
-
-test_push_feature_branch_filtered() {
-  local body status stub_before ev_before
-  body=$(cat "$PROJECT_DIR/tests/fixtures/github-push-feature-branch.json")
-  stub_before=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
-  ev_before=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
-  status=$(post_webhook push "$body" "push-feature")
-  [ "$status" = "202" ] || return 1
-  sleep 0.3
-  local ev_after
-  ev_after=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
-  [ "$ev_after" = "$ev_before" ] || return 1
-  local log="$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl"
-  [ -f "$log" ] || return 1
-  grep -q 'branch_not_matched' "$log" || return 1
-  grep -q 'feature/xyz' "$log" || return 1
-  local stub_after
-  stub_after=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
-  [ "$stub_after" = "$stub_before" ] || return 1
-  return 0
-}
-
-test_push_bot_loop_filtered() {
-  # This test requires the connection to list claude-bot in webhook_bot_users.
-  # We mutate connections.json in-place; the listener re-reads it per-request.
-  local home_dir="$TEST_TMPDIR/home"
-  local connections="$home_dir/.claude-secure/webhooks/connections.json"
-  local tmp
-  tmp=$(mktemp)
-  jq 'map(if .name == "test-profile" then . + {webhook_bot_users: ["claude-bot"]} else . end)' \
-    "$connections" > "$tmp" && mv "$tmp" "$connections"
-
-  local body status stub_before ev_before
-  body=$(cat "$PROJECT_DIR/tests/fixtures/github-push-bot-loop.json")
-  stub_before=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
-  ev_before=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
-  status=$(post_webhook push "$body" "push-botloop")
-  [ "$status" = "202" ] || return 1
-  sleep 0.3
-  local ev_after
-  ev_after=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
-  [ "$ev_after" = "$ev_before" ] || return 1
-  local log="$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl"
-  [ -f "$log" ] || return 1
-  grep -q 'loop_prevention' "$log" || return 1
-  local stub_after
-  stub_after=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
-  [ "$stub_after" = "$stub_before" ] || return 1
   return 0
 }
 
 test_push_branch_delete_no_crash() {
   # Pitfall 7 regression: head_commit=null must not crash the listener or
-  # the render pipeline. Branch "old-feature" is not main → filtered.
+  # the render pipeline.
   local body status
   body=$(cat "$PROJECT_DIR/tests/fixtures/github-push-branch-delete.json")
   status=$(post_webhook push "$body" "push-delete")
@@ -395,7 +319,7 @@ test_push_branch_delete_no_crash() {
 test_workflow_run_failure_routes() {
   local body status stub_before
   body=$(cat "$PROJECT_DIR/tests/fixtures/github-workflow-run-failure.json")
-  stub_before=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_before=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
   status=$(post_webhook workflow_run "$body" "wf-fail")
   [ "$status" = "202" ] || return 1
   sleep 0.3
@@ -404,50 +328,8 @@ test_workflow_run_failure_routes() {
   [ -n "$ev_file" ] || return 1
   jq -e '.event_type == "workflow_run-completed"' "$ev_file" >/dev/null || return 1
   local stub_after
-  stub_after=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_after=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
   [ "$stub_after" -gt "$stub_before" ] || return 1
-  return 0
-}
-
-test_workflow_run_success_filtered() {
-  local body status stub_before ev_before
-  body=$(cat "$PROJECT_DIR/tests/fixtures/github-workflow-run-success.json")
-  stub_before=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
-  ev_before=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
-  status=$(post_webhook workflow_run "$body" "wf-success")
-  [ "$status" = "202" ] || return 1
-  sleep 0.3
-  local ev_after
-  ev_after=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
-  [ "$ev_after" = "$ev_before" ] || return 1
-  local log="$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl"
-  [ -f "$log" ] || return 1
-  grep -q 'workflow_conclusion_not_matched' "$log" || return 1
-  grep -q 'success' "$log" || return 1
-  local stub_after
-  stub_after=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
-  [ "$stub_after" = "$stub_before" ] || return 1
-  return 0
-}
-
-test_workflow_run_in_progress_filtered() {
-  local body status stub_before ev_before
-  body=$(cat "$PROJECT_DIR/tests/fixtures/github-workflow-run-in-progress.json")
-  stub_before=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
-  ev_before=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
-  status=$(post_webhook workflow_run "$body" "wf-inprog")
-  [ "$status" = "202" ] || return 1
-  sleep 0.3
-  local ev_after
-  ev_after=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
-  [ "$ev_after" = "$ev_before" ] || return 1
-  local log="$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl"
-  [ -f "$log" ] || return 1
-  grep -q 'workflow_action_not_completed' "$log" || return 1
-  grep -q 'in_progress' "$log" || return 1
-  local stub_after
-  stub_after=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
-  [ "$stub_after" = "$stub_before" ] || return 1
   return 0
 }
 
@@ -605,28 +487,6 @@ for headers, payload, expected in cases:
         sys.exit(1)
 sys.exit(0)
 PYEOF
-}
-
-test_ping_event_filtered() {
-  # Pitfall 4 regression + D-04. Ping has no action and no issue; filter
-  # must reject as unsupported_event:ping. Green after Plan 15-02.
-  local body status stub_before ev_before
-  body=$(cat "$PROJECT_DIR/tests/fixtures/github-ping.json")
-  stub_before=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
-  ev_before=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
-  status=$(post_webhook ping "$body" "ping-test")
-  [ "$status" = "202" ] || return 1
-  sleep 0.3
-  local ev_after
-  ev_after=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
-  [ "$ev_after" = "$ev_before" ] || return 1
-  local log="$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl"
-  [ -f "$log" ] || return 1
-  grep -q 'unsupported_event:ping' "$log" || return 1
-  local stub_after
-  stub_after=$(grep '"spawn_skipped"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
-  [ "$stub_after" = "$stub_before" ] || return 1
-  return 0
 }
 
 test_extract_field_truncates() {
@@ -867,9 +727,8 @@ main() {
   if [ $listener_up -eq 1 ]; then
     run_test "issues opened routes"             test_issues_opened_routes
     run_test "issues labeled routes"            test_issues_labeled_routes
-    run_test "issues closed filtered"           test_issues_closed_filtered
   else
-    for t in test_issues_opened_routes test_issues_labeled_routes test_issues_closed_filtered; do
+    for t in test_issues_opened_routes test_issues_labeled_routes; do
       TOTAL=$((TOTAL+1)); FAIL=$((FAIL+1)); echo "  FAIL: $t (listener not running)"
     done
   fi
@@ -877,14 +736,12 @@ main() {
   echo ""
 
   # HOOK-04
-  echo "--- HOOK-04: Push-to-Main ---"
+  echo "--- HOOK-04: Push ---"
   if [ $listener_up -eq 1 ]; then
     run_test "push main routes"                 test_push_main_routes
-    run_test "push feature branch filtered"     test_push_feature_branch_filtered
-    run_test "push bot loop filtered"           test_push_bot_loop_filtered
     run_test "push branch delete no crash"      test_push_branch_delete_no_crash
   else
-    for t in test_push_main_routes test_push_feature_branch_filtered test_push_bot_loop_filtered test_push_branch_delete_no_crash; do
+    for t in test_push_main_routes test_push_branch_delete_no_crash; do
       TOTAL=$((TOTAL+1)); FAIL=$((FAIL+1)); echo "  FAIL: $t (listener not running)"
     done
   fi
@@ -894,12 +751,8 @@ main() {
   echo "--- HOOK-05: Workflow run ---"
   if [ $listener_up -eq 1 ]; then
     run_test "workflow_run failure routes"      test_workflow_run_failure_routes
-    run_test "workflow_run success filtered"    test_workflow_run_success_filtered
-    run_test "workflow_run in_progress filt."   test_workflow_run_in_progress_filtered
   else
-    for t in test_workflow_run_failure_routes test_workflow_run_success_filtered test_workflow_run_in_progress_filtered; do
-      TOTAL=$((TOTAL+1)); FAIL=$((FAIL+1)); echo "  FAIL: $t (listener not running)"
-    done
+    TOTAL=$((TOTAL+1)); FAIL=$((FAIL+1)); echo "  FAIL: test_workflow_run_failure_routes (listener not running)"
   fi
   run_test "workflow template dry-run"        test_workflow_template_dry_run
   echo ""
@@ -916,11 +769,6 @@ main() {
   echo "--- Locked decisions D-01..D-22 ---"
   run_test "listener starts without docs_dir" test_listener_starts_without_docs_dir
   run_test "compute_event_type cases"         test_compute_event_type_cases
-  if [ $listener_up -eq 1 ]; then
-    run_test "ping event filtered"            test_ping_event_filtered
-  else
-    TOTAL=$((TOTAL+1)); FAIL=$((FAIL+1)); echo "  FAIL: test_ping_event_filtered (listener not running)"
-  fi
   run_test "extract_field truncates"          test_extract_field_truncates
   run_test "extract_field utf8-safe"          test_extract_field_utf8_safe
   run_test "render handles pipe in value"     test_render_handles_pipe_in_value
