@@ -1484,7 +1484,7 @@ do_spawn() {
   # PROFILE may be pre-set by do_replay or tests (legacy path); in that case config
   # is already loaded externally and flags start at index 1.
   local _spawn_args_offset=1
-  if [ -z "$PROFILE" ]; then
+  if [ -z "${PROFILE:-}" ]; then
     local _candidate="${REMAINING_ARGS[1]:-}"
     if [ -n "$_candidate" ] && [[ "$_candidate" != --* ]]; then
       # First arg is a profile name (not a flag)
@@ -1501,7 +1501,7 @@ do_spawn() {
       load_profile_config "$PROFILE"
     fi
   fi
-  if [ -z "$PROFILE" ]; then
+  if [ -z "${PROFILE:-}" ]; then
     echo "ERROR: profile name is required for spawn" >&2
     echo "Usage: claude-secure spawn <name> --event '<json>'" >&2
     _spawn_error_audit "spawn: profile name is required"
