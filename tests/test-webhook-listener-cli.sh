@@ -339,6 +339,69 @@ test_add_connection_rejects_duplicate() {
 }
 
 # ---------------------------------------------------------------------------
+# WLCLI-14: --set-profile writes profile field to connections.json
+# ---------------------------------------------------------------------------
+test_set_profile_writes_connections_json() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+
+  mkdir -p "$tmpdir/webhooks"
+  printf '%s\n' '[{"name":"myrepo","repo":"org/repo","webhook_secret":"sec"}]' \
+    > "$tmpdir/webhooks/connections.json"
+
+  setup_cli "$tmpdir"
+  cmd_webhook_listener --set-profile "myrepo-docs" --name "myrepo" 2>/dev/null
+
+  local profile
+  profile=$(jq -r '.[0].profile // ""' "$tmpdir/webhooks/connections.json" 2>/dev/null)
+  [ "$profile" = "myrepo-docs" ] || { echo "Expected profile=myrepo-docs, got: $profile" >&2; return 1; }
+}
+
+# ---------------------------------------------------------------------------
+# WLCLI-15: --set-profile without --name exits with error
+# ---------------------------------------------------------------------------
+test_set_profile_requires_name() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+
+  setup_cli "$tmpdir"
+  local output rc=0
+  output=$(cmd_webhook_listener --set-profile "myrepo-docs" 2>&1) || rc=$?
+  [ "$rc" -ne 0 ] || { echo "Expected non-zero exit, got 0" >&2; return 1; }
+  echo "$output" | grep -qi "\-\-name\|required" || {
+    echo "Expected --name error, got: $output" >&2; return 1
+  }
+}
+
+# ---------------------------------------------------------------------------
+# WLCLI-16: --add-connection --profile stores profile field; --list-connections
+#            shows it when it differs from name
+# ---------------------------------------------------------------------------
+test_add_connection_with_profile() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+
+  setup_cli "$tmpdir"
+  cmd_webhook_listener --add-connection --name "myrepo" --repo "org/repo" \
+    --webhook-secret "sec" --profile "myrepo-docs" 2>/dev/null
+
+  local cjson="$tmpdir/webhooks/connections.json"
+  local profile
+  profile=$(jq -r '.[0].profile // ""' "$cjson" 2>/dev/null)
+  [ "$profile" = "myrepo-docs" ] || { echo "profile field wrong: $profile" >&2; return 1; }
+
+  # --list-connections must show the profile annotation
+  local output
+  output=$(cmd_webhook_listener --list-connections 2>/dev/null)
+  echo "$output" | grep -q "profile: myrepo-docs" || {
+    echo "Expected profile annotation in list output, got: $output" >&2; return 1
+  }
+}
+
+# ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
 echo ""
@@ -358,6 +421,9 @@ run_test "WLCLI-10: --add-connection creates connections.json" test_add_connecti
 run_test "WLCLI-11: --remove-connection removes named entry" test_remove_connection_removes_entry
 run_test "WLCLI-12: --list-connections omits secret and token" test_list_connections_omits_sensitive
 run_test "WLCLI-13: --add-connection rejects duplicate name" test_add_connection_rejects_duplicate
+run_test "WLCLI-14: --set-profile writes profile to connections.json" test_set_profile_writes_connections_json
+run_test "WLCLI-15: --set-profile without --name exits non-zero" test_set_profile_requires_name
+run_test "WLCLI-16: --add-connection --profile stores + lists profile" test_add_connection_with_profile
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed out of $TOTAL tests"
