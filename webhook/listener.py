@@ -156,6 +156,7 @@ def resolve_connection_by_repo(
                 "name": entry["name"],
                 "repo": repo_full_name,
                 "webhook_secret": secret,
+                "profile": entry.get("profile") or entry["name"],
             }
     return None
 
@@ -463,7 +464,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             status_code=202,
         )
 
-        spawn_async(profile["name"], event_path, delivery_id)  # noqa: profile key kept for compat
+        spawn_async(profile["profile"], event_path, delivery_id)
         return self._send_json(
             202, {"status": "accepted", "delivery_id": delivery_id}
         )
