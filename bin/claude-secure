@@ -2583,9 +2583,13 @@ ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile)
-      _profile_hint="${2:-<name>}"
-      echo "ERROR: --profile flag removed. Use: claude-secure profile create $_profile_hint" >&2
-      exit 1 ;;
+      if [[ " ${ARGS[*]} " == *" gh-webhook-listener "* ]]; then
+        ARGS+=("$1"); shift
+      else
+        _profile_hint="${2:-<name>}"
+        echo "ERROR: --profile flag removed. Use: claude-secure profile create $_profile_hint" >&2
+        exit 1
+      fi ;;
     --instance)
       echo "ERROR: --instance is no longer supported. Use: claude-secure profile create <name>" >&2
       exit 1 ;;

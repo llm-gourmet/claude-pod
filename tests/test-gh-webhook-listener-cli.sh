@@ -402,6 +402,42 @@ test_add_connection_with_profile() {
 }
 
 # ---------------------------------------------------------------------------
+# WLCLI-17: --profile after gh-webhook-listener is not rejected by global guard
+# Regression test for the bug where the top-level arg parser fired on --profile
+# before the subcommand was known, rejecting a legitimate flag.
+# This test invokes the binary as a subprocess (not via cmd_gh_webhook_listener)
+# so the global guard is exercised.
+# ---------------------------------------------------------------------------
+test_add_connection_profile_not_rejected_by_global_guard() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf $tmpdir" RETURN
+
+  mkdir -p "$tmpdir/webhooks"
+
+  local output rc=0
+  output=$(CONFIG_DIR="$tmpdir" "$PROJECT_DIR/bin/claude-secure" \
+    gh-webhook-listener --add-connection \
+    --name "test-obsidian" \
+    --repo "llm-gourmet/obsidian" \
+    --webhook-secret "testsecret" \
+    --profile "obsidian" 2>&1) || rc=$?
+
+  echo "$output" | grep -q "flag removed" && {
+    echo "Global guard incorrectly rejected --profile: $output" >&2; return 1
+  }
+  [ "$rc" -ne 0 ] && {
+    echo "Unexpected non-zero exit ($rc): $output" >&2; return 1
+  }
+
+  local cjson="$tmpdir/webhooks/connections.json"
+  [ -f "$cjson" ] || { echo "connections.json not created" >&2; return 1; }
+  local profile
+  profile=$(jq -r '.[0].profile // ""' "$cjson" 2>/dev/null)
+  [ "$profile" = "obsidian" ] || { echo "profile field wrong: $profile" >&2; return 1; }
+}
+
+# ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
 echo ""
@@ -424,6 +460,7 @@ run_test "WLCLI-13: --add-connection rejects duplicate name" test_add_connection
 run_test "WLCLI-14: --set-profile writes profile to connections.json" test_set_profile_writes_connections_json
 run_test "WLCLI-15: --set-profile without --name exits non-zero" test_set_profile_requires_name
 run_test "WLCLI-16: --add-connection --profile stores + lists profile" test_add_connection_with_profile
+run_test "WLCLI-17: --profile after gh-webhook-listener not rejected by global guard" test_add_connection_profile_not_rejected_by_global_guard
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed out of $TOTAL tests"
