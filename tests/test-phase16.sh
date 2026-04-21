@@ -85,8 +85,9 @@ STUB
 setup_test_profile() {
   local home_dir="$TEST_TMPDIR/home"
   local profile_dir="$home_dir/.claude-secure/profiles/test-profile"
-  mkdir -p "$profile_dir" "$profile_dir/prompts" "$profile_dir/report-templates" \
+  mkdir -p "$profile_dir" "$profile_dir/tasks" "$profile_dir/report-templates" \
     "$home_dir/.claude-secure/events" "$home_dir/.claude-secure/logs/spawns"
+  printf 'phase16 task placeholder.\n' > "$profile_dir/tasks/default.md"
 
   local report_repo="${TEST_REPORT_REPO:-}"
   local report_branch="${TEST_REPORT_BRANCH:-main}"
@@ -187,21 +188,6 @@ test_fixtures_exist() {
   return 0
 }
 
-test_templates_exist() {
-  local f
-  for f in \
-    "$PROJECT_DIR/webhook/report-templates/issues-opened.md" \
-    "$PROJECT_DIR/webhook/report-templates/issues-labeled.md" \
-    "$PROJECT_DIR/webhook/report-templates/push.md" \
-    "$PROJECT_DIR/webhook/report-templates/workflow_run-completed.md"
-  do
-    [ -s "$f" ] || { echo "MISSING or EMPTY: $f" >&2; return 1; }
-    grep -q '{{RESULT_TEXT}}' "$f" \
-      || { echo "no {{RESULT_TEXT}} in $f" >&2; return 1; }
-  done
-  return 0
-}
-
 test_no_force_push_grep() {
   # Static invariant: bin/claude-secure must never use git push --force,
   # --force-with-lease, -f, or refspec-force (+refs). Wave 0 state: bin has
@@ -216,55 +202,6 @@ test_no_force_push_grep() {
   return 0
 }
 
-
-test_installer_ships_report_templates() {
-  # Wave 2 static invariant: install.sh must ship webhook/report-templates/
-  # to /opt/claude-secure/webhook/report-templates/ via a step mirroring 5b.
-  # D-12 always-refresh: cp individual files but NEVER rm -rf the directory,
-  # so operator-added custom templates survive reinstall.
-  local inst="$PROJECT_DIR/install.sh"
-  [ -f "$inst" ] || { echo "install.sh missing" >&2; return 1; }
-
-  # bash -n syntax check
-  if ! bash -n "$inst" 2>/dev/null; then
-    echo "install.sh failed bash -n syntax check" >&2
-    return 1
-  fi
-
-  # Production path referenced at least 3 times (mkdir, cp, chmod)
-  local path_count
-  path_count=$(grep -c '/opt/claude-secure/webhook/report-templates' "$inst")
-  if [ "$path_count" -lt 3 ]; then
-    echo "Expected >=3 refs to /opt/claude-secure/webhook/report-templates in install.sh, got $path_count" >&2
-    return 1
-  fi
-
-  # Step 5c comment marker present
-  if ! grep -q '# 5c' "$inst"; then
-    echo "Expected '# 5c' step marker in install.sh" >&2
-    return 1
-  fi
-
-  # NEVER rm -rf the report-templates directory (D-12 always-refresh)
-  if grep -E 'rm[[:space:]]+-rf[^#]*report-templates' "$inst" >/dev/null; then
-    echo "FORBIDDEN: install.sh contains 'rm -rf ... report-templates' (D-12 violation)" >&2
-    return 1
-  fi
-
-  # Log line announcing the copy
-  if ! grep -q 'Copied default report templates' "$inst"; then
-    echo "Expected 'Copied default report templates' log line in install.sh" >&2
-    return 1
-  fi
-
-  # Source directory exists in the repo checkout
-  [ -d "$PROJECT_DIR/webhook/report-templates" ] || {
-    echo "webhook/report-templates missing from repo checkout" >&2
-    return 1
-  }
-
-  return 0
-}
 
 test_resolve_report_template_from_docs_dir() {
   # resolve_report_template should find templates under docs/<profile>/report-templates/
@@ -338,8 +275,9 @@ run_spawn_integration() {
   local home_dir="$tdir/home"
   local profile_dir="$home_dir/.claude-secure/profiles/test-profile"
   rm -rf "$tdir"
-  mkdir -p "$profile_dir" "$profile_dir/prompts" "$home_dir/.claude-secure/logs"
+  mkdir -p "$profile_dir" "$profile_dir/tasks" "$home_dir/.claude-secure/logs"
   mkdir -p "$tdir/workspace"
+  printf 'audit harness task placeholder.\n' > "$profile_dir/tasks/default.md"
 
   jq -n \
     --arg name "test-profile" \
@@ -623,11 +561,12 @@ test_audit_replay_identical() {
   local tid="replay_shape"
   local home_dir="$TEST_TMPDIR/$tid/home"
   local profile_dir="$home_dir/.claude-secure/profiles/test-profile"
-  mkdir -p "$profile_dir" "$home_dir/.claude-secure/logs"
+  mkdir -p "$profile_dir" "$profile_dir/tasks" "$home_dir/.claude-secure/logs"
   jq -n '{name:"test-profile", repo:"test-org/test-repo", webhook_secret:"s", workspace:"'"$TEST_TMPDIR/$tid/ws"'", report_repo:"", report_branch:"main", report_path_prefix:"reports"}' \
     > "$profile_dir/profile.json"
   mkdir -p "$TEST_TMPDIR/$tid/ws"
   : > "$profile_dir/.env"
+  printf 'replay harness task placeholder.\n' > "$profile_dir/tasks/default.md"
 
   local fake_stdout_file="$TEST_TMPDIR/$tid/fake.json"
   jq -c '.claude' "$PROJECT_DIR/tests/fixtures/envelope-success.json" > "$fake_stdout_file"
@@ -704,9 +643,7 @@ main() {
 
   echo "--- Scaffold invariants ---"
   run_test "fixtures exist"                     test_fixtures_exist
-  run_test "templates exist"                    test_templates_exist
   run_test "no force-push in bin"               test_no_force_push_grep
-  run_test "installer ships report templates"   test_installer_ships_report_templates
   run_test "report template from docs/ dir"     test_resolve_report_template_from_docs_dir
   echo ""
 

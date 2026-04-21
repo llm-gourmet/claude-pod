@@ -269,15 +269,6 @@ test_issues_labeled_routes() {
   return 0
 }
 
-test_default_template_issues_opened_exists() {
-  # Green after Plan 15-02 (ships default templates under webhook/templates/).
-  [ -f "$PROJECT_DIR/webhook/templates/issues-opened.md" ] || return 1
-  grep -q '{{ISSUE_TITLE}}' "$PROJECT_DIR/webhook/templates/issues-opened.md" || return 1
-  grep -q '{{ISSUE_BODY}}' "$PROJECT_DIR/webhook/templates/issues-opened.md" || return 1
-  grep -q '{{REPO_NAME}}' "$PROJECT_DIR/webhook/templates/issues-opened.md" || return 1
-  return 0
-}
-
 # =========================================================================
 # HOOK-04: Push-to-Main event routing (green via Plan 15-02)
 # =========================================================================
@@ -333,31 +324,6 @@ test_workflow_run_failure_routes() {
   return 0
 }
 
-test_workflow_template_dry_run() {
-  # Green after Plan 15-03. Invokes the REAL bin/claude-secure in --dry-run
-  # mode against the failure fixture.
-  #
-  # Assertions:
-  #   - exit 0
-  #   - stdout contains literal "CI" (WORKFLOW_NAME from .workflow.name,
-  #     NOT empty -- Pitfall 6 regression)
-  #   - stdout contains the workflow_run id "289782451"
-  #   - stdout contains literal "main" (BRANCH fallback from
-  #     .workflow_run.head_branch -- the failure fixture has NO .ref field,
-  #     so if the gated [ -s "$v_file" ] fallback in render_template is
-  #     wrong, BRANCH renders empty and this assertion fails. This grep is
-  #     the execution-time tripwire for the Plan 15-03 Region 2 latent bug.)
-  local out rc
-  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
-    --event-file "$PROJECT_DIR/tests/fixtures/github-workflow-run-failure.json" \
-    --dry-run 2>&1)
-  rc=$?
-  [ $rc -eq 0 ] || { echo "claude-secure exited $rc" >&2; return 1; }
-  printf '%s' "$out" | grep -q 'CI' || { echo "missing CI in output" >&2; return 1; }
-  printf '%s' "$out" | grep -q '289782451' || { echo "missing workflow id" >&2; return 1; }
-  printf '%s' "$out" | grep -q 'main' || { echo "missing main (BRANCH fallback)" >&2; return 1; }
-  return 0
-}
 
 # =========================================================================
 # HOOK-07: Replay subcommand (green via Plan 15-03)
@@ -539,114 +505,6 @@ test_extract_field_utf8_safe() {
   return 0
 }
 
-test_render_handles_pipe_in_value() {
-  # Pitfall 1 regression. Green after Plan 15-03.
-  local out rc
-  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
-    --event-file "$PROJECT_DIR/tests/fixtures/github-issues-opened-with-pipe.json" \
-    --dry-run 2>&1)
-  rc=$?
-  [ $rc -eq 0 ] || { echo "spawn exited $rc" >&2; return 1; }
-  printf '%s' "$out" | grep -q 'fix(api): handle | in header' || return 1
-  return 0
-}
-
-test_render_handles_backslash_in_value() {
-  # Pitfall 1 regression. Green after Plan 15-03.
-  local out rc
-  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
-    --event-file "$PROJECT_DIR/tests/fixtures/github-issues-opened-with-pipe.json" \
-    --dry-run 2>&1)
-  rc=$?
-  [ $rc -eq 0 ] || return 1
-  printf '%s' "$out" | grep -q 'path\\to\\file' || return 1
-  return 0
-}
-
-test_resolve_template_from_docs_dir() {
-  # docs/ fallback: profile has no prompts/ under profiles/, but has one under docs/.
-  local home_dir="$TEST_TMPDIR/home"
-  rm -f "$home_dir/.claude-secure/profiles/test-profile/prompts/issues-opened.md"
-  local docs_prompts="$home_dir/.claude-secure/docs/test-profile/prompts"
-  mkdir -p "$docs_prompts"
-  local marker="DOCS_DIR_MARKER_$(uuidgen | tr -d -)"
-  printf '%s {{ISSUE_TITLE}}\n' "$marker" > "$docs_prompts/issues-opened.md"
-  local out rc
-  out=$(WEBHOOK_TEMPLATES_DIR="$PROJECT_DIR/webhook/templates" \
-    PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
-    --event-file "$PROJECT_DIR/tests/fixtures/github-issues-opened.json" \
-    --dry-run 2>&1)
-  rc=$?
-  rm -rf "$docs_prompts"
-  [ $rc -eq 0 ] || { echo "exited $rc: $out" >&2; return 1; }
-  printf '%s' "$out" | grep -q "$marker" || return 1
-  return 0
-}
-
-test_resolve_template_fallback_chain() {
-  # D-13: no profile prompts/ override → falls back to webhook/templates/.
-  # Green after Plan 15-03. Remove any profile-level issues-opened override.
-  local home_dir="$TEST_TMPDIR/home"
-  rm -f "$home_dir/.claude-secure/profiles/test-profile/prompts/issues-opened.md"
-  rm -f "$home_dir/.claude-secure/docs/test-profile/prompts/issues-opened.md"
-  local out rc
-  out=$(WEBHOOK_TEMPLATES_DIR="$PROJECT_DIR/webhook/templates" \
-    PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
-    --event-file "$PROJECT_DIR/tests/fixtures/github-issues-opened.json" \
-    --dry-run 2>&1)
-  rc=$?
-  [ $rc -eq 0 ] || { echo "exited $rc: $out" >&2; return 1; }
-  # The repo default template contains {{ISSUE_TITLE}} → renders "Test issue title"
-  printf '%s' "$out" | grep -q 'Test issue title' || return 1
-  return 0
-}
-
-test_explicit_template_no_default_fallback() {
-  # D-13 step 1 rule: explicit --prompt-template MUST NOT fall back to defaults.
-  # Green after Plan 15-03.
-  local home_dir="$TEST_TMPDIR/home"
-  # Ensure no profile-level "nonsense" template exists.
-  rm -f "$home_dir/.claude-secure/profiles/test-profile/prompts/nonsense.md"
-  local out rc
-  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
-    --prompt-template nonsense \
-    --event-file "$PROJECT_DIR/tests/fixtures/github-issues-opened.json" \
-    --dry-run 2>&1)
-  rc=$?
-  [ $rc -ne 0 ] || return 1
-  printf '%s' "$out" | grep -q 'Template not found' || return 1
-  return 0
-}
-
-test_webhook_templates_dir_env_var() {
-  # D-15: WEBHOOK_TEMPLATES_DIR env var takes precedence over compiled default.
-  # Green after Plan 15-03.
-  local custom_dir="$TEST_TMPDIR/custom-templates"
-  mkdir -p "$custom_dir"
-  local marker="UNIQ_MARKER_$(uuidgen | tr -d -)"
-  printf '%s\n' "$marker {{ISSUE_TITLE}}" > "$custom_dir/issues-opened.md"
-  # Remove any profile-level override so we cascade to WEBHOOK_TEMPLATES_DIR
-  local home_dir="$TEST_TMPDIR/home"
-  rm -f "$home_dir/.claude-secure/profiles/test-profile/prompts/issues-opened.md"
-  local out rc
-  out=$(WEBHOOK_TEMPLATES_DIR="$custom_dir" \
-    PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
-    --event-file "$PROJECT_DIR/tests/fixtures/github-issues-opened.json" \
-    --dry-run 2>&1)
-  rc=$?
-  [ $rc -eq 0 ] || return 1
-  printf '%s' "$out" | grep -q "$marker" || return 1
-  return 0
-}
-
-test_install_copies_templates_dir() {
-  # D-12: install.sh must copy webhook/templates/ to /opt/claude-secure.
-  # Green after Plan 15-04. Grep contract against install.sh.
-  grep -q 'webhook/templates' "$PROJECT_DIR/install.sh" || return 1
-  grep -q 'mkdir -p /opt/claude-secure/webhook/templates' "$PROJECT_DIR/install.sh" || return 1
-  return 0
-}
-
 test_event_file_has_top_level_event_type() {
   # D-02: persisted event file has BOTH .event_type and ._meta.event_type.
   # Green after Plan 15-02.
@@ -660,44 +518,6 @@ test_event_file_has_top_level_event_type() {
   [ -n "$ev_file" ] || return 1
   jq -e '.event_type == "issues-opened"' "$ev_file" >/dev/null || return 1
   jq -e '._meta.event_type == "issues-opened"' "$ev_file" >/dev/null || return 1
-  return 0
-}
-
-test_spawn_event_type_priority() {
-  # D-03: spawn's event_type extraction priority must be
-  #   .event_type // ._meta.event_type // .action
-  # This test owns its setup entirely.
-  #
-  # (1) Ensure profile exists.
-  setup_test_profile
-  # (2) Create a profile-level template whose only substantive content is
-  # the line `EVENT_TYPE={{EVENT_TYPE}}` (the EVENT_TYPE= prefix is the grep
-  # anchor, not a token).
-  install_prompts_override "priority-top" "# priority test
-EVENT_TYPE={{EVENT_TYPE}}
-"
-  # (3) Synthesize an event file where event_type, _meta.event_type, and
-  # action all differ, plus the repo so profile resolution works.
-  local home_dir="$TEST_TMPDIR/home"
-  local events_dir="$home_dir/.claude-secure/events"
-  mkdir -p "$events_dir"
-  local ev_path="$events_dir/priority-test.json"
-  jq -n '{
-    event_type: "priority-top",
-    _meta: { event_type: "priority-mid" },
-    action: "priority-bot",
-    repository: { full_name: "test-org/test-repo" }
-  }' > "$ev_path"
-  # (4) Invoke REAL bin/claude-secure with --prompt-template priority-top
-  # and --dry-run. Assert EVENT_TYPE=priority-top in output.
-  local out rc
-  out=$(PATH="$PROJECT_DIR/bin:$PATH" claude-secure spawn test-profile \
-    --event-file "$ev_path" \
-    --prompt-template priority-top \
-    --dry-run 2>&1)
-  rc=$?
-  [ $rc -eq 0 ] || { echo "spawn exited $rc: $out" >&2; return 1; }
-  printf '%s' "$out" | grep -q 'EVENT_TYPE=priority-top' || { echo "expected EVENT_TYPE=priority-top, got: $out" >&2; return 1; }
   return 0
 }
 
@@ -732,7 +552,6 @@ main() {
       TOTAL=$((TOTAL+1)); FAIL=$((FAIL+1)); echo "  FAIL: $t (listener not running)"
     done
   fi
-  run_test "default template issues-opened"   test_default_template_issues_opened_exists
   echo ""
 
   # HOOK-04
@@ -754,7 +573,6 @@ main() {
   else
     TOTAL=$((TOTAL+1)); FAIL=$((FAIL+1)); echo "  FAIL: test_workflow_run_failure_routes (listener not running)"
   fi
-  run_test "workflow template dry-run"        test_workflow_template_dry_run
   echo ""
 
   # HOOK-07
@@ -771,19 +589,11 @@ main() {
   run_test "compute_event_type cases"         test_compute_event_type_cases
   run_test "extract_field truncates"          test_extract_field_truncates
   run_test "extract_field utf8-safe"          test_extract_field_utf8_safe
-  run_test "render handles pipe in value"     test_render_handles_pipe_in_value
-  run_test "render handles backslash in val"  test_render_handles_backslash_in_value
-  run_test "resolve_template from docs/ dir"  test_resolve_template_from_docs_dir
-  run_test "resolve_template fallback chain"  test_resolve_template_fallback_chain
-  run_test "explicit template no default fb"  test_explicit_template_no_default_fallback
-  run_test "WEBHOOK_TEMPLATES_DIR env var"    test_webhook_templates_dir_env_var
-  run_test "install copies templates dir"     test_install_copies_templates_dir
   if [ $listener_up -eq 1 ]; then
     run_test "event file has top level type" test_event_file_has_top_level_event_type
   else
     TOTAL=$((TOTAL+1)); FAIL=$((FAIL+1)); echo "  FAIL: test_event_file_has_top_level_event_type (listener not running)"
   fi
-  run_test "spawn event_type priority"        test_spawn_event_type_priority
   echo ""
 
   echo "=============================="
