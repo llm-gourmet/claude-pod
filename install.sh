@@ -689,11 +689,14 @@ install_webhook_service() {
   invoking_user=$(id -un)
   invoking_group=$(id -gn)
   sudo cp "$app_dir/webhook/claude-secure-webhook.service" /etc/systemd/system/claude-secure-webhook.service
+  local invoking_home
+  invoking_home=$(eval echo "~${invoking_user}")
   sudo sed -i \
     -e "s|/opt/claude-secure/webhook/listener.py|${app_dir}/webhook/listener.py|g" \
     -e "s|__WEBHOOK_CONFIG_PATH__|${webhook_config_path}|g" \
     -e "s|__WEBHOOK_USER__|${invoking_user}|g" \
     -e "s|__WEBHOOK_GROUP__|${invoking_group}|g" \
+    -e "s|__WEBHOOK_HOME__|${invoking_home}|g" \
     /etc/systemd/system/claude-secure-webhook.service
   sudo chmod 644 /etc/systemd/system/claude-secure-webhook.service
   sudo systemctl daemon-reload 2>/dev/null || log_warn "systemctl daemon-reload failed (likely WSL2-no-systemd)"
