@@ -1706,7 +1706,7 @@ reap_orphan_projects() {
     fi
 
     echo "reaper: reaped $proj age=${age}s"
-    if docker compose -p "$proj" down -v --remove-orphans --timeout 10 \
+    if docker compose -p "$proj" down -v --remove-orphans --rmi local --timeout 10 \
          >/dev/null 2>&1; then
       killed=$((killed + 1))
     else
