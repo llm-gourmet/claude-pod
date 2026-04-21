@@ -2101,6 +2101,150 @@ _webhook_find_connection() {
 }
 
 # =========================================================================
+# gh-webhook-listener filter subcommands
+# =========================================================================
+
+_gh_webhook_filter_coverage() {
+  echo "  push events          → commit message prefix"
+  echo "  pr/issues/discussion → label match"
+  echo "  comments/reviews     → body prefix"
+  echo "  workflow/check/etc   → not applicable (no free-text field)"
+}
+
+_gh_webhook_filter_add() {
+  local value="" conn_name=""
+  value="${1:-}"; shift || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) conn_name="$2"; shift 2 ;;
+      *) echo "Error: unknown argument '$1'" >&2; return 1 ;;
+    esac
+  done
+
+  if [ -z "$value" ] || [ -z "$conn_name" ]; then
+    echo "Error: filter add requires a value and --name <connection>" >&2
+    return 1
+  fi
+
+  local connections; connections=$(_webhook_read_connections)
+  local existing; existing=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" \
+    '.[] | select(.name == $n) | .name' 2>/dev/null)
+  if [ -z "$existing" ]; then
+    echo "Error: connection '$conn_name' not found" >&2
+    return 1
+  fi
+
+  local dup; dup=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" --arg v "$value" \
+    '.[] | select(.name == $n) | .skip_filters // [] | .[] | select(. == $v)' 2>/dev/null)
+  if [ -n "$dup" ]; then
+    echo "Error: filter '$value' already exists on connection '$conn_name'" >&2
+    return 1
+  fi
+
+  local updated; updated=$(printf '%s' "$connections" | jq \
+    --arg n "$conn_name" --arg v "$value" \
+    '[.[] | if .name == $n then .skip_filters = ((.skip_filters // []) + [$v]) else . end]')
+  _webhook_write_connections "$updated"
+  echo "Filter \"$value\" added to connection \"$conn_name\":"
+  _gh_webhook_filter_coverage
+  return 0
+}
+
+_gh_webhook_filter_list() {
+  local conn_name=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) conn_name="$2"; shift 2 ;;
+      *) echo "Error: unknown argument '$1'" >&2; return 1 ;;
+    esac
+  done
+
+  if [ -z "$conn_name" ]; then
+    echo "Error: --name <connection> is required" >&2
+    return 1
+  fi
+
+  local connections; connections=$(_webhook_read_connections)
+  local existing; existing=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" \
+    '.[] | select(.name == $n) | .name' 2>/dev/null)
+  if [ -z "$existing" ]; then
+    echo "Error: connection '$conn_name' not found" >&2
+    return 1
+  fi
+
+  local filters; filters=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" \
+    '.[] | select(.name == $n) | .skip_filters // [] | .[]' 2>/dev/null)
+
+  if [ -z "$filters" ]; then
+    echo "No filters configured for connection '$conn_name'."
+    return 0
+  fi
+
+  while IFS= read -r fv; do
+    echo "Filter \"$fv\":"
+    _gh_webhook_filter_coverage
+    echo ""
+  done <<< "$filters"
+  return 0
+}
+
+_gh_webhook_filter_remove() {
+  local value="" conn_name=""
+  value="${1:-}"; shift || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) conn_name="$2"; shift 2 ;;
+      *) echo "Error: unknown argument '$1'" >&2; return 1 ;;
+    esac
+  done
+
+  if [ -z "$value" ] || [ -z "$conn_name" ]; then
+    echo "Error: filter remove requires a value and --name <connection>" >&2
+    return 1
+  fi
+
+  local connections; connections=$(_webhook_read_connections)
+  local existing; existing=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" \
+    '.[] | select(.name == $n) | .name' 2>/dev/null)
+  if [ -z "$existing" ]; then
+    echo "Error: connection '$conn_name' not found" >&2
+    return 1
+  fi
+
+  local existing_fv; existing_fv=$(printf '%s' "$connections" | jq -r \
+    --arg n "$conn_name" --arg v "$value" \
+    '.[] | select(.name == $n) | .skip_filters // [] | .[] | select(. == $v)' 2>/dev/null)
+  if [ -z "$existing_fv" ]; then
+    echo "Error: filter '$value' not found on connection '$conn_name'" >&2
+    return 1
+  fi
+
+  local updated; updated=$(printf '%s' "$connections" | jq \
+    --arg n "$conn_name" --arg v "$value" \
+    '[.[] | if .name == $n then .skip_filters = [(.skip_filters // [])[] | select(. != $v)] else . end]')
+  _webhook_write_connections "$updated"
+  echo "Removed filter '$value' from connection '$conn_name'"
+  return 0
+}
+
+cmd_gh_webhook_filter() {
+  local subcmd="${1:-}"
+  shift || true
+  case "$subcmd" in
+    add)    _gh_webhook_filter_add "$@" ;;
+    list)   _gh_webhook_filter_list "$@" ;;
+    remove) _gh_webhook_filter_remove "$@" ;;
+    *)
+      echo "Usage: claude-secure gh-webhook-listener filter <add|list|remove> ..." >&2
+      echo "  filter add \"<value>\" --name <connection>" >&2
+      echo "  filter list --name <connection>" >&2
+      echo "  filter remove \"<value>\" --name <connection>" >&2
+      return 1
+      ;;
+  esac
+}
+
+# =========================================================================
 # gh-webhook-listener: configure and inspect the webhook listener service
 # =========================================================================
 
@@ -2186,11 +2330,15 @@ cmd_gh_webhook_listener() {
         echo "       claude-secure gh-webhook-listener --set-bind <addr>"
         echo "       claude-secure gh-webhook-listener --set-port <port>"
         echo "       claude-secure gh-webhook-listener status"
+        echo "       claude-secure gh-webhook-listener filter add \"<value>\" --name <connection>"
+        echo "       claude-secure gh-webhook-listener filter list --name <connection>"
+        echo "       claude-secure gh-webhook-listener filter remove \"<value>\" --name <connection>"
         echo ""
         echo "Connections are stored in ~/.claude-secure/webhooks/connections.json."
         echo "Bind/port are persisted to ~/.claude-secure/webhooks/webhook.json."
         return 0
         ;;
+      filter) shift; cmd_gh_webhook_filter "$@"; return $? ;;
       status) subcmd="status"; shift ;;
       -*) echo "Error: unknown flag '$1'" >&2; return 1 ;;
       *) subcmd="$1"; shift ;;

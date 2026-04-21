@@ -207,6 +207,98 @@ test_spawn_log_file_written() {
   return 0
 }
 
+set_skip_filter() {
+  local filter="$1"
+  local home_dir="$TEST_TMPDIR/home"
+  local webhooks_dir="$home_dir/.claude-secure/webhooks"
+  cat > "$webhooks_dir/connections.json" <<JSON
+[{"name":"test-profile","repo":"test-org/test-repo","webhook_secret":"test-secret-abc123","skip_filters":["$filter"]}]
+JSON
+  chmod 600 "$webhooks_dir/connections.json"
+}
+
+clear_skip_filters() {
+  local home_dir="$TEST_TMPDIR/home"
+  local webhooks_dir="$home_dir/.claude-secure/webhooks"
+  cat > "$webhooks_dir/connections.json" <<JSON
+[{"name":"test-profile","repo":"test-org/test-repo","webhook_secret":"test-secret-abc123"}]
+JSON
+  chmod 600 "$webhooks_dir/connections.json"
+}
+
+# ---------------------------------------------------------------------------
+# Filter skip: push with ALL [skip-claude]-prefixed commits → skipped, no spawn
+# ---------------------------------------------------------------------------
+test_filter_all_prefixed_skips_spawn() {
+  set_skip_filter "[skip-claude]"
+  local delivery_id="filt-all-$(uuidgen)"
+  local body; body=$(printf '%s' '{
+    "ref":"refs/heads/main",
+    "repository":{"id":1000001,"name":"test-repo","full_name":"test-org/test-repo","owner":{"login":"test-org"}},
+    "pusher":{"name":"bot","email":"bot@example.com"},
+    "commits":[
+      {"id":"aaa1","message":"[skip-claude] auto-update","author":{"name":"bot","email":"bot@example.com"}},
+      {"id":"aaa2","message":"[skip-claude] another","author":{"name":"bot","email":"bot@example.com"}}
+    ]
+  }')
+  local out status
+  out=$(post_push "$body" "$delivery_id")
+  status=$(printf '%s' "$out" | head -n1)
+  [ "$status" = "200" ] || { echo "expected HTTP 200 (skipped), got $status" >&2; return 1; }
+  sleep 0.3
+  local log="$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl"
+  grep -q '"skipped"' "$log" 2>/dev/null || { echo "no 'skipped' event in log" >&2; return 1; }
+  grep "$delivery_id" "$log" 2>/dev/null | grep -q '"spawn_start"' && \
+    { echo "spawn_start logged despite filter match" >&2; return 1; }
+  clear_skip_filters
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# Filter skip: mixed push (one prefixed, one not) → still spawns
+# ---------------------------------------------------------------------------
+test_filter_mixed_commits_spawns() {
+  set_skip_filter "[skip-claude]"
+  local delivery_id="filt-mix-$(uuidgen)"
+  local body; body=$(printf '%s' '{
+    "ref":"refs/heads/main",
+    "repository":{"id":1000001,"name":"test-repo","full_name":"test-org/test-repo","owner":{"login":"test-org"}},
+    "pusher":{"name":"user","email":"user@example.com"},
+    "commits":[
+      {"id":"bbb1","message":"[skip-claude] auto-update","author":{"name":"bot","email":"bot@example.com"}},
+      {"id":"bbb2","message":"Fix real bug","author":{"name":"user","email":"user@example.com"}}
+    ]
+  }')
+  local out status
+  out=$(post_push "$body" "$delivery_id")
+  status=$(printf '%s' "$out" | head -n1)
+  [ "$status" = "202" ] || { echo "expected HTTP 202 (spawn), got $status" >&2; return 1; }
+  sleep 0.3
+  local log="$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl"
+  grep "$delivery_id" "$log" 2>/dev/null | grep -q '"spawn_start"' || \
+    { echo "spawn_start not found for mixed push" >&2; return 1; }
+  clear_skip_filters
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# Filter skip: skip_filters empty → all events spawn normally
+# ---------------------------------------------------------------------------
+test_filter_empty_filters_spawns() {
+  clear_skip_filters
+  local delivery_id="filt-empty-$(uuidgen)"
+  local body; body=$(cat "$PROJECT_DIR/tests/fixtures/github-push.json")
+  local out status
+  out=$(post_push "$body" "$delivery_id")
+  status=$(printf '%s' "$out" | head -n1)
+  [ "$status" = "202" ] || { echo "expected HTTP 202, got $status" >&2; return 1; }
+  sleep 0.3
+  local log="$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl"
+  grep "$delivery_id" "$log" 2>/dev/null | grep -q '"spawn_start"' || \
+    { echo "spawn_start not found for empty-filter push" >&2; return 1; }
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -224,14 +316,20 @@ main() {
     for t in test_spawn_called_with_event_file \
               test_spawn_exit_0_logs_spawn_done \
               test_spawn_exit_nonzero_logs_spawn_error \
-              test_spawn_log_file_written; do
+              test_spawn_log_file_written \
+              test_filter_all_prefixed_skips_spawn \
+              test_filter_mixed_commits_spawns \
+              test_filter_empty_filters_spawns; do
       TOTAL=$((TOTAL+1)); FAIL=$((FAIL+1)); echo "  FAIL: $t (listener not running)"
     done
   else
-    run_test "spawn called with --event-file"   test_spawn_called_with_event_file
-    run_test "spawn exit 0 → spawn_done"        test_spawn_exit_0_logs_spawn_done
-    run_test "spawn exit 1 → spawn_error"       test_spawn_exit_nonzero_logs_spawn_error
-    run_test "spawn log file written"           test_spawn_log_file_written
+    run_test "spawn called with --event-file"      test_spawn_called_with_event_file
+    run_test "spawn exit 0 → spawn_done"           test_spawn_exit_0_logs_spawn_done
+    run_test "spawn exit 1 → spawn_error"          test_spawn_exit_nonzero_logs_spawn_error
+    run_test "spawn log file written"              test_spawn_log_file_written
+    run_test "filter: all prefixed → skipped"      test_filter_all_prefixed_skips_spawn
+    run_test "filter: mixed commits → spawns"      test_filter_mixed_commits_spawns
+    run_test "filter: empty filters → spawns"      test_filter_empty_filters_spawns
   fi
 
   echo ""

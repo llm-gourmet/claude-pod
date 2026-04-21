@@ -296,6 +296,44 @@ Settings persisted to `~/.claude-secure/webhooks/webhook.json`.
 
 No new listener, no new port — the existing systemd service routes by `repo` field.
 
+### Loop prevention / skip filters
+
+When claude-secure acts on a GitHub event (pushes, comments, labels), it can trigger new webhook deliveries and re-spawn itself. Skip filters prevent this by matching events before the spawn decision.
+
+**Add a filter** (applies to all applicable event types automatically):
+
+```bash
+claude-secure gh-webhook-listener filter add "[skip-claude]" --name myrepo
+```
+
+Output shows which mechanisms the filter applies to:
+
+```
+Filter "[skip-claude]" added to connection "myrepo":
+  push events          → commit message prefix
+  pr/issues/discussion → label match
+  comments/reviews     → body prefix
+  workflow/check/etc   → not applicable (no free-text field)
+```
+
+**How matching works:**
+
+| Event type | Filter applied as |
+|---|---|
+| `push` | Prefix of every commit message — skips only if **ALL** commits match |
+| `pull_request`, `issues`, `discussion` | Label name exact match |
+| `issue_comment`, `pull_request_review`, `pull_request_review_comment` | Prefix of comment/review body |
+| `workflow_run`, `check_run`, `create`, `delete`, etc. | Not applicable — always spawns |
+
+**List and remove:**
+
+```bash
+claude-secure gh-webhook-listener filter list --name myrepo
+claude-secure gh-webhook-listener filter remove "[skip-claude]" --name myrepo
+```
+
+Skipped events return HTTP 200 and a `skipped` entry is written to `webhook.jsonl`. Multiple filter values can be active on a connection simultaneously.
+
 ### Docs-oriented profiles
 
 Profiles for documentation tools (e.g. an Obsidian vault) can live under `~/.claude-secure/docs/<name>/` instead of `~/.claude-secure/profiles/<name>/`. The structure is identical. The listener and CLI probe both directories; `profiles/` takes priority on name collision.
