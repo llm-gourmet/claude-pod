@@ -31,10 +31,10 @@
 
 ## 5. VPS — Migration
 
-- [ ] 5.1 Aktualisiertes `listener.py` auf VPS deployen (`/opt/claude-secure/webhook/listener.py`)
-- [ ] 5.2 `claude-secure-webhook` Service neustarten: `sudo systemctl restart claude-secure-webhook`
-- [ ] 5.3 Router-Profil anlegen: `claude-secure profile create obsidian-router`
-- [ ] 5.4 System-Prompt für `obsidian-router` schreiben (Filter-Logik in natürlicher Sprache)
-- [ ] 5.5 Connection auf VPS prüfen: `claude-secure webhook-listener --list-connections`
-- [ ] 5.6 `github_token` aus `connections.json` in Profil `.env` verschieben (falls vorhanden)
-- [ ] 5.7 Test-Push durchführen und `webhook.jsonl` auf `spawn_start` / `spawn_done` prüfen
+- [x] 5.1 Aktualisiertes `listener.py` auf VPS deployen (`/opt/claude-secure/webhook/listener.py`)
+- [x] 5.2 `claude-secure-webhook` Service neustarten: `sudo systemctl restart claude-secure-webhook`
+- [x] 5.3 Router-Profil anlegen: `claude-secure profile create obsidian-router`
+- [x] 5.4 System-Prompt für `obsidian-router` schreiben (Filter-Logik in natürlicher Sprache)
+- [x] 5.5 Connection auf VPS prüfen: `claude-secure webhook-listener --list-connections`
+- [x] 5.6 `github_token` aus `connections.json` in Profil `.env` verschieben (falls vorhanden)
+- [x] 5.7 Test-Push durchführen und `webhook.jsonl` auf `spawn_start` / `spawn_done` prüfen
