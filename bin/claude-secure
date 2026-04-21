@@ -1562,8 +1562,16 @@ ${EVENT_JSON}
     envelope_json=$(build_output_envelope "$PROFILE" "$event_type" "$claude_stdout")
     audit_status="success"
   else
-    local error_msg
-    error_msg=$(cat "$claude_stderr_file" 2>/dev/null || echo "")
+    local error_msg stderr_msg
+    stderr_msg=$(cat "$claude_stderr_file" 2>/dev/null || echo "")
+    # Claude Code writes auth/startup errors to stdout, not stderr — combine both.
+    if [ -n "$stderr_msg" ]; then
+      error_msg="$stderr_msg"
+    elif [ -n "$claude_stdout" ]; then
+      error_msg="$claude_stdout"
+    else
+      error_msg=""
+    fi
     envelope_json=$(build_error_envelope "$PROFILE" "$event_type" "$error_msg")
     audit_status="claude_error"
     _audit_err_short="${error_msg:0:200}"
