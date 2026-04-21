@@ -75,13 +75,13 @@ claude-secure reap                    # Clean up orphaned containers and stale e
 claude-secure help                    # Show all commands
 
 # Webhook listener
-claude-secure webhook-listener status
-claude-secure webhook-listener --add-connection --name <n> --repo owner/repo --webhook-secret <s> [--profile <p>]
-claude-secure webhook-listener --remove-connection <name>
-claude-secure webhook-listener --list-connections
-claude-secure webhook-listener --set-profile <profile> --name <name>
-claude-secure webhook-listener --set-bind <addr>
-claude-secure webhook-listener --set-port <port>
+claude-secure gh-webhook-listener status
+claude-secure gh-webhook-listener --add-connection --name <n> --repo owner/repo --webhook-secret <s> [--profile <p>]
+claude-secure gh-webhook-listener --remove-connection <name>
+claude-secure gh-webhook-listener --list-connections
+claude-secure gh-webhook-listener --set-profile <profile> --name <name>
+claude-secure gh-webhook-listener --set-bind <addr>
+claude-secure gh-webhook-listener --set-port <port>
 
 # Docs bootstrap
 claude-secure bootstrap-docs --add-connection --name <n> --repo <url> --token <pat>
@@ -243,27 +243,27 @@ Connections are stored in `~/.claude-secure/webhooks/connections.json` (mode 600
 
 ```bash
 # Add a connection (profile defaults to name)
-claude-secure webhook-listener --add-connection \
+claude-secure gh-webhook-listener --add-connection \
   --name myrepo --repo org/myrepo --webhook-secret <secret>
 
 # Add a connection with a different profile name
-claude-secure webhook-listener --add-connection \
+claude-secure gh-webhook-listener --add-connection \
   --name myrepo --repo org/myrepo --webhook-secret <secret> --profile myrepo-docs
 
 # Change the profile for an existing connection
-claude-secure webhook-listener --set-profile myrepo-docs --name myrepo
+claude-secure gh-webhook-listener --set-profile myrepo-docs --name myrepo
 
 # List connections (secret redacted; profile shown when it differs from name)
-claude-secure webhook-listener --list-connections
+claude-secure gh-webhook-listener --list-connections
 
 # Remove a connection
-claude-secure webhook-listener --remove-connection myrepo
+claude-secure gh-webhook-listener --remove-connection myrepo
 ```
 
 ### Status
 
 ```bash
-claude-secure webhook-listener status
+claude-secure gh-webhook-listener status
 ```
 
 ```
@@ -276,8 +276,8 @@ Webhook Listener Status
 ### Configuration
 
 ```bash
-claude-secure webhook-listener --set-bind <addr>   # default: 127.0.0.1
-claude-secure webhook-listener --set-port <port>   # default: 9000
+claude-secure gh-webhook-listener --set-bind <addr>   # default: 127.0.0.1
+claude-secure gh-webhook-listener --set-port <port>   # default: 9000
 ```
 
 Settings persisted to `~/.claude-secure/webhooks/webhook.json`.
@@ -286,7 +286,7 @@ Settings persisted to `~/.claude-secure/webhooks/webhook.json`.
 
 1. Add a connection:
    ```bash
-   claude-secure webhook-listener --add-connection \
+   claude-secure gh-webhook-listener --add-connection \
      --name myrepo --repo org/myrepo --webhook-secret <secret>
    ```
 2. Register a GitHub webhook on the repo:

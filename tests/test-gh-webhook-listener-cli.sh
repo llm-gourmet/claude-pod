@@ -1,12 +1,12 @@
 #!/bin/bash
-# test-webhook-listener-cli.sh -- Unit tests for webhook-listener CLI subcommand
+# test-gh-webhook-listener-cli.sh -- Unit tests for gh-webhook-listener CLI subcommand
 # Tests WLCLI-01 through WLCLI-13
 #
 # Strategy: source bin/claude-secure with __CLAUDE_SECURE_SOURCE_ONLY=1 to
 # load function definitions, use temp dirs as CONFIG_DIR and HOME.
 # No Docker, no network.
 #
-# Usage: bash tests/test-webhook-listener-cli.sh
+# Usage: bash tests/test-gh-webhook-listener-cli.sh
 # Exit 0 if all pass, exit 1 if any fail.
 set -uo pipefail
 
@@ -53,7 +53,7 @@ test_set_token_writes_connections_json() {
     > "$tmpdir/webhooks/connections.json"
 
   setup_cli "$tmpdir"
-  cmd_webhook_listener --set-token "ghp_abc123" --name "myrepo" 2>/dev/null
+  cmd_gh_webhook_listener --set-token "ghp_abc123" --name "myrepo" 2>/dev/null
 
   local cjson="$tmpdir/webhooks/connections.json"
   [ -f "$cjson" ] || { echo "connections.json not found" >&2; return 1; }
@@ -71,7 +71,7 @@ test_set_bind_writes_webhook_json() {
   trap "rm -rf $tmpdir" RETURN
 
   setup_cli "$tmpdir" "$tmpdir"
-  cmd_webhook_listener --set-bind "0.0.0.0" 2>/dev/null
+  cmd_gh_webhook_listener --set-bind "0.0.0.0" 2>/dev/null
 
   local wjson="$tmpdir/.claude-secure/webhooks/webhook.json"
   [ -f "$wjson" ] || { echo "webhook.json not created at $wjson" >&2; return 1; }
@@ -89,7 +89,7 @@ test_set_port_writes_number() {
   trap "rm -rf $tmpdir" RETURN
 
   setup_cli "$tmpdir" "$tmpdir"
-  cmd_webhook_listener --set-port "9001" 2>/dev/null
+  cmd_gh_webhook_listener --set-port "9001" 2>/dev/null
 
   local wjson="$tmpdir/.claude-secure/webhooks/webhook.json"
   [ -f "$wjson" ] || { echo "webhook.json not created" >&2; return 1; }
@@ -110,8 +110,8 @@ test_key_update_preserves_others() {
   trap "rm -rf $tmpdir" RETURN
 
   setup_cli "$tmpdir" "$tmpdir"
-  cmd_webhook_listener --set-port "9001" 2>/dev/null
-  cmd_webhook_listener --set-bind "0.0.0.0" 2>/dev/null
+  cmd_gh_webhook_listener --set-port "9001" 2>/dev/null
+  cmd_gh_webhook_listener --set-bind "0.0.0.0" 2>/dev/null
 
   local wjson="$tmpdir/.claude-secure/webhooks/webhook.json"
   local port bind
@@ -130,8 +130,8 @@ test_key_update_no_duplicate() {
   trap "rm -rf $tmpdir" RETURN
 
   setup_cli "$tmpdir" "$tmpdir"
-  cmd_webhook_listener --set-port "9001" 2>/dev/null
-  cmd_webhook_listener --set-port "9002" 2>/dev/null
+  cmd_gh_webhook_listener --set-port "9001" 2>/dev/null
+  cmd_gh_webhook_listener --set-port "9002" 2>/dev/null
 
   local wjson="$tmpdir/.claude-secure/webhooks/webhook.json"
   local port
@@ -154,7 +154,7 @@ test_set_token_redacted_in_output() {
 
   setup_cli "$tmpdir"
   local output
-  output=$(cmd_webhook_listener --set-token "ghp_supersecret" --name "myrepo" 2>&1)
+  output=$(cmd_gh_webhook_listener --set-token "ghp_supersecret" --name "myrepo" 2>&1)
   echo "$output" | grep -q "ghp_supersecret" && { echo "token leaked in output: $output" >&2; return 1; }
   echo "$output" | grep -qi "redacted\|<redact" || { echo "Expected redacted confirmation, got: $output" >&2; return 1; }
 }
@@ -169,8 +169,8 @@ test_status_no_config_helpful_message() {
 
   setup_cli "$tmpdir" "$tmpdir"
   local output
-  WEBHOOK_CONFIG="$tmpdir/nonexistent.json" output=$(cmd_webhook_listener status 2>&1)
-  echo "$output" | grep -qi "no listener configured\|webhook-listener --help" || {
+  WEBHOOK_CONFIG="$tmpdir/nonexistent.json" output=$(cmd_gh_webhook_listener status 2>&1)
+  echo "$output" | grep -qi "no listener configured\|gh-webhook-listener --help" || {
     echo "Expected helpful message, got: $output" >&2
     return 1
   }
@@ -219,7 +219,7 @@ srv.serve_forever()
 
   setup_cli "$tmpdir" "$tmpdir"
   local output
-  output=$(cmd_webhook_listener status 2>&1) || true
+  output=$(cmd_gh_webhook_listener status 2>&1) || true
 
   [ -f "$tmpdir/mock.pid" ] && kill "$(cat "$tmpdir/mock.pid")" 2>/dev/null || true
   rm -rf "$tmpdir"
@@ -240,7 +240,7 @@ test_set_token_requires_name() {
 
   setup_cli "$tmpdir"
   local output rc=0
-  output=$(cmd_webhook_listener --set-token "ghp_abc123" 2>&1) || rc=$?
+  output=$(cmd_gh_webhook_listener --set-token "ghp_abc123" 2>&1) || rc=$?
   [ "$rc" -ne 0 ] || { echo "Expected non-zero exit, got 0" >&2; return 1; }
   echo "$output" | grep -qi "\-\-name\|required" || {
     echo "Expected --name error, got: $output" >&2
@@ -257,7 +257,7 @@ test_add_connection_creates_file() {
   trap "rm -rf $tmpdir" RETURN
 
   setup_cli "$tmpdir"
-  cmd_webhook_listener --add-connection --name "myrepo" --repo "org/repo" \
+  cmd_gh_webhook_listener --add-connection --name "myrepo" --repo "org/repo" \
     --webhook-secret "shsec_test" 2>/dev/null
 
   local cjson="$tmpdir/webhooks/connections.json"
@@ -284,7 +284,7 @@ test_remove_connection_removes_entry() {
     > "$tmpdir/webhooks/connections.json"
 
   setup_cli "$tmpdir"
-  cmd_webhook_listener --remove-connection "myrepo" 2>/dev/null
+  cmd_gh_webhook_listener --remove-connection "myrepo" 2>/dev/null
 
   local count
   count=$(jq 'length' "$tmpdir/webhooks/connections.json" 2>/dev/null)
@@ -308,7 +308,7 @@ test_list_connections_omits_sensitive() {
 
   setup_cli "$tmpdir"
   local output
-  output=$(cmd_webhook_listener --list-connections 2>/dev/null)
+  output=$(cmd_gh_webhook_listener --list-connections 2>/dev/null)
   echo "$output" | grep -q "shsec_secret" && { echo "secret leaked in output" >&2; return 1; }
   echo "$output" | grep -q "ghp_token" && { echo "token leaked in output" >&2; return 1; }
   echo "$output" | grep -q "myrepo" || { echo "name missing from output: $output" >&2; return 1; }
@@ -329,7 +329,7 @@ test_add_connection_rejects_duplicate() {
 
   setup_cli "$tmpdir"
   local output rc=0
-  output=$(cmd_webhook_listener --add-connection --name "myrepo" --repo "org/other" \
+  output=$(cmd_gh_webhook_listener --add-connection --name "myrepo" --repo "org/other" \
     --webhook-secret "sec2" 2>&1) || rc=$?
   [ "$rc" -ne 0 ] || { echo "Expected non-zero exit for duplicate, got 0" >&2; return 1; }
   echo "$output" | grep -qi "already exists" || { echo "Expected 'already exists' error, got: $output" >&2; return 1; }
@@ -351,7 +351,7 @@ test_set_profile_writes_connections_json() {
     > "$tmpdir/webhooks/connections.json"
 
   setup_cli "$tmpdir"
-  cmd_webhook_listener --set-profile "myrepo-docs" --name "myrepo" 2>/dev/null
+  cmd_gh_webhook_listener --set-profile "myrepo-docs" --name "myrepo" 2>/dev/null
 
   local profile
   profile=$(jq -r '.[0].profile // ""' "$tmpdir/webhooks/connections.json" 2>/dev/null)
@@ -368,7 +368,7 @@ test_set_profile_requires_name() {
 
   setup_cli "$tmpdir"
   local output rc=0
-  output=$(cmd_webhook_listener --set-profile "myrepo-docs" 2>&1) || rc=$?
+  output=$(cmd_gh_webhook_listener --set-profile "myrepo-docs" 2>&1) || rc=$?
   [ "$rc" -ne 0 ] || { echo "Expected non-zero exit, got 0" >&2; return 1; }
   echo "$output" | grep -qi "\-\-name\|required" || {
     echo "Expected --name error, got: $output" >&2; return 1
@@ -385,7 +385,7 @@ test_add_connection_with_profile() {
   trap "rm -rf $tmpdir" RETURN
 
   setup_cli "$tmpdir"
-  cmd_webhook_listener --add-connection --name "myrepo" --repo "org/repo" \
+  cmd_gh_webhook_listener --add-connection --name "myrepo" --repo "org/repo" \
     --webhook-secret "sec" --profile "myrepo-docs" 2>/dev/null
 
   local cjson="$tmpdir/webhooks/connections.json"
@@ -395,7 +395,7 @@ test_add_connection_with_profile() {
 
   # --list-connections must show the profile annotation
   local output
-  output=$(cmd_webhook_listener --list-connections 2>/dev/null)
+  output=$(cmd_gh_webhook_listener --list-connections 2>/dev/null)
   echo "$output" | grep -q "profile: myrepo-docs" || {
     echo "Expected profile annotation in list output, got: $output" >&2; return 1
   }

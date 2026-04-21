@@ -2101,15 +2101,15 @@ _webhook_find_connection() {
 }
 
 # =========================================================================
-# webhook-listener: configure and inspect the webhook listener service
+# gh-webhook-listener: configure and inspect the webhook listener service
 # =========================================================================
 
 # Show status of the webhook listener service.
-_webhook_listener_status() {
+_gh_webhook_listener_status() {
   local webhook_json="${WEBHOOK_CONFIG:-$HOME/.claude-secure/webhooks/webhook.json}"
 
   if [ ! -r "$webhook_json" ]; then
-    echo "No listener configured. Run claude-secure webhook-listener --help"
+    echo "No listener configured. Run claude-secure gh-webhook-listener --help"
     return 0
   fi
 
@@ -2158,7 +2158,7 @@ _webhook_json_set_key() {
   chmod 600 "$file"
 }
 
-cmd_webhook_listener() {
+cmd_gh_webhook_listener() {
   local set_token="" set_bind="" set_port="" set_profile="" conn_name=""
   local add_connection=0 remove_connection="" list_connections=0
   local conn_repo="" conn_secret="" conn_profile=""
@@ -2178,14 +2178,14 @@ cmd_webhook_listener() {
       --repo)              conn_repo="$2";          shift 2 ;;
       --webhook-secret)    conn_secret="$2";        shift 2 ;;
       --help|-h)
-        echo "Usage: claude-secure webhook-listener [subcommand]"
-        echo "       claude-secure webhook-listener --add-connection --name <n> --repo <r> --webhook-secret <s> [--profile <p>]"
-        echo "       claude-secure webhook-listener --remove-connection <name>"
-        echo "       claude-secure webhook-listener --list-connections"
-        echo "       claude-secure webhook-listener --set-profile <profile> --name <name>"
-        echo "       claude-secure webhook-listener --set-bind <addr>"
-        echo "       claude-secure webhook-listener --set-port <port>"
-        echo "       claude-secure webhook-listener status"
+        echo "Usage: claude-secure gh-webhook-listener [subcommand]"
+        echo "       claude-secure gh-webhook-listener --add-connection --name <n> --repo <r> --webhook-secret <s> [--profile <p>]"
+        echo "       claude-secure gh-webhook-listener --remove-connection <name>"
+        echo "       claude-secure gh-webhook-listener --list-connections"
+        echo "       claude-secure gh-webhook-listener --set-profile <profile> --name <name>"
+        echo "       claude-secure gh-webhook-listener --set-bind <addr>"
+        echo "       claude-secure gh-webhook-listener --set-port <port>"
+        echo "       claude-secure gh-webhook-listener status"
         echo ""
         echo "Connections are stored in ~/.claude-secure/webhooks/connections.json."
         echo "Bind/port are persisted to ~/.claude-secure/webhooks/webhook.json."
@@ -2301,10 +2301,10 @@ cmd_webhook_listener() {
   fi
 
   case "${subcmd:-}" in
-    status) _webhook_listener_status ;;
+    status) _gh_webhook_listener_status ;;
     "")
-      echo "Usage: claude-secure webhook-listener [status|--add-connection|--set-token|--set-bind|--set-port]" >&2
-      echo "Run 'claude-secure webhook-listener --help' for more information." >&2
+      echo "Usage: claude-secure gh-webhook-listener [status|--add-connection|--set-token|--set-bind|--set-port]" >&2
+      echo "Run 'claude-secure gh-webhook-listener --help' for more information." >&2
       return 1
       ;;
     *)
@@ -2367,7 +2367,7 @@ FIRST_ARG="${ARGS[0]:-}"
 # Superuser mode (allowed for most commands). Skip config load for commands
 # that don't need a merged workspace or that manage their own profile resolution.
 case "$FIRST_ARG" in
-  list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs|webhook-listener|start|stop|remove|logs|profile)
+  list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs|gh-webhook-listener|start|stop|remove|logs|profile)
     : # skip superuser load
     ;;
   *)
@@ -2569,7 +2569,7 @@ case "$CMD" in
     echo "  upgrade            Upgrade Claude Code to latest version"
     echo "  reap               Clean up orphaned spawn containers and stale event files"
     echo "  bootstrap-docs     Scaffold project docs in configured remote repo"
-    echo "  webhook-listener   Configure and inspect the webhook listener service"
+    echo "  gh-webhook-listener   Configure and inspect the webhook listener service"
     echo "  help               Show this help message"
     echo ""
     echo "Spawn flags:"
@@ -2591,8 +2591,8 @@ case "$CMD" in
   bootstrap-docs)
     cmd_bootstrap_docs "${REMAINING_ARGS[@]:1}"
     ;;
-  webhook-listener)
-    cmd_webhook_listener "${REMAINING_ARGS[@]:1}"
+  gh-webhook-listener)
+    cmd_gh_webhook_listener "${REMAINING_ARGS[@]:1}"
     ;;
   spawn)
     do_spawn
