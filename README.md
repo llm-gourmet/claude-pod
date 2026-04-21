@@ -47,9 +47,10 @@ claude-secure profile <name>          # Show profile info (workspace, secrets, s
 claude-secure profile <name> secret list
 claude-secure profile <name> secret add <KEY> [<value>] [--redacted <TOKEN>] [--domains d1,d2,...]
 claude-secure profile <name> secret remove <KEY>
-claude-secure profile <name> system-prompt set "<text>"
-claude-secure profile <name> system-prompt get
-claude-secure profile <name> system-prompt clear
+
+# Task + system prompt: edit files under the profile directory (see "Tasks and system prompts")
+#   ~/.claude-secure/profiles/<name>/tasks/default.md          (task prompt, required)
+#   ~/.claude-secure/profiles/<name>/system_prompts/default.md (system prompt, optional)
 
 # Session
 claude-secure start <name>            # Start an interactive Claude Code session
@@ -127,16 +128,23 @@ Profile names must be lowercase alphanumeric and hyphens, max 63 characters.
 
 ```
 ~/.claude-secure/profiles/<name>/
-  profile.json      # workspace path, secrets[], optional system_prompt and repo
-  .env              # auth token/key and raw secret values (mode 600)
+  profile.json            # workspace path, secrets[], optional repo
+  .env                    # auth token/key and raw secret values (mode 600)
+  tasks/
+    default.md            # task prompt passed to Claude as -p (required)
+    <event_type>.md       # optional per-event override (e.g. push.md, issues-opened.md)
+  system_prompts/
+    default.md            # system prompt passed as --system-prompt (optional)
+    <event_type>.md       # optional per-event override
 ```
+
+`tasks/default.md` and `system_prompts/default.md` are scaffolded automatically by `profile create`.
 
 ### `profile.json` schema
 
 ```json
 {
   "workspace": "/path/to/project",
-  "system_prompt": "optional — injected via --system-prompt for every session",
   "repo": "owner/repo",
   "secrets": [
     {
@@ -151,11 +159,12 @@ Profile names must be lowercase alphanumeric and hyphens, max 63 characters.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `workspace` | yes | Absolute path mounted as the project workspace |
-| `system_prompt` | no | Injected for every interactive and headless session |
 | `repo` | no | `owner/repo` — used by `spawn` to resolve this profile from an incoming webhook event |
 | `secrets[].env_var` | yes | Env variable name (must also appear in `.env`) |
 | `secrets[].redacted` | no | Opaque token substituted in LLM context instead of the real value |
 | `secrets[].domains` | no | Outbound domains the hook allows when this secret is in use |
+
+The system prompt is no longer stored in `profile.json`. Existing installations are migrated automatically by `claude-secure update` (`system_prompt` → `system_prompts/default.md`).
 
 `profile.json` is re-read on every request — no restart needed after edits.
 
@@ -192,15 +201,28 @@ claude-secure profile myapp secret remove GITHUB_TOKEN
 - `secret add` writes the raw value to `.env` (mode 600) and upserts the metadata in `profile.json secrets[]`.
 - Redaction changes take effect immediately (no restart). A container restart is required for the new env var to be visible inside Claude.
 
-### Managing the system prompt
+### Tasks and system prompts
 
-```bash
-claude-secure profile myapp system-prompt set "You are a focused code reviewer."
-claude-secure profile myapp system-prompt get
-claude-secure profile myapp system-prompt clear
+Per-profile markdown files under the profile directory drive what Claude does and how it behaves:
+
+```
+~/.claude-secure/profiles/<name>/
+  tasks/
+    default.md            # required — passed as -p to Claude
+    <event_type>.md       # optional — takes precedence for spawn events
+  system_prompts/
+    default.md            # optional — passed as --system-prompt
+    <event_type>.md       # optional — takes precedence for spawn events
 ```
 
-The system prompt is stored as `system_prompt` in `profile.json` and passed to Claude Code via `--system-prompt`. Takes effect on the next `start` or `spawn`.
+Resolution chain used by `start` and `spawn`:
+
+- **Task prompt** — `tasks/<event_type>.md` → `tasks/default.md`. If neither exists, spawn fails with the checked paths printed.
+- **System prompt** — `system_prompts/<event_type>.md` → `system_prompts/default.md`. If neither exists, `--system-prompt` is omitted.
+
+Files are passed to Claude as-is (no token substitution). The event JSON is available to the spawn; Claude can run `git show`, `git log`, etc. to gather context.
+
+Edit the files directly — changes take effect on the next `start` or `spawn`, no restart needed. Use `claude-secure spawn <name> --event '<json>' --dry-run` to verify which files resolve and preview the rendered content.
 
 ---
 

@@ -1,7 +1,7 @@
 ## Requirements
 
 ### Requirement: connections stored as JSON array in dedicated directory
-Webhook connection config SHALL be stored at `~/.claude-secure/webhooks/connections.json` as a JSON array. The directory SHALL have mode `700` and the file SHALL have mode `600`. Each element SHALL contain `name` (string, required), `repo` (string, required), `webhook_secret` (string, required), and optionally `github_token` (string), `webhook_event_filter` (object), and `webhook_bot_users` (array).
+Webhook connection config SHALL be stored at `~/.claude-secure/webhooks/connections.json` as a JSON array. The directory SHALL have mode `700` and the file SHALL have mode `600`. Each element SHALL contain `name` (string, required), `repo` (string, required), `webhook_secret` (string, required), and optionally `github_token` (string). The fields `webhook_event_filter`, `webhook_bot_users`, and `todo_path_pattern` are no longer part of the schema; if present in existing files they SHALL be silently ignored.
 
 #### Scenario: Directory and file created on first add
 - **WHEN** `--add-connection` is run and `~/.claude-secure/webhooks/` does not exist
@@ -9,7 +9,11 @@ Webhook connection config SHALL be stored at `~/.claude-secure/webhooks/connecti
 
 #### Scenario: File contains valid JSON array after add
 - **WHEN** `claude-secure webhook-listener --add-connection --name myrepo --repo org/repo --webhook-secret shsec_xxx` is run
-- **THEN** `connections.json` is a valid JSON array containing one object with `name`, `repo`, and `webhook_secret` fields
+- **THEN** `connections.json` is a valid JSON array containing one object with `name`, `repo`, and `webhook_secret` fields and no `webhook_event_filter` or `todo_path_pattern` fields
+
+#### Scenario: Legacy fields in existing file are ignored
+- **WHEN** `connections.json` contains entries with `webhook_event_filter`, `webhook_bot_users`, or `todo_path_pattern` fields
+- **THEN** the listener processes the connection normally and those fields have no effect on spawn behaviour
 
 ### Requirement: connection names are unique; duplicate add is rejected
 `--add-connection` SHALL check for an existing connection with the same `name` (case-sensitive) and exit non-zero with an error message if one is found. The file SHALL NOT be modified.
@@ -63,12 +67,10 @@ All writes to `connections.json` SHALL be performed via a temp file in the same 
 - **THEN** the listener returns HTTP 404
 
 ### Requirement: listener stubs spawn — no claude-secure spawn call
-When a webhook event passes all filters, the listener SHALL log a `spawn_skipped` event and return HTTP 200 without invoking `claude-secure spawn`. The semaphore and thread infrastructure SHALL remain in place.
+**REMOVED** — replaced by `webhook-spawn-always` spec. `_spawn_worker` now calls `claude-secure spawn` unconditionally after HMAC and repo lookup. No action required; the listener upgrade replaces the stub automatically.
 
-#### Scenario: Filtered-pass event logs spawn_skipped
-- **WHEN** a valid push event passes HMAC verification and all event filters
-- **THEN** `webhook.jsonl` contains a `spawn_skipped` entry with `connection` and `delivery_id` fields
+## REMOVED Requirements
 
-#### Scenario: No subprocess is launched
-- **WHEN** a valid push event is processed
-- **THEN** no child process running `claude-secure spawn` is created
+### Requirement: listener stubs spawn — no claude-secure spawn call
+**Reason**: Placeholder behaviour removed. `_spawn_worker` now calls `claude-secure spawn` unconditionally after HMAC and repo lookup (see `webhook-spawn-always` spec).
+**Migration**: No action required. The listener upgrade replaces the stub automatically.

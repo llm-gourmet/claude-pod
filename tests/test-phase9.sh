@@ -311,9 +311,10 @@ EOF
 run_test "MULTI-09: Profile config scope (workspace from profile.json)" test_profile_config_scope
 
 # =========================================================================
-# MULTI-10: system_prompt field in profile.json
-# load_profile_config must export CLAUDE_SECURE_SYSTEM_PROMPT from profile.json
-# bin/claude-secure must pass --system-prompt to claude when the field is set
+# MULTI-10: system_prompts/default.md file sets CLAUDE_SECURE_SYSTEM_PROMPT
+# load_profile_config must export CLAUDE_SECURE_SYSTEM_PROMPT from the file.
+# bin/claude-secure must still reference --system-prompt and
+# CLAUDE_SECURE_SYSTEM_PROMPT when the value is set.
 # =========================================================================
 test_system_prompt_field() {
   local tmpdir
@@ -322,16 +323,14 @@ test_system_prompt_field() {
 
   local cfg="$tmpdir/.claude-secure"
   local pdir="$cfg/profiles/sysprompt"
-  mkdir -p "$pdir" "$tmpdir/ws"
+  mkdir -p "$pdir/system_prompts" "$tmpdir/ws"
 
   cat > "$pdir/profile.json" <<EOF
-{
-  "workspace": "$tmpdir/ws",
-  "system_prompt": "You are a helpful assistant with access to REPORT_REPO_TOKEN.",
-  "secrets": []
-}
+{"workspace":"$tmpdir/ws","secrets":[]}
 EOF
   printf 'ANTHROPIC_API_KEY=test\n' > "$pdir/.env"
+  printf 'You are a helpful assistant with access to REPORT_REPO_TOKEN.' \
+    > "$pdir/system_prompts/default.md"
 
   # Verify load_profile_config exports CLAUDE_SECURE_SYSTEM_PROMPT
   local got_prompt
@@ -352,10 +351,8 @@ EOF
   grep -q -- '--system-prompt' "$PROJECT_DIR/bin/claude-secure" || return 1
   grep -q 'CLAUDE_SECURE_SYSTEM_PROMPT' "$PROJECT_DIR/bin/claude-secure" || return 1
 
-  # Verify empty system_prompt leaves CLAUDE_SECURE_SYSTEM_PROMPT unset/empty
-  cat > "$pdir/profile.json" <<EOF
-{"workspace":"$tmpdir/ws","secrets":[]}
-EOF
+  # Verify missing system_prompts/default.md leaves CLAUDE_SECURE_SYSTEM_PROMPT empty
+  rm -f "$pdir/system_prompts/default.md"
   local empty_prompt
   empty_prompt=$(
     export __CLAUDE_SECURE_SOURCE_ONLY=1
@@ -370,7 +367,7 @@ EOF
 
   return 0
 }
-run_test "MULTI-10: system_prompt field exported as CLAUDE_SECURE_SYSTEM_PROMPT" test_system_prompt_field
+run_test "MULTI-10: system_prompts/default.md sets CLAUDE_SECURE_SYSTEM_PROMPT" test_system_prompt_field
 
 # =========================================================================
 # MULTI-11: profile create <name> exits without starting containers

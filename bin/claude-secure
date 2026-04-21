@@ -198,6 +198,22 @@ create_profile() {
   # Build profile.json
   jq -n --arg ws "$ws_path" '{"workspace": $ws, "secrets": []}' > "$tmpdir/profile.json"
 
+  # Scaffold tasks/ and system_prompts/ with placeholder default.md files.
+  mkdir -p "$tmpdir/tasks" "$tmpdir/system_prompts"
+  cat > "$tmpdir/tasks/default.md" <<EOF
+# Default task for profile '$name'
+
+Describe what Claude should do when spawned for this profile.
+Event JSON is available in the environment; use \`git\` and the repo to
+gather additional context as needed.
+EOF
+  cat > "$tmpdir/system_prompts/default.md" <<EOF
+# Default system prompt for profile '$name'
+
+Replace this with role, tone, and constraints for Claude in this profile.
+Delete the file to omit --system-prompt entirely.
+EOF
+
   # Auth setup
   local existing_env=""
   if [ -d "$CONFIG_DIR/profiles" ]; then
@@ -340,7 +356,10 @@ load_profile_config() {
   else
     export SECRETS_FILE="$pdir/.env"
   fi
-  CLAUDE_SECURE_SYSTEM_PROMPT=$(jq -r '.system_prompt // empty' "$pdir/profile.json" 2>/dev/null || true)
+  CLAUDE_SECURE_SYSTEM_PROMPT=""
+  if [ -f "$pdir/system_prompts/default.md" ]; then
+    CLAUDE_SECURE_SYSTEM_PROMPT=$(cat "$pdir/system_prompts/default.md")
+  fi
   export CLAUDE_SECURE_SYSTEM_PROMPT
   export PROFILE_PATH="$pdir/profile.json"
   export LOG_DIR="$CONFIG_DIR/logs"
@@ -782,16 +801,62 @@ build_error_envelope() {
 }
 
 # =========================================================================
-# Phase 15 helpers (D-13, D-15, D-17, D-18): template resolution fallback,
-# UTF-8-safe payload extraction, and awk-based token substitution.
+# Profile task-file resolvers: the spawn task prompt and system prompt are
+# resolved from the profile directory (tasks/ and system_prompts/).
 # =========================================================================
 
-# Resolve the default templates directory.
-# Checks $WEBHOOK_TEMPLATES_DIR first, then falls back to the installed path.
-# Override in dev: export WEBHOOK_TEMPLATES_DIR=$PWD/webhook/templates
-_resolve_default_templates_dir() {
-  local subdir="${1:-templates}"
-  echo "${WEBHOOK_TEMPLATES_DIR:-/opt/claude-secure/webhook/$subdir}"
+# Print the path to the task file for a given event_type in the current
+# profile. Checks tasks/<event_type>.md, then tasks/default.md. Emits an
+# error listing the checked paths and returns 1 if neither exists.
+resolve_task_file() {
+  local event_type="$1"
+  local profile_dir
+  profile_dir=$(resolve_profile_dir "$PROFILE")
+  local tasks_dir="$profile_dir/tasks"
+
+  local event_path="$tasks_dir/${event_type}.md"
+  local default_path="$tasks_dir/default.md"
+
+  if [ -f "$event_path" ]; then
+    echo "$event_path"
+    return 0
+  fi
+  if [ -f "$default_path" ]; then
+    echo "$default_path"
+    return 0
+  fi
+
+  echo "ERROR: No task file found for event_type '$event_type'" >&2
+  echo "  Checked: $event_path" >&2
+  echo "  Checked: $default_path" >&2
+  echo "  Create one of the above to enable spawn." >&2
+  return 1
+}
+
+# Print the path to the system-prompt file for a given event_type in the
+# current profile. Checks system_prompts/<event_type>.md, then
+# system_prompts/default.md. Prints nothing and returns 0 if neither exists
+# — callers treat an empty result as "omit --system-prompt".
+resolve_system_prompt_file() {
+  local event_type="${1:-}"
+  local profile_dir
+  profile_dir=$(resolve_profile_dir "$PROFILE")
+  local sp_dir="$profile_dir/system_prompts"
+
+  if [ -n "$event_type" ]; then
+    local event_path="$sp_dir/${event_type}.md"
+    if [ -f "$event_path" ]; then
+      echo "$event_path"
+      return 0
+    fi
+  fi
+
+  local default_path="$sp_dir/default.md"
+  if [ -f "$default_path" ]; then
+    echo "$default_path"
+    return 0
+  fi
+  return 0
 }
 
 # D-17 / D-18 / Pitfall 4: extract a jq path from an event payload and emit
@@ -860,119 +925,6 @@ _extract_to_tempfile() {
   echo "$out_file"
 }
 
-# Pitfall 1 fix: substitute `{{TOKEN}}` in a template with the contents of
-# a value file, using awk to avoid any sed escape-character bugs. The value
-# can contain any of: | \ & / newlines — none need escaping because awk reads
-# the substitution from a file, not a command-line arg.
-#
-# This variant inlines the value at the token position (short single/few-line
-# values like titles, authors, URLs). For long multiline bodies/messages, use
-# _substitute_multiline_token_from_file which emits each line on its own row.
-_substitute_token_from_file() {
-  local rendered="$1"
-  local token="$2"
-  local value_file="$3"
-  echo "$rendered" | awk -v token="{{${token}}}" -v vfile="$value_file" '
-    BEGIN {
-      value = ""
-      first = 1
-      while ((getline line < vfile) > 0) {
-        if (first) { value = line; first = 0 }
-        else       { value = value "\n" line }
-      }
-      close(vfile)
-    }
-    {
-      if (index($0, token) > 0) {
-        n = split($0, parts, token)
-        out = parts[1]
-        for (i = 2; i <= n; i++) out = out value parts[i]
-        print out
-      } else {
-        print
-      }
-    }
-  '
-}
-
-# Multiline variant: when a line contains only `{{TOKEN}}` (with optional
-# surrounding whitespace handling), emit the value file line-by-line in place.
-# Matches the pre-Phase-15 ISSUE_BODY pattern so templates that reserve a
-# blank line for the body render correctly.
-_substitute_multiline_token_from_file() {
-  local rendered="$1"
-  local token="$2"
-  local value_file="$3"
-  echo "$rendered" | awk -v pat="{{${token}}}" -v vfile="$value_file" '
-    index($0, pat) > 0 {
-      while ((getline line < vfile) > 0) print line
-      close(vfile)
-      next
-    }
-    { print }
-  '
-}
-
-resolve_template() {
-  local event_type="$1"
-  local explicit_template="${2:-}"
-
-  local profile_dir
-  profile_dir=$(resolve_profile_dir "$PROFILE")
-  local prompts_dir="$profile_dir/prompts"
-  local docs_prompts_dir="$CONFIG_DIR/docs/$PROFILE/prompts"
-
-  # D-13 step 1: explicit --prompt-template stays in the profile dir ONLY.
-  # No default-dir fallback when the user named a template explicitly — a
-  # silent fallback would hide typos.
-  if [ -n "$explicit_template" ]; then
-    local path="$prompts_dir/${explicit_template}.md"
-    if [ -f "$path" ]; then
-      echo "$path"
-      return 0
-    fi
-    echo "ERROR: Template not found: $path (from --prompt-template)" >&2
-    return 1
-  fi
-
-  # D-13 step 2: profile override by event_type (profiles/ dir).
-  if [ -d "$prompts_dir" ]; then
-    local path="$prompts_dir/${event_type}.md"
-    if [ -f "$path" ]; then
-      echo "$path"
-      return 0
-    fi
-  fi
-
-  # D-13 step 2b: docs/ fallback for profile prompts.
-  if [ -d "$docs_prompts_dir" ]; then
-    local path="$docs_prompts_dir/${event_type}.md"
-    if [ -f "$path" ]; then
-      echo "$path"
-      return 0
-    fi
-  fi
-
-  # D-13 step 3: default template fallback.
-  local default_dir
-  default_dir=$(_resolve_default_templates_dir)
-  if [ -d "$default_dir" ]; then
-    local path="$default_dir/${event_type}.md"
-    if [ -f "$path" ]; then
-      echo "$path"
-      return 0
-    fi
-  fi
-
-  # D-13 step 4: hard fail, listing every path checked.
-  echo "ERROR: No template found for event_type '$event_type'" >&2
-  echo "  Checked: $prompts_dir/${event_type}.md" >&2
-  echo "  Checked: $docs_prompts_dir/${event_type}.md" >&2
-  echo "  Checked: $default_dir/${event_type}.md" >&2
-  echo "  Use --prompt-template to override, or create one of the above." >&2
-  return 1
-}
-
 # Phase 16 D-08: report-template fallback chain.
 # Clone of resolve_template for report templates. Only the subdir names
 # change (prompts/ -> report-templates/, templates/ -> report-templates/).
@@ -1022,107 +974,6 @@ resolve_report_template() {
   echo "  Checked: $default_dir/${event_type}.md" >&2
   echo "  Create one of the above to enable report publishing." >&2
   return 1
-}
-
-render_template() {
-  local template_path="$1"
-  local event_json="$2"
-
-  local rendered
-  rendered=$(cat "$template_path")
-  local v_file
-
-  # --- Common (D-16) --------------------------------------------------------
-
-  v_file=$(_extract_to_tempfile "$event_json" '.repository.full_name' "")
-  rendered=$(_substitute_token_from_file "$rendered" "REPO_NAME" "$v_file")
-
-  # D-03: top-level .event_type wins, then Phase 14 ._meta.event_type, then .action.
-  v_file=$(_extract_to_tempfile "$event_json" '.event_type // ._meta.event_type // .action' "unknown")
-  rendered=$(_substitute_token_from_file "$rendered" "EVENT_TYPE" "$v_file")
-
-  # --- Issues ---------------------------------------------------------------
-
-  v_file=$(_extract_to_tempfile "$event_json" '.issue.number | tostring' "")
-  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_NUMBER" "$v_file")
-
-  v_file=$(_extract_to_tempfile "$event_json" '.issue.title' "")
-  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_TITLE" "$v_file")
-
-  v_file=$(_extract_to_tempfile "$event_json" '[.issue.labels[]?.name] | join(", ")' "")
-  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_LABELS" "$v_file")
-
-  v_file=$(_extract_to_tempfile "$event_json" '.issue.user.login' "")
-  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_AUTHOR" "$v_file")
-
-  v_file=$(_extract_to_tempfile "$event_json" '.issue.html_url' "")
-  rendered=$(_substitute_token_from_file "$rendered" "ISSUE_URL" "$v_file")
-
-  # --- GATED multi-source variables (BRANCH, COMMIT_SHA) -------------------
-  #
-  # Pattern: extract from the primary source first; if the resulting file is
-  # non-empty (i.e. `.ref` was present on a push payload), substitute now.
-  # Otherwise fall back to the workflow_run source and substitute that.
-  #
-  # WHY GATED: `_substitute_token_from_file` always replaces the token — even
-  # with an empty value — so the naive "substitute, then re-grep for the
-  # token to detect fallback" pattern silently consumes `{{BRANCH}}` on
-  # workflow_run-only payloads. `[ -s "$v_file" ]` triggers the fallback
-  # branch only when the primary source produced bytes.
-  v_file=$(_extract_to_tempfile "$event_json" '.ref | sub("^refs/heads/"; "")' "")
-  if [ -s "$v_file" ]; then
-    rendered=$(_substitute_token_from_file "$rendered" "BRANCH" "$v_file")
-  else
-    v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.head_branch' "")
-    rendered=$(_substitute_token_from_file "$rendered" "BRANCH" "$v_file")
-  fi
-
-  v_file=$(_extract_to_tempfile "$event_json" '.after // .head_commit.id' "")
-  if [ -s "$v_file" ]; then
-    rendered=$(_substitute_token_from_file "$rendered" "COMMIT_SHA" "$v_file")
-  else
-    v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.head_sha' "")
-    rendered=$(_substitute_token_from_file "$rendered" "COMMIT_SHA" "$v_file")
-  fi
-
-  # --- Push (single-source, null-safe via `// empty` in jq) ----------------
-
-  v_file=$(_extract_to_tempfile "$event_json" '.head_commit.author.name' "")
-  rendered=$(_substitute_token_from_file "$rendered" "COMMIT_AUTHOR" "$v_file")
-
-  v_file=$(_extract_to_tempfile "$event_json" '.pusher.name' "")
-  rendered=$(_substitute_token_from_file "$rendered" "PUSHER" "$v_file")
-
-  v_file=$(_extract_to_tempfile "$event_json" '.compare' "")
-  rendered=$(_substitute_token_from_file "$rendered" "COMPARE_URL" "$v_file")
-
-  # `tojson` converts the array to compact single-line JSON; `-r` strips the outer quotes.
-  v_file=$(_extract_to_tempfile "$event_json" '.commits // [] | tojson' "[]")
-  rendered=$(_substitute_token_from_file "$rendered" "COMMITS_JSON" "$v_file")
-
-  # --- Workflow run (Pitfall 6: prefer top-level .workflow.name) -----------
-
-  v_file=$(_extract_to_tempfile "$event_json" '.workflow.name // .workflow_run.name' "")
-  rendered=$(_substitute_token_from_file "$rendered" "WORKFLOW_NAME" "$v_file")
-
-  v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.id | tostring' "")
-  rendered=$(_substitute_token_from_file "$rendered" "WORKFLOW_RUN_ID" "$v_file")
-
-  v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.conclusion' "")
-  rendered=$(_substitute_token_from_file "$rendered" "WORKFLOW_CONCLUSION" "$v_file")
-
-  v_file=$(_extract_to_tempfile "$event_json" '.workflow_run.html_url' "")
-  rendered=$(_substitute_token_from_file "$rendered" "WORKFLOW_RUN_URL" "$v_file")
-
-  # --- Multiline values (null-safe, Pitfall 7) -----------------------------
-
-  v_file=$(_extract_to_tempfile "$event_json" '.issue.body // empty' "")
-  rendered=$(_substitute_multiline_token_from_file "$rendered" "ISSUE_BODY" "$v_file")
-
-  v_file=$(_extract_to_tempfile "$event_json" '.head_commit.message // empty' "")
-  rendered=$(_substitute_multiline_token_from_file "$rendered" "COMMIT_MESSAGE" "$v_file")
-
-  echo "$rendered"
 }
 
 # =========================================================================
@@ -1584,22 +1435,29 @@ do_spawn() {
   audit_branch=$(echo "$EVENT_JSON" | jq -r '.pull_request.head.ref // (.ref // empty | sub("^refs/heads/"; ""))')
   [ "$audit_branch" = "null" ] && audit_branch=""
 
-  local _profile_json="$CONFIG_DIR/profiles/$PROFILE/profile.json"
-  if [ -f "$_profile_json" ]; then
-    CLAUDE_SECURE_SYSTEM_PROMPT=$(jq -r '.system_prompt // empty' "$_profile_json" 2>/dev/null || true)
-    export CLAUDE_SECURE_SYSTEM_PROMPT
-  fi
-
-  # Resolve and render prompt template (per D-13 through D-17)
-  local profile_dir="$CONFIG_DIR/profiles/$PROFILE"
-  local template_path
-  template_path=$(resolve_template "$event_type" "$PROMPT_TEMPLATE") || return 1
+  # Resolve task file from profile-local tasks/ directory.
+  local task_file
+  task_file=$(resolve_task_file "$event_type") || return 1
 
   local rendered_prompt
-  rendered_prompt=$(render_template "$template_path" "$EVENT_JSON")
+  rendered_prompt=$(cat "$task_file")
 
-  # --dry-run: print resolved prompt and exit (per Claude's Discretion)
+  # Resolve system prompt file (may be empty = omit --system-prompt).
+  local system_prompt_file system_prompt_source="none"
+  system_prompt_file=$(resolve_system_prompt_file "$event_type")
+  if [ -n "$system_prompt_file" ]; then
+    CLAUDE_SECURE_SYSTEM_PROMPT=$(cat "$system_prompt_file")
+    system_prompt_source="$system_prompt_file"
+  else
+    CLAUDE_SECURE_SYSTEM_PROMPT=""
+  fi
+  export CLAUDE_SECURE_SYSTEM_PROMPT
+
+  # --dry-run: print resolved paths + content and exit.
   if [ "$DRY_RUN" -eq 1 ]; then
+    echo "task_file: $task_file"
+    echo "system_prompt: $system_prompt_source"
+    echo "---"
     echo "$rendered_prompt"
     return 0
   fi
@@ -2603,6 +2461,14 @@ case "$CMD" in
   update)
     echo "Pulling latest changes..."
     sudo git -C "$APP_DIR" pull
+    # Migrate profile layout to the file-based tasks/ + system_prompts/ model
+    # BEFORE replacing the binary, so the new CLI finds migrated profiles.
+    _migrate_script="$APP_DIR/scripts/migrate-profile-prompts.sh"
+    if [ -x "$_migrate_script" ]; then
+      echo "Migrating profile prompts..."
+      CONFIG_DIR="$CONFIG_DIR" bash "$_migrate_script" || \
+        echo "WARNING: migrate-profile-prompts.sh failed (continuing)"
+    fi
     # Update CLI wrapper if source changed (do this before rebuilding images
     # so the new binary is in place if the user re-runs after a partial failure)
     CLI_INSTALLED="$(command -v claude-secure)"
