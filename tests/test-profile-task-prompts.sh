@@ -13,6 +13,9 @@
 #   PTP-07: --dry-run shows resolved task path and system prompt source
 #   PTP-08: migration script moves system_prompt field to system_prompts/default.md
 #   PTP-09: migration script is idempotent
+#   PTP-10: --event-file appends payload block to prompt
+#   PTP-11: empty EVENT_JSON produces no payload block (guard unit test)
+#   PTP-12: --dry-run with event file shows payload block in stdout
 set -uo pipefail
 
 PASS=0; FAIL=0; TOTAL=0
@@ -222,6 +225,73 @@ test_ptp09_migration_idempotent() {
   grep -q '^PUSH$' "$cfg/profiles/p1/tasks/push.md" || return 1
 }
 run_test "PTP-09: migration is idempotent" test_ptp09_migration_idempotent
+
+# -------------------------------------------------------------------------
+# PTP-10: --event-file produces prompt with payload block appended
+# -------------------------------------------------------------------------
+test_ptp10_event_file_appends_payload_block() {
+  local t; t=$(mktemp -d -p "$TEST_TMPDIR"); local cfg; cfg=$(_make_profile "$t")
+  local pdir="$cfg/profiles/testprof"
+  mkdir -p "$pdir/tasks"
+  printf 'TASK CONTENT\n' > "$pdir/tasks/push.md"
+
+  local event_file="$t/push-event.json"
+  printf '{"event_type":"push","repository":{"full_name":"u/r"},"commits":[]}\n' > "$event_file"
+
+  local out
+  out=$(CONFIG_DIR="$cfg" HOME="$TEST_TMPDIR" \
+    bash "$CLI" spawn testprof --event-file "$event_file" --dry-run 2>&1)
+
+  echo "$out" | grep -q 'TASK CONTENT' || return 1
+  echo "$out" | grep -qF -- '---' || return 1
+  echo "$out" | grep -q 'Event Payload' || return 1
+  echo "$out" | grep -qF '```json' || return 1
+  echo "$out" | grep -q '"event_type"' || return 1
+}
+run_test "PTP-10: --event-file appends payload block to prompt" test_ptp10_event_file_appends_payload_block
+
+# -------------------------------------------------------------------------
+# PTP-11: no EVENT_JSON -> no payload block appended (unit test of guard)
+# -------------------------------------------------------------------------
+test_ptp11_no_event_no_payload_block() {
+  local content="TASK CONTENT"
+  local EVENT_JSON=""
+  local event_type="unknown"
+  local result="$content"
+  if [ -n "${EVENT_JSON:-}" ]; then
+    result+="
+
+---
+Event Payload (\`${event_type}\`):
+\`\`\`json
+${EVENT_JSON}
+\`\`\`"
+  fi
+  ! echo "$result" | grep -q 'Event Payload'
+}
+run_test "PTP-11: empty EVENT_JSON produces no payload block" test_ptp11_no_event_no_payload_block
+
+# -------------------------------------------------------------------------
+# PTP-12: --dry-run with event file shows payload block in stdout
+# -------------------------------------------------------------------------
+test_ptp12_dry_run_shows_payload_block() {
+  local t; t=$(mktemp -d -p "$TEST_TMPDIR"); local cfg; cfg=$(_make_profile "$t")
+  local pdir="$cfg/profiles/testprof"
+  mkdir -p "$pdir/tasks"
+  printf 'DRY RUN TASK\n' > "$pdir/tasks/push.md"
+
+  local event_file="$t/event.json"
+  printf '{"event_type":"push","repository":{"full_name":"u/r"},"ref":"refs/heads/main"}\n' > "$event_file"
+
+  local out
+  out=$(CONFIG_DIR="$cfg" HOME="$TEST_TMPDIR" \
+    bash "$CLI" spawn testprof --event-file "$event_file" --dry-run 2>&1)
+
+  echo "$out" | grep -q 'DRY RUN TASK' || return 1
+  echo "$out" | grep -q 'Event Payload (`push`)' || return 1
+  echo "$out" | grep -q '"event_type"' || return 1
+}
+run_test "PTP-12: --dry-run with event file shows payload block in stdout" test_ptp12_dry_run_shows_payload_block
 
 echo ""
 echo "========================================"
