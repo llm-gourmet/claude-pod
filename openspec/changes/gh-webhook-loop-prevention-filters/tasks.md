@@ -30,4 +30,4 @@
 
 ## 6. Commit
 
-- [ ] 6.1 Commit all changes with message `[skip-claude] feat(gh-webhook): add loop-prevention skip filters`
+- [x] 6.1 Commit all changes with message `[skip-claude] feat(gh-webhook): add loop-prevention skip filters`

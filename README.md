@@ -83,6 +83,11 @@ claude-secure gh-webhook-listener --set-profile <profile> --name <name>
 claude-secure gh-webhook-listener --set-bind <addr>
 claude-secure gh-webhook-listener --set-port <port>
 
+# Skip filters (loop prevention)
+claude-secure gh-webhook-listener filter add "<value>" --name <connection>
+claude-secure gh-webhook-listener filter list --name <connection>
+claude-secure gh-webhook-listener filter remove "<value>" --name <connection>
+
 # Docs bootstrap
 claude-secure bootstrap-docs --add-connection --name <n> --repo <url> --token <pat>
 claude-secure bootstrap-docs --list-connections
@@ -220,7 +225,7 @@ Resolution chain used by `start` and `spawn`:
 - **Task prompt** — `tasks/<event_type>.md` → `tasks/default.md`. If neither exists, spawn fails with the checked paths printed.
 - **System prompt** — `system_prompts/<event_type>.md` → `system_prompts/default.md`. If neither exists, `--system-prompt` is omitted.
 
-Files are passed to Claude as-is (no token substitution). The event JSON is available to the spawn; Claude can run `git show`, `git log`, etc. to gather context.
+Files are passed to Claude as-is (no token substitution). The full webhook event JSON is **always appended** to the task prompt as a fenced code block — Claude receives the raw payload directly without needing to call any API. Claude can also run `git show`, `git log`, etc. for additional context.
 
 Edit the files directly — changes take effect on the next `start` or `spawn`, no restart needed. Use `claude-secure spawn <name> --event '<json>' --dry-run` to verify which files resolve and preview the rendered content.
 

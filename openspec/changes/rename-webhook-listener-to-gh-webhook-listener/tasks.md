@@ -21,4 +21,4 @@
 
 ## 5. Commit
 
-- [ ] 5.1 Commit all changes with message `[skip-claude] rename(cli): webhook-listener → gh-webhook-listener`
+- [x] 5.1 Commit all changes with message `[skip-claude] rename(cli): webhook-listener → gh-webhook-listener`
