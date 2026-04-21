@@ -1539,7 +1539,7 @@ ${EVENT_JSON}
     claude_exit="${CLAUDE_SECURE_FAKE_CLAUDE_EXIT:-0}"
   else
     docker compose up -d --wait
-    claude_stdout=$(docker compose exec -T claude claude -p "${claude_args[@]}" 2>"$claude_stderr_file") || claude_exit=$?
+    claude_stdout=$(docker compose exec -T claude claude -p "${claude_args[@]}" < /dev/null 2>"$claude_stderr_file") || claude_exit=$?
   fi
 
   # Validate Claude output contains expected fields (per HEAD-02: result, cost, duration, session_id)
