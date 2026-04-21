@@ -198,20 +198,40 @@ create_profile() {
   # Build profile.json
   jq -n --arg ws "$ws_path" '{"workspace": $ws, "secrets": []}' > "$tmpdir/profile.json"
 
-  # Scaffold tasks/ and system_prompts/ with placeholder default.md files.
+  # Scaffold tasks/ and system_prompts/ with self-describing stub files.
   mkdir -p "$tmpdir/tasks" "$tmpdir/system_prompts"
-  cat > "$tmpdir/tasks/default.md" <<EOF
-# Default task for profile '$name'
-
-Describe what Claude should do when spawned for this profile.
-Event JSON is available in the environment; use \`git\` and the repo to
-gather additional context as needed.
-EOF
+  cat > "$tmpdir/tasks/default.md" <<'STUBEOF'
+# TODO: describe what Claude should do for events not matched by a specific task file
+STUBEOF
+  cat > "$tmpdir/tasks/push.md" <<'STUBEOF'
+# TODO: describe what Claude should do when a push event arrives
+STUBEOF
+  cat > "$tmpdir/tasks/issues-opened.md" <<'STUBEOF'
+# TODO: describe what Claude should do when an issues.opened event arrives
+STUBEOF
+  cat > "$tmpdir/tasks/issues-labeled.md" <<'STUBEOF'
+# TODO: describe what Claude should do when an issues.labeled event arrives
+STUBEOF
+  cat > "$tmpdir/tasks/pull-request-opened.md" <<'STUBEOF'
+# TODO: describe what Claude should do when a pull_request.opened event arrives
+STUBEOF
+  cat > "$tmpdir/tasks/pull-request-merged.md" <<'STUBEOF'
+# TODO: describe what Claude should do when a pull_request.closed (merged) event arrives
+STUBEOF
+  cat > "$tmpdir/tasks/workflow-run-completed.md" <<'STUBEOF'
+# TODO: describe what Claude should do when a workflow_run.completed event arrives
+STUBEOF
   cat > "$tmpdir/system_prompts/default.md" <<EOF
-# Default system prompt for profile '$name'
+# System prompt placeholder for profile '$name'
 
-Replace this with role, tone, and constraints for Claude in this profile.
-Delete the file to omit --system-prompt entirely.
+This file is a placeholder. You are reading it because no custom system prompt
+has been configured yet for this profile. Please let the user know they can
+customize this file at:
+
+  ~/.claude-secure/profiles/$name/system_prompts/
+
+Replace this content with the role, tone, and constraints for Claude in this
+profile. Delete the file to omit --system-prompt entirely.
 EOF
 
   # Auth setup
@@ -499,7 +519,7 @@ cmd_profile() {
   if [ -z "$prof_name" ]; then
     echo "ERROR: profile name or 'create' is required" >&2
     echo "Usage: claude-secure profile create <name>" >&2
-    echo "       claude-secure profile <name> [secret|system-prompt] [args...]" >&2
+    echo "       claude-secure profile <name> [secret] [args...]" >&2
     exit 1
   fi
   validate_profile_name "$prof_name"
@@ -528,23 +548,6 @@ cmd_profile() {
           ;;
       esac
       ;;
-    system-prompt)
-      local action="${3:-}"
-      case "$action" in
-        set)   profile_system_prompt_set "$prof_dir" "${4:-}" ;;
-        get)   profile_system_prompt_get "$prof_dir" ;;
-        clear) profile_system_prompt_clear "$prof_dir" ;;
-        "")
-          echo "ERROR: Action required: set, get, clear" >&2
-          echo "Usage: claude-secure profile <name> system-prompt <set|get|clear>" >&2
-          exit 1
-          ;;
-        *)
-          echo "ERROR: Unknown action '$action'. Use: set, get, clear" >&2
-          exit 1
-          ;;
-      esac
-      ;;
     "")
       # Bare: show profile info
       local workspace secret_count running_state
@@ -562,7 +565,7 @@ cmd_profile() {
       echo "  Status:    $running_state"
       ;;
     *)
-      echo "ERROR: Unknown subcommand '$subcmd'. Use: secret, system-prompt" >&2
+      echo "ERROR: Unknown subcommand '$subcmd'. Use: secret" >&2
       exit 1
       ;;
   esac
@@ -676,46 +679,6 @@ profile_secret_remove() {
   mv "$tmp_json" "$pjson"
 
   echo "Secret '$key' removed from profile."
-}
-
-profile_system_prompt_set() {
-  local pdir="$1"
-  local text="${2:-}"
-
-  if [ -z "$text" ]; then
-    read -rp "System prompt: " text
-    if [ -z "$text" ]; then
-      echo "ERROR: System prompt was empty." >&2; return 1
-    fi
-  fi
-
-  local pjson="$pdir/profile.json"
-  local tmp_json
-  tmp_json=$(mktemp)
-  jq --arg t "$text" '.system_prompt = $t' "$pjson" > "$tmp_json"
-  mv "$tmp_json" "$pjson"
-  echo "System prompt set."
-}
-
-profile_system_prompt_get() {
-  local pdir="$1"
-  local val
-  val=$(jq -r '.system_prompt // empty' "$pdir/profile.json")
-  if [ -z "$val" ]; then
-    echo "(no system prompt set)"
-  else
-    echo "$val"
-  fi
-}
-
-profile_system_prompt_clear() {
-  local pdir="$1"
-  local pjson="$pdir/profile.json"
-  local tmp_json
-  tmp_json=$(mktemp)
-  jq 'del(.system_prompt)' "$pjson" > "$tmp_json"
-  mv "$tmp_json" "$pjson"
-  echo "System prompt cleared."
 }
 
 # Use docker compose project-scoped cleanup instead of hardcoded names
@@ -2588,9 +2551,6 @@ case "$CMD" in
     echo "  profile <name> secret list"
     echo "  profile <name> secret add <KEY> [<value>] [--redacted <TOKEN>] [--domains d1,d2,...]"
     echo "  profile <name> secret remove <KEY>"
-    echo "  profile <name> system-prompt set \"<text>\""
-    echo "  profile <name> system-prompt get"
-    echo "  profile <name> system-prompt clear"
     echo ""
     echo "Session:"
     echo "  start <name>       Start an interactive Claude Code session"
