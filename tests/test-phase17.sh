@@ -299,23 +299,25 @@ test_reap_compose_down_invocation() {
   export REAPED_COUNT=0 REAPED_ERRORS=0
   reap_orphan_projects "cs-" >/dev/null 2>&1
   unset MOCK_DOCKER_PS_OUTPUT MOCK_DOCKER_INSPECT_CREATED REAPER_ORPHAN_AGE_SECS
-  grep -q 'compose -p cs-test-11111111 down -v --remove-orphans --timeout 10' "$MOCK_DOCKER_LOG" \
+  grep -q 'compose -p cs-test-11111111 down -v --remove-orphans --rmi local --timeout 10' "$MOCK_DOCKER_LOG" \
     || { echo "no compose down invocation recorded in $MOCK_DOCKER_LOG" >&2; cat "$MOCK_DOCKER_LOG" >&2; return 1; }
   return 0
 }
 
-test_reap_never_touches_images() {
-  local bin="$PROJECT_DIR/bin/claude-secure"
-  local body
-  body=$(awk '/^do_reap\(\)/,/^}$/' "$bin")
-  if echo "$body" | grep -qE 'docker[[:space:]]+rmi|image[[:space:]]+prune|--rmi'; then
-    echo "do_reap body contains forbidden image commands" >&2
-    return 1
-  fi
-  body=$(awk '/^reap_orphan_projects\(\)/,/^}$/' "$bin")
-  if echo "$body" | grep -qE 'docker[[:space:]]+rmi|image[[:space:]]+prune|--rmi'; then
-    echo "reap_orphan_projects body contains forbidden image commands" >&2
-    return 1
+test_reap_rmi_local_in_compose_down() {
+  source_claude_secure_for_unit_test
+  : > "$MOCK_DOCKER_LOG"
+  export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
+  export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
+  export REAPER_ORPHAN_AGE_SECS=0
+  export REAPED_COUNT=0 REAPED_ERRORS=0
+  reap_orphan_projects "cs-" >/dev/null 2>&1
+  unset MOCK_DOCKER_PS_OUTPUT MOCK_DOCKER_INSPECT_CREATED REAPER_ORPHAN_AGE_SECS
+  grep -q -- '--rmi local' "$MOCK_DOCKER_LOG" \
+    || { echo "compose down missing --rmi local in $MOCK_DOCKER_LOG" >&2; cat "$MOCK_DOCKER_LOG" >&2; return 1; }
+  # Explicit docker rmi or image prune must NOT appear — --rmi local is sufficient.
+  if grep -qE '^docker rmi|^docker image prune' "$MOCK_DOCKER_LOG"; then
+    echo "reaper invoked explicit docker rmi/image prune — unexpected" >&2; return 1
   fi
   return 0
 }
@@ -756,7 +758,7 @@ run_test "reaper install sections"           test_reaper_install_sections
 run_test "reap age threshold select"         test_reap_age_threshold_select
 run_test "reap age threshold skip"           test_reap_age_threshold_skip
 run_test "reap compose down invocation"      test_reap_compose_down_invocation
-run_test "reap never touches images"         test_reap_never_touches_images
+run_test "reap compose down uses --rmi local" test_reap_rmi_local_in_compose_down
 run_test "reap instance prefix scoping"      test_reap_instance_prefix_scoping
 run_test "reap per-project failure continues" test_reap_per_project_failure_continues
 run_test "reap whole cycle failure nonzero"  test_reap_whole_cycle_failure_exits_nonzero

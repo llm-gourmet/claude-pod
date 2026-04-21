@@ -75,13 +75,18 @@ claude-secure reap                    # Clean up orphaned containers and stale e
 claude-secure help                    # Show all commands
 
 # Webhook listener
-claude-secure webhook-listener status
-claude-secure webhook-listener --add-connection --name <n> --repo owner/repo --webhook-secret <s> [--profile <p>]
-claude-secure webhook-listener --remove-connection <name>
-claude-secure webhook-listener --list-connections
-claude-secure webhook-listener --set-profile <profile> --name <name>
-claude-secure webhook-listener --set-bind <addr>
-claude-secure webhook-listener --set-port <port>
+claude-secure gh-webhook-listener status
+claude-secure gh-webhook-listener --add-connection --name <n> --repo owner/repo --webhook-secret <s> [--profile <p>]
+claude-secure gh-webhook-listener --remove-connection <name>
+claude-secure gh-webhook-listener --list-connections
+claude-secure gh-webhook-listener --set-profile <profile> --name <name>
+claude-secure gh-webhook-listener --set-bind <addr>
+claude-secure gh-webhook-listener --set-port <port>
+
+# Skip filters (loop prevention)
+claude-secure gh-webhook-listener filter add "<value>" --name <connection>
+claude-secure gh-webhook-listener filter list --name <connection>
+claude-secure gh-webhook-listener filter remove "<value>" --name <connection>
 
 # Docs bootstrap
 claude-secure bootstrap-docs --add-connection --name <n> --repo <url> --token <pat>
@@ -220,7 +225,7 @@ Resolution chain used by `start` and `spawn`:
 - **Task prompt** — `tasks/<event_type>.md` → `tasks/default.md`. If neither exists, spawn fails with the checked paths printed.
 - **System prompt** — `system_prompts/<event_type>.md` → `system_prompts/default.md`. If neither exists, `--system-prompt` is omitted.
 
-Files are passed to Claude as-is (no token substitution). The event JSON is available to the spawn; Claude can run `git show`, `git log`, etc. to gather context.
+Files are passed to Claude as-is (no token substitution). The full webhook event JSON is **always appended** to the task prompt as a fenced code block — Claude receives the raw payload directly without needing to call any API. Claude can also run `git show`, `git log`, etc. for additional context.
 
 Edit the files directly — changes take effect on the next `start` or `spawn`, no restart needed. Use `claude-secure spawn <name> --event '<json>' --dry-run` to verify which files resolve and preview the rendered content.
 
@@ -243,27 +248,27 @@ Connections are stored in `~/.claude-secure/webhooks/connections.json` (mode 600
 
 ```bash
 # Add a connection (profile defaults to name)
-claude-secure webhook-listener --add-connection \
+claude-secure gh-webhook-listener --add-connection \
   --name myrepo --repo org/myrepo --webhook-secret <secret>
 
 # Add a connection with a different profile name
-claude-secure webhook-listener --add-connection \
+claude-secure gh-webhook-listener --add-connection \
   --name myrepo --repo org/myrepo --webhook-secret <secret> --profile myrepo-docs
 
 # Change the profile for an existing connection
-claude-secure webhook-listener --set-profile myrepo-docs --name myrepo
+claude-secure gh-webhook-listener --set-profile myrepo-docs --name myrepo
 
 # List connections (secret redacted; profile shown when it differs from name)
-claude-secure webhook-listener --list-connections
+claude-secure gh-webhook-listener --list-connections
 
 # Remove a connection
-claude-secure webhook-listener --remove-connection myrepo
+claude-secure gh-webhook-listener --remove-connection myrepo
 ```
 
 ### Status
 
 ```bash
-claude-secure webhook-listener status
+claude-secure gh-webhook-listener status
 ```
 
 ```
@@ -276,8 +281,8 @@ Webhook Listener Status
 ### Configuration
 
 ```bash
-claude-secure webhook-listener --set-bind <addr>   # default: 127.0.0.1
-claude-secure webhook-listener --set-port <port>   # default: 9000
+claude-secure gh-webhook-listener --set-bind <addr>   # default: 127.0.0.1
+claude-secure gh-webhook-listener --set-port <port>   # default: 9000
 ```
 
 Settings persisted to `~/.claude-secure/webhooks/webhook.json`.
@@ -286,7 +291,7 @@ Settings persisted to `~/.claude-secure/webhooks/webhook.json`.
 
 1. Add a connection:
    ```bash
-   claude-secure webhook-listener --add-connection \
+   claude-secure gh-webhook-listener --add-connection \
      --name myrepo --repo org/myrepo --webhook-secret <secret>
    ```
 2. Register a GitHub webhook on the repo:
@@ -295,6 +300,44 @@ Settings persisted to `~/.claude-secure/webhooks/webhook.json`.
    - **Content type:** `application/json`
 
 No new listener, no new port — the existing systemd service routes by `repo` field.
+
+### Loop prevention / skip filters
+
+When claude-secure acts on a GitHub event (pushes, comments, labels), it can trigger new webhook deliveries and re-spawn itself. Skip filters prevent this by matching events before the spawn decision.
+
+**Add a filter** (applies to all applicable event types automatically):
+
+```bash
+claude-secure gh-webhook-listener filter add "[skip-claude]" --name myrepo
+```
+
+Output shows which mechanisms the filter applies to:
+
+```
+Filter "[skip-claude]" added to connection "myrepo":
+  push events          → commit message prefix
+  pr/issues/discussion → label match
+  comments/reviews     → body prefix
+  workflow/check/etc   → not applicable (no free-text field)
+```
+
+**How matching works:**
+
+| Event type | Filter applied as |
+|---|---|
+| `push` | Prefix of every commit message — skips only if **ALL** commits match |
+| `pull_request`, `issues`, `discussion` | Label name exact match |
+| `issue_comment`, `pull_request_review`, `pull_request_review_comment` | Prefix of comment/review body |
+| `workflow_run`, `check_run`, `create`, `delete`, etc. | Not applicable — always spawns |
+
+**List and remove:**
+
+```bash
+claude-secure gh-webhook-listener filter list --name myrepo
+claude-secure gh-webhook-listener filter remove "[skip-claude]" --name myrepo
+```
+
+Skipped events return HTTP 200 and a `skipped` entry is written to `webhook.jsonl`. Multiple filter values can be active on a connection simultaneously.
 
 ### Docs-oriented profiles
 

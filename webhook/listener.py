@@ -53,6 +53,58 @@ def compute_event_type(headers, payload: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Loop-prevention skip filter evaluation
+# ---------------------------------------------------------------------------
+def _filter_matches_one(base: str, payload: dict, filter_value: str) -> "tuple[bool, str]":
+    """Check if a single filter value matches the given event type + payload.
+
+    Returns (matched, reason). Non-applicable event types always return False.
+    """
+    if base == "push":
+        commits = payload.get("commits")
+        if not commits:
+            return False, ""
+        if all(
+            isinstance(c, dict) and c.get("message", "").startswith(filter_value)
+            for c in commits
+        ):
+            return True, "all commits prefixed"
+        return False, ""
+    if base in ("pull_request", "issues", "discussion"):
+        labels = payload.get("labels") or []
+        if any(isinstance(lbl, dict) and lbl.get("name") == filter_value for lbl in labels):
+            return True, "label match"
+        return False, ""
+    if base in ("issue_comment", "pull_request_review", "pull_request_review_comment"):
+        key = "review" if base == "pull_request_review" else "comment"
+        obj = payload.get(key) or {}
+        body = obj.get("body") if isinstance(obj, dict) else None
+        if isinstance(body, str) and body.startswith(filter_value):
+            return True, "body prefix"
+        return False, ""
+    # workflow_run, check_run, create, delete, deployment, ping, etc.
+    return False, ""
+
+
+def evaluate_skip_filters(
+    event_type: str, payload: dict, skip_filters: list
+) -> "tuple[bool, str, str]":
+    """Return (should_skip, matched_filter_value, reason) given the event and connection filters.
+
+    Uses the base event type (part before first '-') for dispatch so that composite
+    types like 'pull_request-opened' match the 'pull_request' rule.
+    """
+    if not skip_filters:
+        return False, "", ""
+    base = event_type.split("-")[0]
+    for fv in skip_filters:
+        matched, reason = _filter_matches_one(base, payload, fv)
+        if matched:
+            return True, fv, reason
+    return False, "", ""
+
+
+# ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 class Config:
@@ -157,6 +209,7 @@ def resolve_connection_by_repo(
                 "repo": repo_full_name,
                 "webhook_secret": secret,
                 "profile": entry.get("profile") or entry["name"],
+                "skip_filters": entry.get("skip_filters") or [],
             }
     return None
 
@@ -423,6 +476,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
         # D-01: composite event type from header + payload.action
         event_type = compute_event_type(self.headers, payload)
+
+        # Loop-prevention: evaluate skip_filters before spawning
+        should_skip, filter_value, skip_reason = evaluate_skip_filters(
+            event_type, payload, profile.get("skip_filters") or []
+        )
+        if should_skip:
+            log_event(
+                event="skipped",
+                connection=profile["name"],
+                delivery_id=delivery_id,
+                filter_value=filter_value,
+                reason=skip_reason,
+            )
+            return self._send_json(200, {"status": "skipped", "filter_value": filter_value})
 
         try:
             event_path = persist_event(

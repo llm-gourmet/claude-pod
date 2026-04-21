@@ -201,25 +201,98 @@ create_profile() {
   # Scaffold tasks/ and system_prompts/ with self-describing stub files.
   mkdir -p "$tmpdir/tasks" "$tmpdir/system_prompts"
   cat > "$tmpdir/tasks/default.md" <<'STUBEOF'
-# TODO: describe what Claude should do for events not matched by a specific task file
+Respond to the webhook event described in the payload below.
+
+<!-- spawn always appends the full webhook event JSON at the end of this prompt
+     as a fenced ```json block labeled "Event Payload (<event_type>)".
+     You can reference any field from the payload directly.
+     Example: the repository name is in .repository.full_name -->
+
+Review the event payload and take whatever action is appropriate for this repository.
 STUBEOF
   cat > "$tmpdir/tasks/push.md" <<'STUBEOF'
-# TODO: describe what Claude should do when a push event arrives
+A push was made to this repository. Review the commits and take appropriate action.
+
+<!-- The full push event payload is appended below by spawn.
+     Useful fields:
+       .commits[]          — array of commit objects
+       .commits[].message  — commit message
+       .commits[].added[]  — files added in that commit
+       .commits[].modified[] — files modified
+       .ref                — branch ref (e.g. refs/heads/main)
+       .repository.full_name — "owner/repo" -->
+
+Summarize what changed across all commits and flag any concerns.
 STUBEOF
   cat > "$tmpdir/tasks/issues-opened.md" <<'STUBEOF'
-# TODO: describe what Claude should do when an issues.opened event arrives
+A new issue was opened. Triage it based on the title and body.
+
+<!-- The full issues event payload is appended below by spawn.
+     Useful fields:
+       .issue.title        — issue title
+       .issue.body         — issue body text
+       .issue.labels[]     — labels already on the issue
+       .issue.user.login   — author
+       .repository.full_name — "owner/repo" -->
+
+Read the issue title and body from the payload. Add an appropriate label (bug, enhancement, question, etc.) and post a brief acknowledgement comment.
 STUBEOF
   cat > "$tmpdir/tasks/issues-labeled.md" <<'STUBEOF'
-# TODO: describe what Claude should do when an issues.labeled event arrives
+A label was added to an issue. React to the label if needed.
+
+<!-- The full issues event payload is appended below by spawn.
+     Useful fields:
+       .label.name         — the label that was just added
+       .issue.title        — issue title
+       .issue.body         — issue body
+       .issue.number       — issue number
+       .repository.full_name — "owner/repo" -->
+
+Check .label.name from the payload. If the label requires an automated response (e.g. "needs-repro", "help-wanted"), take the appropriate action.
 STUBEOF
   cat > "$tmpdir/tasks/pull-request-opened.md" <<'STUBEOF'
-# TODO: describe what Claude should do when a pull_request.opened event arrives
+A pull request was opened. Review it and provide feedback.
+
+<!-- The full pull_request event payload is appended below by spawn.
+     Useful fields:
+       .pull_request.title       — PR title
+       .pull_request.body        — PR description
+       .pull_request.head.sha    — head commit SHA (use with git diff)
+       .pull_request.base.ref    — base branch name
+       .pull_request.head.ref    — head branch name
+       .pull_request.user.login  — author
+       .repository.full_name     — "owner/repo" -->
+
+Read the PR title and body from the payload. Run `git diff origin/<base_ref>...origin/<head_ref>` to see the changes. Post a review comment summarizing what the PR does and any concerns.
 STUBEOF
   cat > "$tmpdir/tasks/pull-request-merged.md" <<'STUBEOF'
-# TODO: describe what Claude should do when a pull_request.closed (merged) event arrives
+A pull request was merged. Perform any post-merge housekeeping.
+
+<!-- The full pull_request event payload is appended below by spawn.
+     Useful fields:
+       .pull_request.title         — PR title
+       .pull_request.body          — PR description
+       .pull_request.merged_by.login — who merged it
+       .pull_request.merge_commit_sha — merge commit SHA
+       .pull_request.head.ref      — source branch (now merged)
+       .pull_request.base.ref      — target branch
+       .repository.full_name       — "owner/repo" -->
+
+The PR described in the payload was just merged. Update the changelog, close any linked issues, or run any post-merge tasks appropriate for this repository.
 STUBEOF
   cat > "$tmpdir/tasks/workflow-run-completed.md" <<'STUBEOF'
-# TODO: describe what Claude should do when a workflow_run.completed event arrives
+A workflow run completed. Respond based on the outcome.
+
+<!-- The full workflow_run event payload is appended below by spawn.
+     Useful fields:
+       .workflow_run.name        — workflow name (e.g. "CI")
+       .workflow_run.conclusion  — "success", "failure", "cancelled", etc.
+       .workflow_run.html_url    — link to the run logs
+       .workflow_run.head_branch — branch the workflow ran on
+       .workflow_run.head_sha    — commit SHA
+       .repository.full_name     — "owner/repo" -->
+
+Check .workflow_run.conclusion from the payload. If "failure", investigate the failure and open an issue or comment with findings. If "success", no action needed unless there are follow-up tasks.
 STUBEOF
   cat > "$tmpdir/system_prompts/default.md" <<EOF
 # System prompt placeholder for profile '$name'
@@ -1405,6 +1478,16 @@ do_spawn() {
   local rendered_prompt
   rendered_prompt=$(cat "$task_file")
 
+  if [ -n "${EVENT_JSON:-}" ]; then
+    rendered_prompt+="
+
+---
+Event Payload (\`${event_type}\`):
+\`\`\`json
+${EVENT_JSON}
+\`\`\`"
+  fi
+
   # Resolve system prompt file (may be empty = omit --system-prompt).
   local system_prompt_file system_prompt_source="none"
   system_prompt_file=$(resolve_system_prompt_file "$event_type")
@@ -1706,7 +1789,7 @@ reap_orphan_projects() {
     fi
 
     echo "reaper: reaped $proj age=${age}s"
-    if docker compose -p "$proj" down -v --remove-orphans --timeout 10 \
+    if docker compose -p "$proj" down -v --remove-orphans --rmi local --timeout 10 \
          >/dev/null 2>&1; then
       killed=$((killed + 1))
     else
@@ -2101,15 +2184,159 @@ _webhook_find_connection() {
 }
 
 # =========================================================================
-# webhook-listener: configure and inspect the webhook listener service
+# gh-webhook-listener filter subcommands
+# =========================================================================
+
+_gh_webhook_filter_coverage() {
+  echo "  push events          → commit message prefix"
+  echo "  pr/issues/discussion → label match"
+  echo "  comments/reviews     → body prefix"
+  echo "  workflow/check/etc   → not applicable (no free-text field)"
+}
+
+_gh_webhook_filter_add() {
+  local value="" conn_name=""
+  value="${1:-}"; shift || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) conn_name="$2"; shift 2 ;;
+      *) echo "Error: unknown argument '$1'" >&2; return 1 ;;
+    esac
+  done
+
+  if [ -z "$value" ] || [ -z "$conn_name" ]; then
+    echo "Error: filter add requires a value and --name <connection>" >&2
+    return 1
+  fi
+
+  local connections; connections=$(_webhook_read_connections)
+  local existing; existing=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" \
+    '.[] | select(.name == $n) | .name' 2>/dev/null)
+  if [ -z "$existing" ]; then
+    echo "Error: connection '$conn_name' not found" >&2
+    return 1
+  fi
+
+  local dup; dup=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" --arg v "$value" \
+    '.[] | select(.name == $n) | .skip_filters // [] | .[] | select(. == $v)' 2>/dev/null)
+  if [ -n "$dup" ]; then
+    echo "Error: filter '$value' already exists on connection '$conn_name'" >&2
+    return 1
+  fi
+
+  local updated; updated=$(printf '%s' "$connections" | jq \
+    --arg n "$conn_name" --arg v "$value" \
+    '[.[] | if .name == $n then .skip_filters = ((.skip_filters // []) + [$v]) else . end]')
+  _webhook_write_connections "$updated"
+  echo "Filter \"$value\" added to connection \"$conn_name\":"
+  _gh_webhook_filter_coverage
+  return 0
+}
+
+_gh_webhook_filter_list() {
+  local conn_name=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) conn_name="$2"; shift 2 ;;
+      *) echo "Error: unknown argument '$1'" >&2; return 1 ;;
+    esac
+  done
+
+  if [ -z "$conn_name" ]; then
+    echo "Error: --name <connection> is required" >&2
+    return 1
+  fi
+
+  local connections; connections=$(_webhook_read_connections)
+  local existing; existing=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" \
+    '.[] | select(.name == $n) | .name' 2>/dev/null)
+  if [ -z "$existing" ]; then
+    echo "Error: connection '$conn_name' not found" >&2
+    return 1
+  fi
+
+  local filters; filters=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" \
+    '.[] | select(.name == $n) | .skip_filters // [] | .[]' 2>/dev/null)
+
+  if [ -z "$filters" ]; then
+    echo "No filters configured for connection '$conn_name'."
+    return 0
+  fi
+
+  while IFS= read -r fv; do
+    echo "Filter \"$fv\":"
+    _gh_webhook_filter_coverage
+    echo ""
+  done <<< "$filters"
+  return 0
+}
+
+_gh_webhook_filter_remove() {
+  local value="" conn_name=""
+  value="${1:-}"; shift || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) conn_name="$2"; shift 2 ;;
+      *) echo "Error: unknown argument '$1'" >&2; return 1 ;;
+    esac
+  done
+
+  if [ -z "$value" ] || [ -z "$conn_name" ]; then
+    echo "Error: filter remove requires a value and --name <connection>" >&2
+    return 1
+  fi
+
+  local connections; connections=$(_webhook_read_connections)
+  local existing; existing=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" \
+    '.[] | select(.name == $n) | .name' 2>/dev/null)
+  if [ -z "$existing" ]; then
+    echo "Error: connection '$conn_name' not found" >&2
+    return 1
+  fi
+
+  local existing_fv; existing_fv=$(printf '%s' "$connections" | jq -r \
+    --arg n "$conn_name" --arg v "$value" \
+    '.[] | select(.name == $n) | .skip_filters // [] | .[] | select(. == $v)' 2>/dev/null)
+  if [ -z "$existing_fv" ]; then
+    echo "Error: filter '$value' not found on connection '$conn_name'" >&2
+    return 1
+  fi
+
+  local updated; updated=$(printf '%s' "$connections" | jq \
+    --arg n "$conn_name" --arg v "$value" \
+    '[.[] | if .name == $n then .skip_filters = [(.skip_filters // [])[] | select(. != $v)] else . end]')
+  _webhook_write_connections "$updated"
+  echo "Removed filter '$value' from connection '$conn_name'"
+  return 0
+}
+
+cmd_gh_webhook_filter() {
+  local subcmd="${1:-}"
+  shift || true
+  case "$subcmd" in
+    add)    _gh_webhook_filter_add "$@" ;;
+    list)   _gh_webhook_filter_list "$@" ;;
+    remove) _gh_webhook_filter_remove "$@" ;;
+    *)
+      echo "Usage: claude-secure gh-webhook-listener filter <add|list|remove> ..." >&2
+      echo "  filter add \"<value>\" --name <connection>" >&2
+      echo "  filter list --name <connection>" >&2
+      echo "  filter remove \"<value>\" --name <connection>" >&2
+      return 1
+      ;;
+  esac
+}
+
+# =========================================================================
+# gh-webhook-listener: configure and inspect the webhook listener service
 # =========================================================================
 
 # Show status of the webhook listener service.
-_webhook_listener_status() {
+_gh_webhook_listener_status() {
   local webhook_json="${WEBHOOK_CONFIG:-$HOME/.claude-secure/webhooks/webhook.json}"
 
   if [ ! -r "$webhook_json" ]; then
-    echo "No listener configured. Run claude-secure webhook-listener --help"
+    echo "No listener configured. Run claude-secure gh-webhook-listener --help"
     return 0
   fi
 
@@ -2158,7 +2385,7 @@ _webhook_json_set_key() {
   chmod 600 "$file"
 }
 
-cmd_webhook_listener() {
+cmd_gh_webhook_listener() {
   local set_token="" set_bind="" set_port="" set_profile="" conn_name=""
   local add_connection=0 remove_connection="" list_connections=0
   local conn_repo="" conn_secret="" conn_profile=""
@@ -2178,19 +2405,23 @@ cmd_webhook_listener() {
       --repo)              conn_repo="$2";          shift 2 ;;
       --webhook-secret)    conn_secret="$2";        shift 2 ;;
       --help|-h)
-        echo "Usage: claude-secure webhook-listener [subcommand]"
-        echo "       claude-secure webhook-listener --add-connection --name <n> --repo <r> --webhook-secret <s> [--profile <p>]"
-        echo "       claude-secure webhook-listener --remove-connection <name>"
-        echo "       claude-secure webhook-listener --list-connections"
-        echo "       claude-secure webhook-listener --set-profile <profile> --name <name>"
-        echo "       claude-secure webhook-listener --set-bind <addr>"
-        echo "       claude-secure webhook-listener --set-port <port>"
-        echo "       claude-secure webhook-listener status"
+        echo "Usage: claude-secure gh-webhook-listener [subcommand]"
+        echo "       claude-secure gh-webhook-listener --add-connection --name <n> --repo <r> --webhook-secret <s> [--profile <p>]"
+        echo "       claude-secure gh-webhook-listener --remove-connection <name>"
+        echo "       claude-secure gh-webhook-listener --list-connections"
+        echo "       claude-secure gh-webhook-listener --set-profile <profile> --name <name>"
+        echo "       claude-secure gh-webhook-listener --set-bind <addr>"
+        echo "       claude-secure gh-webhook-listener --set-port <port>"
+        echo "       claude-secure gh-webhook-listener status"
+        echo "       claude-secure gh-webhook-listener filter add \"<value>\" --name <connection>"
+        echo "       claude-secure gh-webhook-listener filter list --name <connection>"
+        echo "       claude-secure gh-webhook-listener filter remove \"<value>\" --name <connection>"
         echo ""
         echo "Connections are stored in ~/.claude-secure/webhooks/connections.json."
         echo "Bind/port are persisted to ~/.claude-secure/webhooks/webhook.json."
         return 0
         ;;
+      filter) shift; cmd_gh_webhook_filter "$@"; return $? ;;
       status) subcmd="status"; shift ;;
       -*) echo "Error: unknown flag '$1'" >&2; return 1 ;;
       *) subcmd="$1"; shift ;;
@@ -2301,10 +2532,10 @@ cmd_webhook_listener() {
   fi
 
   case "${subcmd:-}" in
-    status) _webhook_listener_status ;;
+    status) _gh_webhook_listener_status ;;
     "")
-      echo "Usage: claude-secure webhook-listener [status|--add-connection|--set-token|--set-bind|--set-port]" >&2
-      echo "Run 'claude-secure webhook-listener --help' for more information." >&2
+      echo "Usage: claude-secure gh-webhook-listener [status|--add-connection|--set-token|--set-bind|--set-port]" >&2
+      echo "Run 'claude-secure gh-webhook-listener --help' for more information." >&2
       return 1
       ;;
     *)
@@ -2367,7 +2598,7 @@ FIRST_ARG="${ARGS[0]:-}"
 # Superuser mode (allowed for most commands). Skip config load for commands
 # that don't need a merged workspace or that manage their own profile resolution.
 case "$FIRST_ARG" in
-  list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs|webhook-listener|start|stop|remove|logs|profile)
+  list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs|gh-webhook-listener|start|stop|remove|logs|profile)
     : # skip superuser load
     ;;
   *)
@@ -2569,7 +2800,7 @@ case "$CMD" in
     echo "  upgrade            Upgrade Claude Code to latest version"
     echo "  reap               Clean up orphaned spawn containers and stale event files"
     echo "  bootstrap-docs     Scaffold project docs in configured remote repo"
-    echo "  webhook-listener   Configure and inspect the webhook listener service"
+    echo "  gh-webhook-listener   Configure and inspect the webhook listener service"
     echo "  help               Show this help message"
     echo ""
     echo "Spawn flags:"
@@ -2591,8 +2822,8 @@ case "$CMD" in
   bootstrap-docs)
     cmd_bootstrap_docs "${REMAINING_ARGS[@]:1}"
     ;;
-  webhook-listener)
-    cmd_webhook_listener "${REMAINING_ARGS[@]:1}"
+  gh-webhook-listener)
+    cmd_gh_webhook_listener "${REMAINING_ARGS[@]:1}"
     ;;
   spawn)
     do_spawn

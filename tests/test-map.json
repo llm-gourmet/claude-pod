@@ -78,7 +78,7 @@
         "test-phase25.sh",
         "test-update-cmd.sh",
         "test-bootstrap-docs.sh",
-        "test-webhook-listener-cli.sh"
+        "test-gh-webhook-listener-cli.sh"
       ]
     },
     {
