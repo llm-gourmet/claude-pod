@@ -13,26 +13,26 @@
 #   claude_pod_bootstrap_path        -> idempotent, sets PATH on macOS
 #
 # Environment overrides (for testing / CI):
-#   CLAUDE_SECURE_PLATFORM_OVERRIDE     = linux | wsl2 | macos (forces detect)
-#   CLAUDE_SECURE_BREW_PREFIX_OVERRIDE  = path (forces brew prefix; CI mock)
+#   CLAUDE_POD_PLATFORM_OVERRIDE     = linux | wsl2 | macos (forces detect)
+#   CLAUDE_POD_BREW_PREFIX_OVERRIDE  = path (forces brew prefix; CI mock)
 #
 # NO `set -e` here — it would leak into the caller and break unrelated logic.
 
 # Guard: idempotent sourcing.
-if [ -n "${__CLAUDE_SECURE_PLATFORM_LOADED:-}" ]; then
+if [ -n "${__CLAUDE_POD_PLATFORM_LOADED:-}" ]; then
   return 0
 fi
-__CLAUDE_SECURE_PLATFORM_LOADED=1
+__CLAUDE_POD_PLATFORM_LOADED=1
 
 detect_platform() {
-  if [ -n "${CLAUDE_SECURE_PLATFORM_OVERRIDE:-}" ]; then
-    case "$CLAUDE_SECURE_PLATFORM_OVERRIDE" in
+  if [ -n "${CLAUDE_POD_PLATFORM_OVERRIDE:-}" ]; then
+    case "$CLAUDE_POD_PLATFORM_OVERRIDE" in
       linux|wsl2|macos)
-        echo "$CLAUDE_SECURE_PLATFORM_OVERRIDE"
+        echo "$CLAUDE_POD_PLATFORM_OVERRIDE"
         return 0
         ;;
       *)
-        echo "ERROR: CLAUDE_SECURE_PLATFORM_OVERRIDE must be one of: linux, wsl2, macos (got: $CLAUDE_SECURE_PLATFORM_OVERRIDE)" >&2
+        echo "ERROR: CLAUDE_POD_PLATFORM_OVERRIDE must be one of: linux, wsl2, macos (got: $CLAUDE_POD_PLATFORM_OVERRIDE)" >&2
         return 1
         ;;
     esac
@@ -60,10 +60,10 @@ detect_platform() {
 }
 
 # Print the Homebrew prefix, or empty string if brew is unavailable.
-# Honors CLAUDE_SECURE_BREW_PREFIX_OVERRIDE for CI mocking.
+# Honors CLAUDE_POD_BREW_PREFIX_OVERRIDE for CI mocking.
 claude_pod_brew_prefix() {
-  if [ -n "${CLAUDE_SECURE_BREW_PREFIX_OVERRIDE:-}" ]; then
-    echo "$CLAUDE_SECURE_BREW_PREFIX_OVERRIDE"
+  if [ -n "${CLAUDE_POD_BREW_PREFIX_OVERRIDE:-}" ]; then
+    echo "$CLAUDE_POD_BREW_PREFIX_OVERRIDE"
     return 0
   fi
   if command -v brew >/dev/null 2>&1; then
@@ -89,11 +89,11 @@ claude_pod_uuid_lower() {
 # (added in Plan 03). This function only verifies the brew bash binary
 # exists so the caller's prologue can re-exec into it.
 claude_pod_bootstrap_path() {
-  if [ -n "${__CLAUDE_SECURE_BOOTSTRAPPED:-}" ]; then
+  if [ -n "${__CLAUDE_POD_BOOTSTRAPPED:-}" ]; then
     return 0
   fi
-  __CLAUDE_SECURE_BOOTSTRAPPED=1
-  export __CLAUDE_SECURE_BOOTSTRAPPED
+  __CLAUDE_POD_BOOTSTRAPPED=1
+  export __CLAUDE_POD_BOOTSTRAPPED
 
   local plat
   plat="$(detect_platform)" || return 1

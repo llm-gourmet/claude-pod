@@ -97,20 +97,20 @@ EOF
 
   local workspace compose_name
   workspace=$(
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$cfg"
     source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "myproj"
     echo "$WORKSPACE_PATH"
   )
   compose_name=$(
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$cfg"
     source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "myproj"
     echo "$COMPOSE_PROJECT_NAME"
   )
@@ -293,11 +293,11 @@ EOF
 
   local ws
   ws=$(
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$cfg"
     source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "scoped"
     echo "$WORKSPACE_PATH"
   )
@@ -311,10 +311,10 @@ EOF
 run_test "MULTI-09: Profile config scope (workspace from profile.json)" test_profile_config_scope
 
 # =========================================================================
-# MULTI-10: system_prompts/default.md file sets CLAUDE_SECURE_SYSTEM_PROMPT
-# load_profile_config must export CLAUDE_SECURE_SYSTEM_PROMPT from the file.
+# MULTI-10: system_prompts/default.md file sets CLAUDE_POD_SYSTEM_PROMPT
+# load_profile_config must export CLAUDE_POD_SYSTEM_PROMPT from the file.
 # bin/claude-pod must still reference --system-prompt and
-# CLAUDE_SECURE_SYSTEM_PROMPT when the value is set.
+# CLAUDE_POD_SYSTEM_PROMPT when the value is set.
 # =========================================================================
 test_system_prompt_field() {
   local tmpdir
@@ -332,42 +332,42 @@ EOF
   printf 'You are a helpful assistant with access to REPORT_REPO_TOKEN.' \
     > "$pdir/system_prompts/default.md"
 
-  # Verify load_profile_config exports CLAUDE_SECURE_SYSTEM_PROMPT
+  # Verify load_profile_config exports CLAUDE_POD_SYSTEM_PROMPT
   local got_prompt
   got_prompt=$(
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$cfg"
     source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "sysprompt"
-    echo "$CLAUDE_SECURE_SYSTEM_PROMPT"
+    echo "$CLAUDE_POD_SYSTEM_PROMPT"
   )
 
   [ "$got_prompt" = "You are a helpful assistant with access to REPORT_REPO_TOKEN." ] \
-    || { echo "CLAUDE_SECURE_SYSTEM_PROMPT wrong: $got_prompt" >&2; return 1; }
+    || { echo "CLAUDE_POD_SYSTEM_PROMPT wrong: $got_prompt" >&2; return 1; }
 
   # Verify bin/claude-pod passes --system-prompt to claude when set
   grep -q -- '--system-prompt' "$PROJECT_DIR/bin/claude-pod" || return 1
-  grep -q 'CLAUDE_SECURE_SYSTEM_PROMPT' "$PROJECT_DIR/bin/claude-pod" || return 1
+  grep -q 'CLAUDE_POD_SYSTEM_PROMPT' "$PROJECT_DIR/bin/claude-pod" || return 1
 
-  # Verify missing system_prompts/default.md leaves CLAUDE_SECURE_SYSTEM_PROMPT empty
+  # Verify missing system_prompts/default.md leaves CLAUDE_POD_SYSTEM_PROMPT empty
   rm -f "$pdir/system_prompts/default.md"
   local empty_prompt
   empty_prompt=$(
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$cfg"
     source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "sysprompt"
-    echo "${CLAUDE_SECURE_SYSTEM_PROMPT:-}"
+    echo "${CLAUDE_POD_SYSTEM_PROMPT:-}"
   )
-  [ -z "$empty_prompt" ] || { echo "Expected empty CLAUDE_SECURE_SYSTEM_PROMPT, got: $empty_prompt" >&2; return 1; }
+  [ -z "$empty_prompt" ] || { echo "Expected empty CLAUDE_POD_SYSTEM_PROMPT, got: $empty_prompt" >&2; return 1; }
 
   return 0
 }
-run_test "MULTI-10: system_prompts/default.md sets CLAUDE_SECURE_SYSTEM_PROMPT" test_system_prompt_field
+run_test "MULTI-10: system_prompts/default.md sets CLAUDE_POD_SYSTEM_PROMPT" test_system_prompt_field
 
 # =========================================================================
 # MULTI-11: profile create <name> exits without starting containers

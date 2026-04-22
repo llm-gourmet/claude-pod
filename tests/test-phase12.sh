@@ -45,7 +45,7 @@ echo ""
 
 # =========================================================================
 # Helper: Source profile functions from bin/claude-pod
-# We source the script with __CLAUDE_SECURE_SOURCE_ONLY=1 to skip execution
+# We source the script with __CLAUDE_POD_SOURCE_ONLY=1 to skip execution
 # and only load function definitions.
 # =========================================================================
 
@@ -67,7 +67,7 @@ _source_functions() {
   _setup_source_env "$tmpdir"
   export APP_DIR="$PROJECT_DIR"
   # shellcheck source=/dev/null
-  __CLAUDE_SECURE_SOURCE_ONLY=1 source "$PROJECT_DIR/bin/claude-pod"
+  __CLAUDE_POD_SOURCE_ONLY=1 source "$PROJECT_DIR/bin/claude-pod"
 }
 
 # Helper: Create a valid test profile directory

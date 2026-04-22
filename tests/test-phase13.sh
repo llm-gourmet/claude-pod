@@ -3,7 +3,7 @@
 # Tests HEAD-01 through HEAD-05 (spawn subcommand, output, max-turns, ephemeral lifecycle, templates)
 #
 # Strategy: Use temp directories for all config to avoid touching real ~/.claude-pod.
-# Source bin/claude-pod functions with __CLAUDE_SECURE_SOURCE_ONLY=1.
+# Source bin/claude-pod functions with __CLAUDE_POD_SOURCE_ONLY=1.
 # Functions not yet implemented are guarded with `type` checks and SKIP gracefully.
 #
 # Usage: bash tests/test-phase13.sh
@@ -45,7 +45,7 @@ echo ""
 
 # =========================================================================
 # Helper: Source profile functions from bin/claude-pod
-# We source the script with __CLAUDE_SECURE_SOURCE_ONLY=1 to skip execution
+# We source the script with __CLAUDE_POD_SOURCE_ONLY=1 to skip execution
 # and only load function definitions.
 # =========================================================================
 
@@ -66,7 +66,7 @@ _source_functions() {
   local tmpdir="$1"
   _setup_source_env "$tmpdir"
   # shellcheck source=/dev/null
-  __CLAUDE_SECURE_SOURCE_ONLY=1 source "$PROJECT_DIR/bin/claude-pod"
+  __CLAUDE_POD_SOURCE_ONLY=1 source "$PROJECT_DIR/bin/claude-pod"
 }
 
 # Helper: Create a valid test profile directory

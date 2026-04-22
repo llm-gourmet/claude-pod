@@ -3,13 +3,13 @@
 # Wave 0 unit tests for lib/platform.sh, plus stubs for downstream plans.
 #
 # Real assertions cover PLAT-02 (platform detection) and TEST-01 (mockable
-# detection via CLAUDE_SECURE_PLATFORM_OVERRIDE + CLAUDE_SECURE_BREW_PREFIX_OVERRIDE).
+# detection via CLAUDE_POD_PLATFORM_OVERRIDE + CLAUDE_POD_BREW_PREFIX_OVERRIDE).
 # Stub assertions stay green so the suite is green from Wave 0 forward;
 # later plans (02-05) replace each stub body with a real assertion.
 #
 # Usage:
 #   bash tests/test-phase18.sh
-#   CLAUDE_SECURE_PLATFORM_OVERRIDE=macos bash tests/test-phase18.sh
+#   CLAUDE_POD_PLATFORM_OVERRIDE=macos bash tests/test-phase18.sh
 
 set -uo pipefail
 
@@ -37,7 +37,7 @@ run_test() {
   ( "$@" ) || rc=$?
   report "$name" "$rc"
   # Reset env between tests so override flags from one test don't leak.
-  unset CLAUDE_SECURE_PLATFORM_OVERRIDE CLAUDE_SECURE_BREW_PREFIX_OVERRIDE __CLAUDE_SECURE_BOOTSTRAPPED
+  unset CLAUDE_POD_PLATFORM_OVERRIDE CLAUDE_POD_BREW_PREFIX_OVERRIDE __CLAUDE_POD_BOOTSTRAPPED
 }
 
 # Source the library under test. Idempotent guard means re-source is safe.
@@ -54,7 +54,7 @@ test_detect_platform_linux_native() {
   # contains "microsoft". On a WSL2 dev box this returns wsl2; on Linux CI
   # it returns linux. Both are correct — the test only fails if neither
   # branch fires (e.g. Darwin host running this without the macos override).
-  unset CLAUDE_SECURE_PLATFORM_OVERRIDE
+  unset CLAUDE_POD_PLATFORM_OVERRIDE
   local r
   r="$(detect_platform)" || return 1
   case "$r" in
@@ -64,28 +64,28 @@ test_detect_platform_linux_native() {
 }
 
 test_detect_platform_override_macos() {
-  CLAUDE_SECURE_PLATFORM_OVERRIDE=macos
+  CLAUDE_POD_PLATFORM_OVERRIDE=macos
   local r
   r="$(detect_platform)" || return 1
   [ "$r" = "macos" ] || { echo "expected macos got '$r'" >&2; return 1; }
 }
 
 test_detect_platform_override_linux() {
-  CLAUDE_SECURE_PLATFORM_OVERRIDE=linux
+  CLAUDE_POD_PLATFORM_OVERRIDE=linux
   local r
   r="$(detect_platform)" || return 1
   [ "$r" = "linux" ] || { echo "expected linux got '$r'" >&2; return 1; }
 }
 
 test_detect_platform_override_wsl2() {
-  CLAUDE_SECURE_PLATFORM_OVERRIDE=wsl2
+  CLAUDE_POD_PLATFORM_OVERRIDE=wsl2
   local r
   r="$(detect_platform)" || return 1
   [ "$r" = "wsl2" ] || { echo "expected wsl2 got '$r'" >&2; return 1; }
 }
 
 test_detect_platform_override_rejects_bogus() {
-  CLAUDE_SECURE_PLATFORM_OVERRIDE=freebsd
+  CLAUDE_POD_PLATFORM_OVERRIDE=freebsd
   local err
   err="$(detect_platform 2>&1 1>/dev/null)" && return 1
   echo "$err" | grep -q "must be one of" || { echo "missing 'must be one of' in stderr: $err" >&2; return 1; }
@@ -100,7 +100,7 @@ test_uuid_lower_normalizes() {
 }
 
 test_brew_prefix_override_honored() {
-  CLAUDE_SECURE_BREW_PREFIX_OVERRIDE=/tmp/fake-brew
+  CLAUDE_POD_BREW_PREFIX_OVERRIDE=/tmp/fake-brew
   local r
   r="$(claude_pod_brew_prefix)" || return 1
   [ "$r" = "/tmp/fake-brew" ] || { echo "expected /tmp/fake-brew got '$r'" >&2; return 1; }
@@ -111,22 +111,22 @@ test_idempotent_sourcing() {
   source "$REPO_ROOT/lib/platform.sh" || return 1
   # shellcheck disable=SC1091
   source "$REPO_ROOT/lib/platform.sh" || return 1
-  [ "$__CLAUDE_SECURE_PLATFORM_LOADED" = "1" ] || { echo "sentinel lost after re-source" >&2; return 1; }
+  [ "$__CLAUDE_POD_PLATFORM_LOADED" = "1" ] || { echo "sentinel lost after re-source" >&2; return 1; }
 }
 
 test_bootstrap_path_macos_without_brew_fails_loud() {
-  CLAUDE_SECURE_PLATFORM_OVERRIDE=macos
-  CLAUDE_SECURE_BREW_PREFIX_OVERRIDE=""
-  unset __CLAUDE_SECURE_BOOTSTRAPPED
+  CLAUDE_POD_PLATFORM_OVERRIDE=macos
+  CLAUDE_POD_BREW_PREFIX_OVERRIDE=""
+  unset __CLAUDE_POD_BOOTSTRAPPED
   local err
   err="$(PATH=/usr/bin:/bin claude_pod_bootstrap_path 2>&1 1>/dev/null)" && return 1
   echo "$err" | grep -q "Homebrew is required" || { echo "missing Homebrew error: $err" >&2; return 1; }
 }
 
 test_bootstrap_path_macos_with_fake_brew_succeeds() {
-  CLAUDE_SECURE_PLATFORM_OVERRIDE=macos
-  CLAUDE_SECURE_BREW_PREFIX_OVERRIDE="$REPO_ROOT/tests/fixtures/brew"
-  unset __CLAUDE_SECURE_BOOTSTRAPPED
+  CLAUDE_POD_PLATFORM_OVERRIDE=macos
+  CLAUDE_POD_BREW_PREFIX_OVERRIDE="$REPO_ROOT/tests/fixtures/brew"
+  unset __CLAUDE_POD_BOOTSTRAPPED
   claude_pod_bootstrap_path || { echo "bootstrap failed unexpectedly" >&2; return 1; }
   local d
   d="$(date)"
@@ -167,7 +167,7 @@ STUB
   out="$(
     export PATH="$sandbox/bin:$PATH"
     export __INSTALL_SOURCE_ONLY=1
-    export CLAUDE_SECURE_PLATFORM_OVERRIDE=macos
+    export CLAUDE_POD_PLATFORM_OVERRIDE=macos
     source "$REPO_ROOT/install.sh"
     macos_bootstrap_deps 2>&1
   )" || rc=$?
@@ -212,7 +212,7 @@ STUB
   out="$(
     export PATH="$sandbox/bin:$PATH"
     export __INSTALL_SOURCE_ONLY=1
-    export CLAUDE_SECURE_PLATFORM_OVERRIDE=macos
+    export CLAUDE_POD_PLATFORM_OVERRIDE=macos
     source "$REPO_ROOT/install.sh"
     macos_bootstrap_deps 2>&1
   )" || rc=$?
@@ -385,11 +385,11 @@ test_phase18_full_suite_under_macos_override() {
   local subshell_log; subshell_log="$(mktemp)"
   local rc=0
   (
-    export CLAUDE_SECURE_PLATFORM_OVERRIDE=macos
+    export CLAUDE_POD_PLATFORM_OVERRIDE=macos
     export __PHASE18_SUBSUITE=1
     # Point the bootstrap at the fixture brew prefix so claude_pod_bootstrap_path
     # has a valid macOS environment to validate against.
-    export CLAUDE_SECURE_BREW_PREFIX_OVERRIDE="$REPO_ROOT/tests/fixtures/brew"
+    export CLAUDE_POD_BREW_PREFIX_OVERRIDE="$REPO_ROOT/tests/fixtures/brew"
     bash "$REPO_ROOT/tests/test-phase18.sh"
   ) > "$subshell_log" 2>&1 || rc=$?
 
@@ -398,7 +398,7 @@ test_phase18_full_suite_under_macos_override() {
   rm -f "$subshell_log"
 
   if [ "$rc" -ne 0 ]; then
-    echo "sub-suite under CLAUDE_SECURE_PLATFORM_OVERRIDE=macos exited $rc" >&2
+    echo "sub-suite under CLAUDE_POD_PLATFORM_OVERRIDE=macos exited $rc" >&2
     echo "$log_contents" >&2
     return 1
   fi

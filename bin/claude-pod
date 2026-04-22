@@ -18,14 +18,14 @@ set -euo pipefail
 # Phase 18 PORT-01: source the platform library and bootstrap PATH so GNU
 # coreutils (date, stat, readlink, realpath, sed, grep) shadow BSD versions
 # on macOS. No-op on Linux/WSL2.
-__CLAUDE_SECURE_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$__CLAUDE_SECURE_SELF_DIR/../lib/platform.sh" ]; then
+__CLAUDE_POD_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$__CLAUDE_POD_SELF_DIR/../lib/platform.sh" ]; then
   # shellcheck source=../lib/platform.sh
-  source "$__CLAUDE_SECURE_SELF_DIR/../lib/platform.sh"
-elif [ -f "$__CLAUDE_SECURE_SELF_DIR/lib/platform.sh" ]; then
+  source "$__CLAUDE_POD_SELF_DIR/../lib/platform.sh"
+elif [ -f "$__CLAUDE_POD_SELF_DIR/lib/platform.sh" ]; then
   # Installed layout: lib/ alongside bin/
   # shellcheck source=lib/platform.sh
-  source "$__CLAUDE_SECURE_SELF_DIR/lib/platform.sh"
+  source "$__CLAUDE_POD_SELF_DIR/lib/platform.sh"
 elif [ -f "/usr/local/share/claude-pod/lib/platform.sh" ]; then
   # shellcheck source=/usr/local/share/claude-pod/lib/platform.sh
   source "/usr/local/share/claude-pod/lib/platform.sh"
@@ -35,11 +35,11 @@ if command -v claude_pod_bootstrap_path >/dev/null 2>&1; then
 fi
 
 # Source-only mode: load function definitions without executing main logic.
-# Used by tests: __CLAUDE_SECURE_SOURCE_ONLY=1 source bin/claude-pod
-# (also accepts CLAUDE_SECURE_SOURCE_ONLY without leading underscores for the
+# Used by tests: __CLAUDE_POD_SOURCE_ONLY=1 source bin/claude-pod
+# (also accepts CLAUDE_POD_SOURCE_ONLY without leading underscores for the
 # Phase 15 test harness)
-if [ -z "${__CLAUDE_SECURE_SOURCE_ONLY:-}" ]; then
-  __CLAUDE_SECURE_SOURCE_ONLY="${CLAUDE_SECURE_SOURCE_ONLY:-0}"
+if [ -z "${__CLAUDE_POD_SOURCE_ONLY:-}" ]; then
+  __CLAUDE_POD_SOURCE_ONLY="${CLAUDE_POD_SOURCE_ONLY:-0}"
 fi
 
 CONFIG_DIR="${CONFIG_DIR:-$HOME/.claude-pod}"
@@ -449,11 +449,11 @@ load_profile_config() {
   else
     export SECRETS_FILE="$pdir/.env"
   fi
-  CLAUDE_SECURE_SYSTEM_PROMPT=""
+  CLAUDE_POD_SYSTEM_PROMPT=""
   if [ -f "$pdir/system_prompts/default.md" ]; then
-    CLAUDE_SECURE_SYSTEM_PROMPT=$(cat "$pdir/system_prompts/default.md")
+    CLAUDE_POD_SYSTEM_PROMPT=$(cat "$pdir/system_prompts/default.md")
   fi
-  export CLAUDE_SECURE_SYSTEM_PROMPT
+  export CLAUDE_POD_SYSTEM_PROMPT
   export PROFILE_PATH="$pdir/profile.json"
   export LOG_DIR="$CONFIG_DIR/logs"
   export LOG_PREFIX="${name}-"
@@ -1447,11 +1447,11 @@ do_spawn() {
   event_type=$(echo "$EVENT_JSON" | jq -r '.event_type // ._meta.event_type // .action // "unknown"')
 
   # Phase 16 / D-12: derive delivery_id.
-  # Priority: ._meta.delivery_id (webhook path) > replay-<uuid> (CLAUDE_SECURE_EXEC set) > manual-<uuid>.
+  # Priority: ._meta.delivery_id (webhook path) > replay-<uuid> (CLAUDE_POD_EXEC set) > manual-<uuid>.
   local delivery_id webhook_id delivery_id_short _did_stripped
   delivery_id=$(echo "$EVENT_JSON" | jq -r '._meta.delivery_id // empty')
   if [ -z "$delivery_id" ]; then
-    if [ -n "${CLAUDE_SECURE_EXEC:-}" ]; then
+    if [ -n "${CLAUDE_POD_EXEC:-}" ]; then
       delivery_id="replay-$(uuidgen 2>/dev/null | tr -d - | head -c 32 || echo unknown)"
     else
       delivery_id="manual-$(uuidgen 2>/dev/null | tr -d - | head -c 32 || echo unknown)"
@@ -1492,12 +1492,12 @@ ${EVENT_JSON}
   local system_prompt_file system_prompt_source="none"
   system_prompt_file=$(resolve_system_prompt_file "$event_type")
   if [ -n "$system_prompt_file" ]; then
-    CLAUDE_SECURE_SYSTEM_PROMPT=$(cat "$system_prompt_file")
+    CLAUDE_POD_SYSTEM_PROMPT=$(cat "$system_prompt_file")
     system_prompt_source="$system_prompt_file"
   else
-    CLAUDE_SECURE_SYSTEM_PROMPT=""
+    CLAUDE_POD_SYSTEM_PROMPT=""
   fi
-  export CLAUDE_SECURE_SYSTEM_PROMPT
+  export CLAUDE_POD_SYSTEM_PROMPT
 
   # --dry-run: print resolved paths + content and exit.
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -1522,8 +1522,8 @@ ${EVENT_JSON}
   # Until empirical testing confirms hooks survive --bare, we do NOT use it.
   # The small startup time cost is acceptable vs risking security bypass.
   local claude_args=("$rendered_prompt" "--output-format" "json" "--dangerously-skip-permissions")
-  if [ -n "${CLAUDE_SECURE_SYSTEM_PROMPT:-}" ]; then
-    claude_args+=("--system-prompt" "$CLAUDE_SECURE_SYSTEM_PROMPT")
+  if [ -n "${CLAUDE_POD_SYSTEM_PROMPT:-}" ]; then
+    claude_args+=("--system-prompt" "$CLAUDE_POD_SYSTEM_PROMPT")
   fi
 
   # Execute headless Claude Code (per D-06, D-09)
@@ -1531,12 +1531,12 @@ ${EVENT_JSON}
   claude_stderr_file=$(mktemp)
   _CLEANUP_FILES+=("$claude_stderr_file")
 
-  # Phase 16 test escape hatch: if CLAUDE_SECURE_FAKE_CLAUDE_STDOUT points at a
+  # Phase 16 test escape hatch: if CLAUDE_POD_FAKE_CLAUDE_STDOUT points at a
   # file, skip docker and use its contents as the envelope stdout. Mirrors the
-  # Phase 15 CLAUDE_SECURE_EXEC pattern. Production path unchanged.
-  if [ -n "${CLAUDE_SECURE_FAKE_CLAUDE_STDOUT:-}" ] && [ -f "${CLAUDE_SECURE_FAKE_CLAUDE_STDOUT}" ]; then
-    claude_stdout=$(cat "${CLAUDE_SECURE_FAKE_CLAUDE_STDOUT}")
-    claude_exit="${CLAUDE_SECURE_FAKE_CLAUDE_EXIT:-0}"
+  # Phase 15 CLAUDE_POD_EXEC pattern. Production path unchanged.
+  if [ -n "${CLAUDE_POD_FAKE_CLAUDE_STDOUT:-}" ] && [ -f "${CLAUDE_POD_FAKE_CLAUDE_STDOUT}" ]; then
+    claude_stdout=$(cat "${CLAUDE_POD_FAKE_CLAUDE_STDOUT}")
+    claude_exit="${CLAUDE_POD_FAKE_CLAUDE_EXIT:-0}"
   else
     docker compose up -d --wait
     claude_stdout=$(docker compose exec -T claude claude -p "${claude_args[@]}" < /dev/null 2>"$claude_stderr_file") || claude_exit=$?
@@ -1698,10 +1698,10 @@ do_replay() {
 
   # D-20 / Pattern 9: exec recursively into claude-pod so we reuse
   # do_spawn without duplicating its lifecycle. Test harnesses that invoke
-  # REAL claude-pod directly (by full path) may set CLAUDE_SECURE_EXEC
+  # REAL claude-pod directly (by full path) may set CLAUDE_POD_EXEC
   # to point at a stub binary so the exec target is recorded rather than
   # running the full spawn path. Falls back to `$0` when unset.
-  local exec_target="${CLAUDE_SECURE_EXEC:-$0}"
+  local exec_target="${CLAUDE_POD_EXEC:-$0}"
   local args=(spawn "$explicit_profile" --event-file "$event_file")
   if [ "$dry_run" = 1 ]; then
     args+=(--dry-run)
@@ -2556,7 +2556,7 @@ cmd_gh_webhook_listener() {
 # =========================================================================
 # Source-only guard: if sourced by tests, stop here
 # =========================================================================
-if [ "$__CLAUDE_SECURE_SOURCE_ONLY" = "1" ]; then
+if [ "$__CLAUDE_POD_SOURCE_ONLY" = "1" ]; then
   return 0 2>/dev/null || true
 fi
 
@@ -2868,8 +2868,8 @@ case "$CMD" in
     cleanup_containers
     docker compose up -d
     _interactive_args=(--dangerously-skip-permissions)
-    if [ -n "${CLAUDE_SECURE_SYSTEM_PROMPT:-}" ]; then
-      _interactive_args+=(--system-prompt "$CLAUDE_SECURE_SYSTEM_PROMPT")
+    if [ -n "${CLAUDE_POD_SYSTEM_PROMPT:-}" ]; then
+      _interactive_args+=(--system-prompt "$CLAUDE_POD_SYSTEM_PROMPT")
     fi
     docker compose exec -it claude claude "${_interactive_args[@]}"
     docker compose down
@@ -2887,8 +2887,8 @@ case "$CMD" in
     cleanup_containers
     docker compose up -d
     _interactive_args=(--dangerously-skip-permissions)
-    if [ -n "${CLAUDE_SECURE_SYSTEM_PROMPT:-}" ]; then
-      _interactive_args+=(--system-prompt "$CLAUDE_SECURE_SYSTEM_PROMPT")
+    if [ -n "${CLAUDE_POD_SYSTEM_PROMPT:-}" ]; then
+      _interactive_args+=(--system-prompt "$CLAUDE_POD_SYSTEM_PROMPT")
     fi
     docker compose exec -it claude claude "${_interactive_args[@]}"
     docker compose down

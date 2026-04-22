@@ -216,13 +216,13 @@ test_resolve_report_template_from_docs_dir() {
   local rc=0
   (
     set +e
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export CONFIG_DIR="$home_dir/.claude-pod"
     export HOME="$home_dir"
     export PROFILE="test-profile"
     # shellcheck disable=SC1090
     source "$PROJECT_DIR/bin/claude-pod" >/dev/null 2>&1
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    unset __CLAUDE_POD_SOURCE_ONLY
     resolve_report_template "push" > "$out_file"
     exit $?
   )
@@ -306,17 +306,17 @@ run_spawn_integration() {
 
   (
     set +e
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$home_dir/.claude-pod"
     export HOME="$home_dir"
     export PROFILE="test-profile"
     export PLATFORM="linux"
-    export CLAUDE_SECURE_FAKE_CLAUDE_STDOUT="$fake_stdout_file"
-    export CLAUDE_SECURE_FAKE_CLAUDE_EXIT="$fake_exit"
+    export CLAUDE_POD_FAKE_CLAUDE_STDOUT="$fake_stdout_file"
+    export CLAUDE_POD_FAKE_CLAUDE_EXIT="$fake_exit"
     # shellcheck disable=SC1090
     source "$PROJECT_DIR/bin/claude-pod" 2>&1
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "test-profile"
     # Simulate REMAINING_ARGS that do_spawn parses.
     REMAINING_ARGS=("spawn" "--event-file" "$event_fixture")
@@ -432,14 +432,14 @@ test_audit_spawn_error() {
 
   (
     set +e
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$home_dir/.claude-pod"
     export HOME="$home_dir"
     export PROFILE="test-profile"
     export PLATFORM="linux"
     source "$PROJECT_DIR/bin/claude-pod"
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "test-profile"
     # No --event: should trigger spawn_error audit.
     REMAINING_ARGS=("spawn")
@@ -525,14 +525,14 @@ test_audit_concurrent_safe() {
 
   (
     set +e
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$home_dir/.claude-pod"
     export HOME="$home_dir"
     export PROFILE="test-profile"
     export PLATFORM="linux"
     source "$PROJECT_DIR/bin/claude-pod"
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "test-profile"
     local i
     for i in 1 2 3 4 5 6 7 8 9 10; do
@@ -556,7 +556,7 @@ test_audit_concurrent_safe() {
 }
 
 test_audit_replay_identical() {
-  # Replay path (CLAUDE_SECURE_EXEC set) must produce identical audit shape,
+  # Replay path (CLAUDE_POD_EXEC set) must produce identical audit shape,
   # just with delivery_id=replay-<uuid>.
   local tid="replay_shape"
   local home_dir="$TEST_TMPDIR/$tid/home"
@@ -573,16 +573,16 @@ test_audit_replay_identical() {
 
   (
     set +e
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$home_dir/.claude-pod"
     export HOME="$home_dir"
     export PROFILE="test-profile"
     export PLATFORM="linux"
-    export CLAUDE_SECURE_EXEC="/bin/true"  # triggers replay-<uuid> path
-    export CLAUDE_SECURE_FAKE_CLAUDE_STDOUT="$fake_stdout_file"
+    export CLAUDE_POD_EXEC="/bin/true"  # triggers replay-<uuid> path
+    export CLAUDE_POD_FAKE_CLAUDE_STDOUT="$fake_stdout_file"
     source "$PROJECT_DIR/bin/claude-pod"
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "test-profile"
     REMAINING_ARGS=("spawn" "--event-file" "$PROJECT_DIR/tests/fixtures/github-issues-opened.json")
     do_spawn
@@ -599,7 +599,7 @@ test_audit_replay_identical() {
 }
 
 test_audit_manual_synthetic_id() {
-  # Manual path (no _meta.delivery_id, no CLAUDE_SECURE_EXEC) => manual-<uuid32>.
+  # Manual path (no _meta.delivery_id, no CLAUDE_POD_EXEC) => manual-<uuid32>.
   local tid="manual_id"
   local event="$PROJECT_DIR/tests/fixtures/github-issues-opened.json"
   local stdout

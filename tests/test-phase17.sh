@@ -18,7 +18,7 @@
 #
 # Guardrails:
 #   - Stubs `docker` on PATH (no real Docker daemon touched)
-#   - __CLAUDE_SECURE_SOURCE_ONLY=1 to expose bin/claude-pod internals
+#   - __CLAUDE_POD_SOURCE_ONLY=1 to expose bin/claude-pod internals
 #   - TEST_TMPDIR cleanup via trap EXIT, nothing touches real ~/.claude-pod
 #
 # Usage:
@@ -108,19 +108,19 @@ STUB
 # =========================================================================
 
 # =========================================================================
-# Source bin/claude-pod with __CLAUDE_SECURE_SOURCE_ONLY=1 so tests can
+# Source bin/claude-pod with __CLAUDE_POD_SOURCE_ONLY=1 so tests can
 # invoke internal functions (do_reap, reap_orphan_projects, etc.) directly.
 # After 17-02 lands, these functions exist and flip the sentinels green.
 # =========================================================================
 source_claude_pod_for_unit_test() {
-  export __CLAUDE_SECURE_SOURCE_ONLY=1
+  export __CLAUDE_POD_SOURCE_ONLY=1
   export CONFIG_DIR="$TEST_TMPDIR/home/.claude-pod"
   export APP_DIR="$PROJECT_DIR"
   export PROFILE="${PROFILE:-test-profile}"
   mkdir -p "$CONFIG_DIR/events" "$CONFIG_DIR/logs/spawns"
   # shellcheck disable=SC1090
   source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null || true
-  unset __CLAUDE_SECURE_SOURCE_ONLY
+  unset __CLAUDE_POD_SOURCE_ONLY
 }
 
 # =========================================================================

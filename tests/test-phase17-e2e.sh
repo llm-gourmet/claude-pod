@@ -3,7 +3,7 @@
 # OPS-03 (Container reaper + end-to-end integration coverage)
 #
 # Purpose: exercise the full webhook -> spawn -> report pipeline against the
-# real Docker stack with a STUBBED Claude binary (CLAUDE_SECURE_FAKE_CLAUDE_STDOUT)
+# real Docker stack with a STUBBED Claude binary (CLAUDE_POD_FAKE_CLAUDE_STDOUT)
 # to keep runtime under the 90-second budget and avoid real API costs.
 #
 # Scenarios (D-14):
@@ -15,7 +15,7 @@
 #
 # Wired in 17-03 (Wave 1b): all four scenarios run against a live listener
 # subprocess, a runtime-injected file:// bare report repo, and the Phase 16
-# CLAUDE_SECURE_FAKE_CLAUDE_STDOUT envelope stub (no real Anthropic / GitHub).
+# CLAUDE_POD_FAKE_CLAUDE_STDOUT envelope stub (no real Anthropic / GitHub).
 #
 # Guardrails:
 #   - INSTANCE_PREFIX=cs-e2e- so the suite never collides with the operator's
@@ -145,7 +145,7 @@ setup_e2e_profile() {
   [ -n "$bare" ] || { echo "FAIL setup: bare repo creation returned empty" >&2; return 1; }
 
   export CONFIG_DIR="$TEST_TMPDIR/.claude-pod"
-  export CLAUDE_SECURE_INSTANCE=e2e
+  export CLAUDE_POD_INSTANCE=e2e
   export INSTANCE_PREFIX="cs-e2e-"
   mkdir -p "$CONFIG_DIR/profiles" "$CONFIG_DIR/logs" "$CONFIG_DIR/events" \
            "$TEST_TMPDIR/workspace-e2e"
@@ -174,7 +174,7 @@ CONNEOF
 
   # Phase 16 stub: point at the envelope fixture so the stubbed Claude
   # returns a valid envelope (D-13: no real Anthropic calls).
-  export CLAUDE_SECURE_FAKE_CLAUDE_STDOUT="$PROJECT_DIR/tests/fixtures/envelope-success.json"
+  export CLAUDE_POD_FAKE_CLAUDE_STDOUT="$PROJECT_DIR/tests/fixtures/envelope-success.json"
   return 0
 }
 
@@ -202,14 +202,14 @@ start_listener() {
 EOF
 
   # Launch listener in background. Env is inherited by subprocess.Popen so
-  # CLAUDE_SECURE_FAKE_CLAUDE_STDOUT and CONFIG_DIR flow into `claude-pod spawn`.
+  # CLAUDE_POD_FAKE_CLAUDE_STDOUT and CONFIG_DIR flow into `claude-pod spawn`.
   (
     cd "$PROJECT_DIR"
     PATH="$PROJECT_DIR/bin:$PATH" \
     CONFIG_DIR="$CONFIG_DIR" \
-    CLAUDE_SECURE_INSTANCE=e2e \
+    CLAUDE_POD_INSTANCE=e2e \
     INSTANCE_PREFIX="cs-e2e-" \
-    CLAUDE_SECURE_FAKE_CLAUDE_STDOUT="$CLAUDE_SECURE_FAKE_CLAUDE_STDOUT" \
+    CLAUDE_POD_FAKE_CLAUDE_STDOUT="$CLAUDE_POD_FAKE_CLAUDE_STDOUT" \
     python3 webhook/listener.py --config "$webhook_cfg" \
       >"$TEST_TMPDIR/listener.stdout" 2>"$TEST_TMPDIR/listener.stderr" &
     echo $! > "$TEST_TMPDIR/listener.pid"

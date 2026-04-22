@@ -168,9 +168,9 @@ test_install_webhook() {
 }
 
 test_systemd_start() {
-  # Gated: only runs when the operator opts in with CLAUDE_SECURE_TEST_SYSTEMD=1.
+  # Gated: only runs when the operator opts in with CLAUDE_POD_TEST_SYSTEMD=1.
   # Real systemd start/stop cannot be simulated in CI or WSL2 without systemd.
-  if [ "${CLAUDE_SECURE_TEST_SYSTEMD:-0}" != "1" ]; then
+  if [ "${CLAUDE_POD_TEST_SYSTEMD:-0}" != "1" ]; then
     return 0
   fi
   # Requires unit file installed and systemctl available.

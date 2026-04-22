@@ -33,7 +33,7 @@ run_test() {
   local rc=0
   ( "$@" ) || rc=$?
   report "$name" "$rc"
-  unset CLAUDE_SECURE_PLATFORM_OVERRIDE CLAUDE_SECURE_BREW_PREFIX_OVERRIDE
+  unset CLAUDE_POD_PLATFORM_OVERRIDE CLAUDE_POD_BREW_PREFIX_OVERRIDE
 }
 
 # shellcheck disable=SC1091

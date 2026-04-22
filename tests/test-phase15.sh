@@ -333,7 +333,7 @@ test_replay_finds_single_match() {
   local ev_path stub_before rc
   ev_path=$(seed_event_file "deadbeef" "$PROJECT_DIR/tests/fixtures/github-issues-opened.json")
   stub_before=$(wc -l "$STUB_LOG" 2>/dev/null | awk '{print $1}' || echo 0)
-  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-pod" \
+  CLAUDE_POD_EXEC="$TEST_TMPDIR/bin/claude-pod" \
     "$PROJECT_DIR/bin/claude-pod" replay deadbeef >"$TEST_TMPDIR/replay1.out" 2>&1
   rc=$?
   [ $rc -eq 0 ] || { echo "replay exited $rc: $(cat "$TEST_TMPDIR/replay1.out")" >&2; return 1; }
@@ -355,7 +355,7 @@ test_replay_ambiguous_errors() {
   cp "$PROJECT_DIR/tests/fixtures/github-issues-opened.json" \
     "$events_dir/${iso}-abcd12349999.json"
   local rc
-  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-pod" \
+  CLAUDE_POD_EXEC="$TEST_TMPDIR/bin/claude-pod" \
     "$PROJECT_DIR/bin/claude-pod" replay abcd1234 >"$TEST_TMPDIR/replay2.out" 2>&1
   rc=$?
   [ $rc -ne 0 ] || return 1
@@ -366,7 +366,7 @@ test_replay_ambiguous_errors() {
 
 test_replay_no_match_errors() {
   local rc
-  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-pod" \
+  CLAUDE_POD_EXEC="$TEST_TMPDIR/bin/claude-pod" \
     "$PROJECT_DIR/bin/claude-pod" replay zzzzzzzz >"$TEST_TMPDIR/replay3.out" 2>&1
   rc=$?
   [ $rc -ne 0 ] || return 1
@@ -378,7 +378,7 @@ test_replay_auto_profile() {
   local ev_path stub_before rc
   ev_path=$(seed_event_file "autoprof" "$PROJECT_DIR/tests/fixtures/github-issues-opened.json")
   stub_before=$(wc -l "$STUB_LOG" 2>/dev/null | awk '{print $1}' || echo 0)
-  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-pod" \
+  CLAUDE_POD_EXEC="$TEST_TMPDIR/bin/claude-pod" \
     "$PROJECT_DIR/bin/claude-pod" replay autoprof >"$TEST_TMPDIR/replay4.out" 2>&1
   rc=$?
   [ $rc -eq 0 ] || return 1
@@ -466,7 +466,7 @@ test_extract_field_truncates() {
   out_file="$TEST_TMPDIR/extracted.txt"
 
   # Source mode: set a sentinel so the CLI does not execute main().
-  ( export CLAUDE_SECURE_SOURCE_ONLY=1
+  ( export CLAUDE_POD_SOURCE_ONLY=1
     source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null || true
     if ! type extract_payload_field >/dev/null 2>&1; then
       echo "extract_payload_field not defined" >&2
@@ -493,7 +493,7 @@ test_extract_field_utf8_safe() {
   fake_json="$TEST_TMPDIR/utf8.json"
   jq -n --arg v "$big_val" '{issue: {body: $v}}' > "$fake_json"
   out_file="$TEST_TMPDIR/utf8-out.txt"
-  ( export CLAUDE_SECURE_SOURCE_ONLY=1
+  ( export CLAUDE_POD_SOURCE_ONLY=1
     source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null || true
     type extract_payload_field >/dev/null 2>&1 || exit 2
     extract_payload_field "$fake_json" '.issue.body' "" > "$out_file"
