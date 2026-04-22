@@ -255,6 +255,7 @@ remove_config_dir() {
   if [[ "$ans" =~ ^[Yy]$ ]]; then
     log_info "Removing config directory: $CONFIG_DIR"
     if run_or_dry rm -rf "$CONFIG_DIR"; then _removed+=("$CONFIG_DIR")
+    elif run_or_dry sudo rm -rf "$CONFIG_DIR"; then _removed+=("$CONFIG_DIR")
     else log_warn "Failed to remove $CONFIG_DIR"; _skipped+=("$CONFIG_DIR (removal failed)"); fi
   else
     log_info "Preserved $CONFIG_DIR (user declined)"
