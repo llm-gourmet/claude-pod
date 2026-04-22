@@ -36,7 +36,7 @@ echo ""
 echo "Ensuring containers are running..."
 _TMP_WS_P1=$(mktemp -d)
 trap 'docker compose down -v >/dev/null 2>&1; rm -rf "$_TMP_WS_P1" 2>/dev/null || true' EXIT
-docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
+docker volume rm -f claude-pod_workspace >/dev/null 2>&1 || true
 WORKSPACE_PATH="$_TMP_WS_P1" \
   docker compose up -d --wait --timeout 30 || { echo "FATAL: containers failed to start"; exit 1; }
 echo ""
@@ -77,9 +77,9 @@ report "DOCK-04" "Outbound connections from claude container are blocked" $?
 # Hooks and settings are COPY'd in Dockerfile and genuinely root-owned.
 # Profile is bind-mounted (:ro flag enforces read-only at mount level; host UID visible inside).
 DOCK05_RESULT=0
-docker compose exec -T claude stat -c '%U %a' /etc/claude-secure/hooks/pre-tool-use.sh 2>/dev/null | grep -q 'root 555' || DOCK05_RESULT=1
-docker compose exec -T claude stat -c '%U %a' /etc/claude-secure/settings.json 2>/dev/null | grep -q 'root 444' || DOCK05_RESULT=1
-docker inspect $(docker compose ps -q claude) --format '{{json .Mounts}}' 2>/dev/null | jq '.[] | select(.Destination=="/etc/claude-secure/profile.json") | .RW' 2>/dev/null | grep -q 'false' || DOCK05_RESULT=1
+docker compose exec -T claude stat -c '%U %a' /etc/claude-pod/hooks/pre-tool-use.sh 2>/dev/null | grep -q 'root 555' || DOCK05_RESULT=1
+docker compose exec -T claude stat -c '%U %a' /etc/claude-pod/settings.json 2>/dev/null | grep -q 'root 444' || DOCK05_RESULT=1
+docker inspect $(docker compose ps -q claude) --format '{{json .Mounts}}' 2>/dev/null | jq '.[] | select(.Destination=="/etc/claude-pod/profile.json") | .RW' 2>/dev/null | grep -q 'false' || DOCK05_RESULT=1
 report "DOCK-05" "Security files are root-owned and read-only" $DOCK05_RESULT
 
 # DOCK-05b: Settings.json accessible via symlink (not shadowed by volume)
@@ -102,7 +102,7 @@ jq -e 'has("workspace")' config/profile.json > /dev/null 2>&1
 report "WHIT-02" "Profile has workspace field" $?
 
 # WHIT-03: Profile is not writable inside container
-docker compose exec -T claude test ! -w /etc/claude-secure/profile.json > /dev/null 2>&1
+docker compose exec -T claude test ! -w /etc/claude-pod/profile.json > /dev/null 2>&1
 report "WHIT-03" "Profile is read-only inside claude container" $?
 
 echo ""

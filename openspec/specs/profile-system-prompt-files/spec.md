@@ -2,8 +2,8 @@
 
 ### Requirement: System prompt file resolution for spawn
 When spawning a Claude instance, the system prompt (passed as `--system-prompt`) SHALL be resolved from the profile directory using the following chain:
-1. `~/.claude-secure/profiles/<name>/system_prompts/<event_type>.md` — event-specific system prompt
-2. `~/.claude-secure/profiles/<name>/system_prompts/default.md` — profile default system prompt
+1. `~/.claude-pod/profiles/<name>/system_prompts/<event_type>.md` — event-specific system prompt
+2. `~/.claude-pod/profiles/<name>/system_prompts/default.md` — profile default system prompt
 
 If neither file exists, `--system-prompt` SHALL be omitted from the Claude invocation. Spawn SHALL NOT fail due to a missing system prompt.
 
@@ -30,15 +30,15 @@ System prompt files SHALL be passed to Claude as-is, with no token substitution.
 - **THEN** the output SHALL include the resolved system prompt file path, or "none" if omitted
 
 ### Requirement: Profile creation scaffolds system_prompts/default.md
-When a new profile is created via `claude-secure profile <name> create`, the command SHALL create a `system_prompts/` subdirectory containing a `default.md` placeholder file.
+When a new profile is created via `claude-pod profile <name> create`, the command SHALL create a `system_prompts/` subdirectory containing a `default.md` placeholder file.
 
 #### Scenario: New profile has system_prompts/default.md
-- **WHEN** `claude-secure profile my-agent create` is run
-- **THEN** `~/.claude-secure/profiles/my-agent/system_prompts/default.md` SHALL exist
+- **WHEN** `claude-pod profile my-agent create` is run
+- **THEN** `~/.claude-pod/profiles/my-agent/system_prompts/default.md` SHALL exist
 - **AND** it SHALL contain a minimal placeholder system prompt
 
 ### Requirement: Automatic migration of system_prompt field
-The migration script `scripts/migrate-profile-prompts.sh`, run by `claude-secure update`, SHALL migrate existing profiles that have a `system_prompt` field in `profile.json`.
+The migration script `scripts/migrate-profile-prompts.sh`, run by `claude-pod update`, SHALL migrate existing profiles that have a `system_prompt` field in `profile.json`.
 
 #### Scenario: Migration extracts system_prompt to file
 - **WHEN** `migrate-profile-prompts.sh` runs on a profile with `system_prompt` in `profile.json`

@@ -14,7 +14,7 @@ PASS=0; FAIL=0; TOTAL=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CLI="$PROJECT_DIR/bin/claude-secure"
+CLI="$PROJECT_DIR/bin/claude-pod"
 
 run_test() {
   local name="$1"; shift
@@ -53,7 +53,7 @@ EOF
 _make_cfg() {
   local tmpdir="$1"
   local profname="${2:-testprof}"
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   local ws="$tmpdir/workspace"
   mkdir -p "$cfg/profiles/$profname" "$ws"
   cat > "$cfg/config.sh" <<EOF
@@ -85,7 +85,7 @@ echo "--- PSET-01: scaffold files ---"
 
 test_pset01_scaffold_files() {
   local tmpdir; tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles"
   _create_profile "$cfg" newprof || true
 
@@ -110,7 +110,7 @@ echo "--- PSET-02: system_prompts/default.md has profile name in host path ---"
 
 test_pset02_system_prompt_contains_name() {
   local tmpdir; tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles"
   _create_profile "$cfg" myprofile || true
 
@@ -128,7 +128,7 @@ echo "--- PSET-03: spawn --dry-run resolves tasks/push.md ---"
 
 test_pset03_spawn_dry_run_push() {
   local tmpdir; tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles"
   _create_profile "$cfg" freshprof || true
 

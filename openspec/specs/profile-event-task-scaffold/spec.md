@@ -21,5 +21,5 @@ Each file SHALL contain a single-line stub comment instructing the operator to d
 - **THEN** `resolve_task_file` returns `tasks/push.md` (not `tasks/default.md`)
 
 #### Scenario: spawn --dry-run succeeds immediately after profile create
-- **WHEN** `claude-secure spawn <name> --event '{"event_type":"push",...}' --dry-run` is run on a freshly created profile
+- **WHEN** `claude-pod spawn <name> --event '{"event_type":"push",...}' --dry-run` is run on a freshly created profile
 - **THEN** exit code is 0 and `task_file:` line names `tasks/push.md`

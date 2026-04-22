@@ -64,7 +64,7 @@
     },
     {
       "paths": [
-        "bin/claude-secure"
+        "bin/claude-pod"
       ],
       "tests": [
         "test-phase6.sh",

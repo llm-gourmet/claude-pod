@@ -5,7 +5,7 @@ Each profile SHALL be fully described by two files: `profile.json` (configuratio
 
 #### Scenario: New profile directory structure
 - **WHEN** a profile named `my-project` is created
-- **THEN** `~/.claude-secure/profiles/my-project/` SHALL contain exactly `profile.json` and `.env`
+- **THEN** `~/.claude-pod/profiles/my-project/` SHALL contain exactly `profile.json` and `.env`
 - **AND** no `whitelist.json` file SHALL be present
 
 ### Requirement: profile.json schema
@@ -85,7 +85,7 @@ The Anthropic proxy SHALL read `profile.json` on each request and build its reda
 - **THEN** the proxy SHALL skip that entry (no error, no crash)
 
 ### Requirement: validate_profile checks new schema
-`validate_profile` in `bin/claude-secure` SHALL verify:
+`validate_profile` in `bin/claude-pod` SHALL verify:
 1. `profile.json` exists and is valid JSON
 2. `workspace` field is present and the path exists on disk
 3. `.env` exists

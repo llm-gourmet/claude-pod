@@ -3,11 +3,11 @@
 ### Requirement: ANTHROPIC_API_KEY delivered to Claude container via env_file only
 The Claude container SHALL receive `ANTHROPIC_API_KEY` exclusively through the `env_file` mechanism. The `environment` block in `docker-compose.yml` for the claude service SHALL NOT contain an `ANTHROPIC_API_KEY` entry (no override, no dummy fallback).
 
-#### Scenario: API-key user starts claude-secure
+#### Scenario: API-key user starts claude-pod
 - **WHEN** the profile `.env` contains `ANTHROPIC_API_KEY=<real-key>` and no `CLAUDE_CODE_OAUTH_TOKEN`
 - **THEN** the claude container's `ANTHROPIC_API_KEY` SHALL equal `<real-key>` (from env_file, no override)
 
-#### Scenario: OAuth user starts claude-secure
+#### Scenario: OAuth user starts claude-pod
 - **WHEN** the profile `.env` contains `CLAUDE_CODE_OAUTH_TOKEN=<token>` and no `ANTHROPIC_API_KEY`
 - **THEN** the claude container SHALL have `ANTHROPIC_API_KEY` unset (not `"dummy"`)
 

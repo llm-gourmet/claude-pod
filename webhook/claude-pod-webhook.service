@@ -1,14 +1,14 @@
-# /etc/systemd/system/claude-secure-webhook.service
+# /etc/systemd/system/claude-pod-webhook.service
 # Installed by install.sh --with-webhook (copies this file verbatim).
-# Source of truth: webhook/claude-secure-webhook.service in the claude-secure repo.
+# Source of truth: webhook/claude-pod-webhook.service in the claude-pod repo.
 #
 # Directives locked by .planning/phases/14-webhook-listener/14-CONTEXT.md D-23..D-26.
 # Do not add hardening (NoNewPrivileges, ProtectSystem, PrivateTmp, CapabilityBoundingSet)
 # without empirical testing -- every one of those directives breaks Docker socket access
-# for the `claude-secure spawn` subprocess this listener invokes. Phase 17 may revisit.
+# for the `claude-pod spawn` subprocess this listener invokes. Phase 17 may revisit.
 
 [Unit]
-Description=claude-secure GitHub webhook listener
+Description=claude-pod GitHub webhook listener
 Documentation=https://github.com/llm-gourmet/claude-pod
 After=network-online.target docker.service
 Wants=network-online.target
@@ -16,7 +16,7 @@ Requires=docker.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/claude-secure/webhook/listener.py --config __WEBHOOK_CONFIG_PATH__
+ExecStart=/usr/bin/python3 /opt/claude-pod/webhook/listener.py --config __WEBHOOK_CONFIG_PATH__
 
 # Restart policy (D-25): always restart on crash, throttle at 5s to avoid tight loops
 # if the config file is broken.
@@ -24,11 +24,11 @@ Restart=always
 RestartSec=5s
 
 # Logging (D-25): listener lifecycle (startup, shutdown, crashes) goes to the journal.
-# Application-level structured logs still go to ~/.claude-secure/logs/webhook.jsonl
+# Application-level structured logs still go to ~/.claude-pod/logs/webhook.jsonl
 # (written by the listener's JsonlHandler).
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=claude-secure-webhook
+SyslogIdentifier=claude-pod-webhook
 
 User=__WEBHOOK_USER__
 Group=__WEBHOOK_GROUP__
@@ -51,11 +51,11 @@ SystemCallArchitectures=native
 
 # === Hardening directives deliberately NOT added (each breaks docker compose) ===
 # Phase 17 D-11/D-12 empirically re-verified this exclusion list:
-#   NoNewPrivileges=true     -- blocks subprocess privilege transitions inside claude-secure
+#   NoNewPrivileges=true     -- blocks subprocess privilege transitions inside claude-pod
 #   ProtectSystem=strict     -- Docker volume-mount machinery writes outside the allowed set
 #   PrivateTmp=true          -- proxy/validator containers may touch /tmp during bootstrap
 #   CapabilityBoundingSet=...-- docker daemon communication needs broader caps than predictable
-#   ProtectHome=true         -- profile state lives under $HOME/.claude-secure
+#   ProtectHome=true         -- profile state lives under $HOME/.claude-pod
 #   PrivateDevices=true      -- iptables validator needs /dev access on shared netns
 # Re-enabling any of these without a new E2E pass will break the listener.
 

@@ -1,4 +1,4 @@
-# Caddyfile für claude-secure Webhook-Listener
+# Caddyfile für claude-pod Webhook-Listener
 # Kopieren nach /etc/caddy/Caddyfile (oder als Block einfügen)
 #
 # Option A: Mit Domain (automatisches HTTPS via Let's Encrypt)

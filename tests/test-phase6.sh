@@ -59,7 +59,7 @@ cd "$PROJECT_DIR"
 export LOG_DIR="$TEST_LOG_DIR"
 export LOG_HOOK=1 LOG_ANTHROPIC=1 LOG_IPTABLES=1
 export WORKSPACE_PATH="$TEST_WORKSPACE"
-docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
+docker volume rm -f claude-pod_workspace >/dev/null 2>&1 || true
 docker compose up -d 2>/dev/null
 sleep 5  # Wait for services to initialize and validator to write startup logs
 
@@ -74,7 +74,7 @@ echo ""
   cd "$PROJECT_DIR"
   # Trigger a hook execution inside the claude container
   docker compose exec -T claude bash -c \
-    'echo "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hello\"}}" | bash /etc/claude-secure/hooks/pre-tool-use.sh' \
+    'echo "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hello\"}}" | bash /etc/claude-pod/hooks/pre-tool-use.sh' \
     >/dev/null 2>&1 || true
   sleep 1
   if [ -f "$TEST_LOG_DIR/hook.jsonl" ] && [ -s "$TEST_LOG_DIR/hook.jsonl" ]; then
@@ -157,7 +157,7 @@ docker compose down -v 2>/dev/null || true
   export LOG_DIR="$TEST_LOG_DIR_DISABLED"
   export LOG_HOOK=0 LOG_ANTHROPIC=0 LOG_IPTABLES=0
   export WORKSPACE_PATH="$TEST_WORKSPACE"
-  docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
+  docker volume rm -f claude-pod_workspace >/dev/null 2>&1 || true
   docker compose up -d 2>/dev/null
   sleep 5
   # Trigger a proxy request to give services a chance to log
@@ -180,12 +180,12 @@ docker compose down -v 2>/dev/null || true
 report "LOG-06" "No JSONL files created when logging disabled" $?
 
 # =========================================================================
-# LOG-07: claude-secure logs command exists
+# LOG-07: claude-pod logs command exists
 # =========================================================================
 (
   RESULT=0
-  grep -q 'logs)' "$PROJECT_DIR/bin/claude-secure" || RESULT=1
-  grep -q 'tail -f' "$PROJECT_DIR/bin/claude-secure" || RESULT=1
+  grep -q 'logs)' "$PROJECT_DIR/bin/claude-pod" || RESULT=1
+  grep -q 'tail -f' "$PROJECT_DIR/bin/claude-pod" || RESULT=1
   exit "$RESULT"
 )
 report "LOG-07" "logs subcommand exists in CLI with tail -f" $?

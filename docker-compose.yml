@@ -28,8 +28,8 @@ services:
       - LOG_PREFIX=${LOG_PREFIX:-}
     volumes:
       - workspace:/workspace
-      - ${PROFILE_PATH:-./config/profile.json}:/etc/claude-secure/profile.json:ro
-      - ${LOG_DIR:-./logs}:/var/log/claude-secure
+      - ${PROFILE_PATH:-./config/profile.json}:/etc/claude-pod/profile.json:ro
+      - ${LOG_DIR:-./logs}:/var/log/claude-pod
     networks:
       - claude-internal
     cap_drop:
@@ -53,13 +53,13 @@ services:
       # are delivered via env_file only — no environment overrides so host-env absence
       # never shadows the real values with empty strings. proxy.js defaults
       # REAL_ANTHROPIC_BASE_URL to https://api.anthropic.com when not set.
-      - PROFILE_PATH=/etc/claude-secure/profile.json
+      - PROFILE_PATH=/etc/claude-pod/profile.json
       - LOG_ANTHROPIC=${LOG_ANTHROPIC:-0}
       - LOG_ANTHROPIC_BODIES=${LOG_ANTHROPIC_BODIES:-0}
       - LOG_PREFIX=${LOG_PREFIX:-}
     volumes:
-      - ${PROFILE_PATH:-./config/profile.json}:/etc/claude-secure/profile.json:ro
-      - ${LOG_DIR:-./logs}:/var/log/claude-secure
+      - ${PROFILE_PATH:-./config/profile.json}:/etc/claude-pod/profile.json:ro
+      - ${LOG_DIR:-./logs}:/var/log/claude-pod
     networks:
       claude-internal:
         aliases:
@@ -77,9 +77,9 @@ services:
       - LOG_IPTABLES=${LOG_IPTABLES:-0}
       - LOG_PREFIX=${LOG_PREFIX:-}
     volumes:
-      - ${PROFILE_PATH:-./config/profile.json}:/etc/claude-secure/profile.json:ro
+      - ${PROFILE_PATH:-./config/profile.json}:/etc/claude-pod/profile.json:ro
       - validator-db:/data
-      - ${LOG_DIR:-./logs}:/var/log/claude-secure
+      - ${LOG_DIR:-./logs}:/var/log/claude-pod
     depends_on:
       claude:
         condition: service_started

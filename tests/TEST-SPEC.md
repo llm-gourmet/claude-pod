@@ -1,6 +1,6 @@
 # Test Specification
 
-86 tests across 10 suites covering all security layers and CLI commands of claude-secure.
+86 tests across 10 suites covering all security layers and CLI commands of claude-pod.
 
 ## Infrastructure
 
@@ -28,7 +28,7 @@ Runs automatically on `git push`. Selects relevant suites based on changed files
 | `validator/` | test-phase1, test-phase2 |
 | `config/whitelist.json` | test-phase1, test-phase3 |
 | `install.sh` | test-phase4 |
-| `bin/claude-secure` | test-phase9, test-bootstrap-docs |
+| `bin/claude-pod` | test-phase9, test-bootstrap-docs |
 | `scripts/` | test-bootstrap-docs |
 | `git-hooks/` | test-phase2 |
 | `tests/test-phase*.sh` | self (matching suite) |
@@ -42,7 +42,7 @@ Override: `RUN_ALL_TESTS=1 git push` or skip with `git push --no-verify`.
 | Pattern | Used By | Purpose |
 |---------|---------|---------|
 | `docker compose exec -T claude <cmd>` | Phase 1, 2, 3, 7 | Run commands inside containers |
-| `echo '{json}' \| docker compose exec -T claude /etc/claude-secure/hooks/pre-tool-use.sh` | Phase 2 | Simulate Claude Code tool calls |
+| `echo '{json}' \| docker compose exec -T claude /etc/claude-pod/hooks/pre-tool-use.sh` | Phase 2 | Simulate Claude Code tool calls |
 | Mock HTTP upstream via `node -e` inside proxy container | Phase 3 | Capture requests the proxy forwards upstream |
 | `docker-compose.test-phase3.yml` override | Phase 3 | Inject test secrets and mock upstream URL |
 | `source install.sh` + call functions in subshell | Phase 4 | Test installer functions in isolation |
@@ -140,7 +140,7 @@ Override: `RUN_ALL_TESTS=1 git push` or skip with `git push --no-verify`.
 | LOG-04 | All three JSONL files in unified host directory | Check all three files exist in LOG_DIR |
 | LOG-05 | Log entries have ts, svc, level, msg fields | `jq -e '.ts and .svc and .level and .msg'` on each log |
 | LOG-06 | No logs created when logging disabled | Restart with LOG_*=0, verify no log files |
-| LOG-07 | logs subcommand exists in CLI | Grep bin/claude-secure for `logs)` and `tail -f` |
+| LOG-07 | logs subcommand exists in CLI | Grep bin/claude-pod for `logs)` and `tail -f` |
 
 ## Phase 7: Env-File Strategy (10 tests)
 
@@ -174,14 +174,14 @@ Override: `RUN_ALL_TESTS=1 git push` or skip with `git push --no-verify`.
 | MULTI-04 | COMPOSE_PROJECT_NAME isolation | No hardcoded container_name, different project names produce different configs |
 | MULTI-05 | Per-instance config files are independent | Create two instances, verify separate config.sh, .env, whitelist.json |
 | MULTI-06 | LOG_PREFIX in compose and all services | Grep compose + proxy + validator + hook for LOG_PREFIX usage |
-| MULTI-07 | list command shows all instances | Create foo/bar instances, `claude-secure list` shows both |
+| MULTI-07 | list command shows all instances | Create foo/bar instances, `claude-pod list` shows both |
 | MULTI-08 | Instance auto-creation directory structure | Verify created instance has config.sh, .env (600), whitelist.json |
 | MULTI-09 | Global config scope (APP_DIR and PLATFORM only) | Verify global config excludes WORKSPACE_PATH, CLI loads both configs |
 
 ## Bootstrap-Docs: Project Documentation Scaffold (8 tests)
 
 **File:** `tests/test-bootstrap-docs.sh`
-**Covers:** `claude-secure bootstrap-docs` subcommand — connection management, error handling, git workflow, cleanup.
+**Covers:** `claude-pod bootstrap-docs` subcommand — connection management, error handling, git workflow, cleanup.
 **Note:** No Docker, no real credentials. Uses local bare repos as git remote.
 
 | ID | Test | How |
@@ -220,7 +220,7 @@ Override: `RUN_ALL_TESTS=1 git push` or skip with `git push --no-verify`.
 ## WLCLI: Webhook Listener CLI (8 tests)
 
 **File:** `tests/test-webhook-listener-cli.sh`
-**Covers:** `claude-secure webhook-listener` subcommand — config setters, key preservation, token redaction, status output.
+**Covers:** `claude-pod webhook-listener` subcommand — config setters, key preservation, token redaction, status output.
 **Note:** No Docker, no real credentials. Uses temp dirs as CONFIG_DIR, mock HTTP server for status test.
 
 | ID | Test | How |

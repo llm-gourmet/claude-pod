@@ -1,6 +1,6 @@
 ## Project
 
-**claude-secure**
+**claude-pod**
 
 An installable security wrapper for Claude Code that runs it in a fully network-isolated Docker environment. It prevents API keys and secrets from leaking to Anthropic or arbitrary external URLs through a four-layer architecture: Docker isolation, PreToolUse hook validation, an Anthropic proxy with secret redaction, and an iptables-based call validator with SQLite registration. Built for solo developers who want to use Claude Code on projects with real API keys without risking secret exfiltration.
 

@@ -21,7 +21,7 @@ TOTAL=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CLI="$PROJECT_DIR/bin/claude-secure"
+CLI="$PROJECT_DIR/bin/claude-pod"
 
 run_test() {
   local name="$1"; shift
@@ -45,7 +45,7 @@ trap cleanup EXIT
 _make_cfg() {
   local tmpdir="$1"
   local profname="${2:-testprof}"
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   local ws="$tmpdir/workspace"
   mkdir -p "$cfg/profiles/$profname" "$ws"
   cat > "$cfg/config.sh" <<EOF
@@ -100,7 +100,7 @@ echo "--- CLI-02: profile create ---"
 
 test_cli02_creates_profile() {
   local tmpdir; tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles" "$tmpdir/ws"
   cat > "$cfg/config.sh" <<EOF
 APP_DIR="$PROJECT_DIR"
@@ -130,8 +130,8 @@ test_cli02_no_containers() {
   local tmpdir; tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   local docker_log="$tmpdir/docker.log"
   local fake_bin="$tmpdir/bin"
-  mkdir -p "$fake_bin" "$tmpdir/.claude-secure/profiles" "$tmpdir/ws"
-  cat > "$tmpdir/.claude-secure/config.sh" <<EOF
+  mkdir -p "$fake_bin" "$tmpdir/.claude-pod/profiles" "$tmpdir/ws"
+  cat > "$tmpdir/.claude-pod/config.sh" <<EOF
 APP_DIR="$PROJECT_DIR"
 PLATFORM="linux"
 DEFAULT_WORKSPACE="$tmpdir/ws"
@@ -144,7 +144,7 @@ DOCKER
   chmod +x "$fake_bin/docker"
 
   printf '%s\n%s\n%s\n%s\n' "$tmpdir/ws" "2" "test-key-dummy" "" | \
-    CONFIG_DIR="$tmpdir/.claude-secure" HOME="$tmpdir" PATH="$fake_bin:$PATH" \
+    CONFIG_DIR="$tmpdir/.claude-pod" HOME="$tmpdir" PATH="$fake_bin:$PATH" \
       bash "$CLI" profile create newprof >/dev/null 2>&1
 
   if [ -f "$docker_log" ] && grep -q "compose up" "$docker_log"; then
@@ -157,8 +157,8 @@ run_test "CLI-02b: profile create does not invoke docker compose up" test_cli02_
 test_cli02_hint_shown() {
   local tmpdir; tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   local fake_bin="$tmpdir/bin"
-  mkdir -p "$fake_bin" "$tmpdir/.claude-secure/profiles" "$tmpdir/ws"
-  cat > "$tmpdir/.claude-secure/config.sh" <<EOF
+  mkdir -p "$fake_bin" "$tmpdir/.claude-pod/profiles" "$tmpdir/ws"
+  cat > "$tmpdir/.claude-pod/config.sh" <<EOF
 APP_DIR="$PROJECT_DIR"
 PLATFORM="linux"
 DEFAULT_WORKSPACE="$tmpdir/ws"
@@ -171,7 +171,7 @@ DOCKER
 
   local output
   output=$(printf '%s\n%s\n%s\n%s\n' "$tmpdir/ws" "2" "test-key-dummy" "" | \
-    CONFIG_DIR="$tmpdir/.claude-secure" HOME="$tmpdir" PATH="$fake_bin:$PATH" \
+    CONFIG_DIR="$tmpdir/.claude-pod" HOME="$tmpdir" PATH="$fake_bin:$PATH" \
       bash "$CLI" profile create newprof 2>&1)
 
   echo "$output" | grep -q "start newprof" || return 1

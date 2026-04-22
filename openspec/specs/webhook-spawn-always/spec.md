@@ -1,11 +1,11 @@
 ## Requirements
 
 ### Requirement: listener spawns after HMAC, repo lookup, and filter evaluation
-After HMAC verification succeeds and a matching connection is found in `connections.json`, the listener SHALL evaluate `skip_filters` (see `gh-webhook-filter-eval` spec). If no filter matches, the listener SHALL call `claude-secure spawn <connection_name> --event-file <path>`. No branch filtering, diff inspection, or label gating SHALL occur beyond skip_filters evaluation.
+After HMAC verification succeeds and a matching connection is found in `connections.json`, the listener SHALL evaluate `skip_filters` (see `gh-webhook-filter-eval` spec). If no filter matches, the listener SHALL call `claude-pod spawn <connection_name> --event-file <path>`. No branch filtering, diff inspection, or label gating SHALL occur beyond skip_filters evaluation.
 
 #### Scenario: Push to any branch triggers spawn when no filter matches
 - **WHEN** a push event arrives for a registered repo, HMAC is valid, and no filter matches
-- **THEN** `claude-secure spawn` is called with the persisted event file
+- **THEN** `claude-pod spawn` is called with the persisted event file
 
 #### Scenario: Push to non-main branch also triggers spawn
 - **WHEN** a push event targets `refs/heads/feature-x` for a registered repo and no filter matches
@@ -17,17 +17,17 @@ After HMAC verification succeeds and a matching connection is found in `connecti
 
 #### Scenario: Matching filter prevents spawn
 - **WHEN** a push event arrives and all commits match a configured skip_filter
-- **THEN** `claude-secure spawn` is NOT called
+- **THEN** `claude-pod spawn` is NOT called
 
-### Requirement: _spawn_worker calls claude-secure spawn via subprocess
-`_spawn_worker` SHALL invoke `subprocess.run([claude_secure_bin, "spawn", connection_name, "--event-file", str(event_path)], capture_output=True, text=True)`. The call is blocking within the worker thread. The semaphore is released after the subprocess exits.
+### Requirement: _spawn_worker calls claude-pod spawn via subprocess
+`_spawn_worker` SHALL invoke `subprocess.run([claude_pod_bin, "spawn", connection_name, "--event-file", str(event_path)], capture_output=True, text=True)`. The call is blocking within the worker thread. The semaphore is released after the subprocess exits.
 
 #### Scenario: Successful spawn logs spawn_done
-- **WHEN** `claude-secure spawn` exits with code 0
+- **WHEN** `claude-pod spawn` exits with code 0
 - **THEN** `webhook.jsonl` contains a `spawn_done` entry with `connection`, `delivery_id`, and `exit_code: 0`
 
 #### Scenario: Failed spawn logs spawn_error
-- **WHEN** `claude-secure spawn` exits with a non-zero code
+- **WHEN** `claude-pod spawn` exits with a non-zero code
 - **THEN** `webhook.jsonl` contains a `spawn_error` entry with `exit_code` matching the actual exit code
 
 #### Scenario: Spawn exception logs spawn_exception
@@ -35,14 +35,14 @@ After HMAC verification succeeds and a matching connection is found in `connecti
 - **THEN** `webhook.jsonl` contains a `spawn_exception` entry with an `error` field
 
 ### Requirement: spawn output written to per-delivery log file
-`_spawn_worker` SHALL write the combined stdout and stderr of the `claude-secure spawn` subprocess to `<logs_dir>/spawn-<delivery_id[:12]>.log`.
+`_spawn_worker` SHALL write the combined stdout and stderr of the `claude-pod spawn` subprocess to `<logs_dir>/spawn-<delivery_id[:12]>.log`.
 
 #### Scenario: Log file created after spawn
 - **WHEN** a spawn completes (success or failure)
 - **THEN** a file `spawn-<first-12-chars-of-delivery-id>.log` exists in the configured logs directory
 
 #### Scenario: Log file contains subprocess output
-- **WHEN** `claude-secure spawn` writes to stdout or stderr
+- **WHEN** `claude-pod spawn` writes to stdout or stderr
 - **THEN** that output appears verbatim in the spawn log file
 
 ### Requirement: spawn_skipped log event removed

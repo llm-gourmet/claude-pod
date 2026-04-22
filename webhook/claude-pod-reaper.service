@@ -1,6 +1,6 @@
-# /etc/systemd/system/claude-secure-reaper.service
+# /etc/systemd/system/claude-pod-reaper.service
 # Installed by install.sh --with-webhook (Phase 17 step 5d).
-# Source of truth: webhook/claude-secure-reaper.service in the claude-secure repo.
+# Source of truth: webhook/claude-pod-reaper.service in the claude-pod repo.
 #
 # Locked by .planning/phases/17-operational-hardening/17-CONTEXT.md D-01..D-12.
 # DO NOT add NoNewPrivileges, ProtectSystem, PrivateTmp, CapabilityBoundingSet,
@@ -8,19 +8,19 @@
 # (empirically confirmed in Phase 14, re-confirmed in Phase 17 E2E gate D-12).
 
 [Unit]
-Description=claude-secure orphaned container reaper
+Description=claude-pod orphaned container reaper
 Documentation=https://github.com/llm-gourmet/claude-pod
 After=docker.service
 Requires=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/claude-secure reap
+ExecStart=/usr/local/bin/claude-pod reap
 
 # Logging (D-09): journal-only, no separate JSONL.
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=claude-secure-reaper
+SyslogIdentifier=claude-pod-reaper
 
 # User (D-24 carry-forward): root for docker socket access. Same justification
 # as the listener -- delegates real work to docker compose, which itself
@@ -50,7 +50,7 @@ SystemCallArchitectures=native
 #   ProtectSystem=strict     -- Docker volume-mount machinery writes outside the allowed set
 #   PrivateTmp=true          -- compose may touch /tmp during bootstrap
 #   CapabilityBoundingSet=...-- docker daemon comms need broader caps
-#   ProtectHome=true         -- profile state lives under $HOME/.claude-secure
+#   ProtectHome=true         -- profile state lives under $HOME/.claude-pod
 #   PrivateDevices=true      -- iptables validator needs /dev access on shared netns
 # Re-enabling any of these without a new E2E pass will break the reaper.
 

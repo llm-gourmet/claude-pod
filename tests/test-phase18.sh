@@ -95,14 +95,14 @@ test_detect_platform_override_rejects_bogus() {
 
 test_uuid_lower_normalizes() {
   local out
-  out="$(claude_secure_uuid_lower)" || return 1
+  out="$(claude_pod_uuid_lower)" || return 1
   [[ "$out" =~ ^[0-9a-f-]+$ ]] || { echo "expected lowercase hex UUID, got '$out'" >&2; return 1; }
 }
 
 test_brew_prefix_override_honored() {
   CLAUDE_SECURE_BREW_PREFIX_OVERRIDE=/tmp/fake-brew
   local r
-  r="$(claude_secure_brew_prefix)" || return 1
+  r="$(claude_pod_brew_prefix)" || return 1
   [ "$r" = "/tmp/fake-brew" ] || { echo "expected /tmp/fake-brew got '$r'" >&2; return 1; }
 }
 
@@ -119,7 +119,7 @@ test_bootstrap_path_macos_without_brew_fails_loud() {
   CLAUDE_SECURE_BREW_PREFIX_OVERRIDE=""
   unset __CLAUDE_SECURE_BOOTSTRAPPED
   local err
-  err="$(PATH=/usr/bin:/bin claude_secure_bootstrap_path 2>&1 1>/dev/null)" && return 1
+  err="$(PATH=/usr/bin:/bin claude_pod_bootstrap_path 2>&1 1>/dev/null)" && return 1
   echo "$err" | grep -q "Homebrew is required" || { echo "missing Homebrew error: $err" >&2; return 1; }
 }
 
@@ -127,7 +127,7 @@ test_bootstrap_path_macos_with_fake_brew_succeeds() {
   CLAUDE_SECURE_PLATFORM_OVERRIDE=macos
   CLAUDE_SECURE_BREW_PREFIX_OVERRIDE="$REPO_ROOT/tests/fixtures/brew"
   unset __CLAUDE_SECURE_BOOTSTRAPPED
-  claude_secure_bootstrap_path || { echo "bootstrap failed unexpectedly" >&2; return 1; }
+  claude_pod_bootstrap_path || { echo "bootstrap failed unexpectedly" >&2; return 1; }
   local d
   d="$(date)"
   [ "$d" = "FAKE-GNU-DATE" ] || { echo "PATH shim did not apply, date=$d" >&2; return 1; }
@@ -228,20 +228,20 @@ STUB
 test_caller_prologue_reexecs_into_brew_bash() {
   local errors=0
 
-  # bin/claude-secure assertions
-  local cs="$REPO_ROOT/bin/claude-secure"
+  # bin/claude-pod assertions
+  local cs="$REPO_ROOT/bin/claude-pod"
   [ -f "$cs" ] || { echo "missing $cs" >&2; return 1; }
-  head -50 "$cs" | grep -q 'BASH_VERSINFO\[0\]:-0' || { echo "bin/claude-secure missing BASH_VERSINFO re-exec test" >&2; errors=$((errors+1)); }
-  head -50 "$cs" | grep -q 'exec "\$__brew_bash"' || { echo "bin/claude-secure missing exec __brew_bash" >&2; errors=$((errors+1)); }
-  head -50 "$cs" | grep -q 'source.*lib/platform.sh' || { echo "bin/claude-secure missing source lib/platform.sh" >&2; errors=$((errors+1)); }
-  head -50 "$cs" | grep -q 'claude_secure_bootstrap_path' || { echo "bin/claude-secure missing claude_secure_bootstrap_path call" >&2; errors=$((errors+1)); }
+  head -50 "$cs" | grep -q 'BASH_VERSINFO\[0\]:-0' || { echo "bin/claude-pod missing BASH_VERSINFO re-exec test" >&2; errors=$((errors+1)); }
+  head -50 "$cs" | grep -q 'exec "\$__brew_bash"' || { echo "bin/claude-pod missing exec __brew_bash" >&2; errors=$((errors+1)); }
+  head -50 "$cs" | grep -q 'source.*lib/platform.sh' || { echo "bin/claude-pod missing source lib/platform.sh" >&2; errors=$((errors+1)); }
+  head -50 "$cs" | grep -q 'claude_pod_bootstrap_path' || { echo "bin/claude-pod missing claude_pod_bootstrap_path call" >&2; errors=$((errors+1)); }
 
   # Ordering: re-exec guard MUST come before `set -euo pipefail`
   local reexec_line set_line
   reexec_line="$(grep -n 'BASH_VERSINFO\[0\]:-0' "$cs" | head -1 | cut -d: -f1)"
   set_line="$(grep -n '^set -euo pipefail' "$cs" | head -1 | cut -d: -f1)"
   if [ -z "$reexec_line" ] || [ -z "$set_line" ]; then
-    echo "could not locate re-exec or set line in bin/claude-secure" >&2
+    echo "could not locate re-exec or set line in bin/claude-pod" >&2
     errors=$((errors+1))
   elif [ "$reexec_line" -ge "$set_line" ]; then
     echo "re-exec guard (line $reexec_line) must precede set -euo pipefail (line $set_line)" >&2
@@ -249,7 +249,7 @@ test_caller_prologue_reexecs_into_brew_bash() {
   fi
 
   # Syntax check
-  bash -n "$cs" || { echo "bin/claude-secure failed syntax check" >&2; errors=$((errors+1)); }
+  bash -n "$cs" || { echo "bin/claude-pod failed syntax check" >&2; errors=$((errors+1)); }
 
   # run-tests.sh assertions
   local rt="$REPO_ROOT/run-tests.sh"
@@ -266,7 +266,7 @@ test_caller_prologue_reexecs_into_brew_bash() {
 test_no_flock_in_host_scripts() {
   local files=(
     "$REPO_ROOT/install.sh"
-    "$REPO_ROOT/bin/claude-secure"
+    "$REPO_ROOT/bin/claude-pod"
     "$REPO_ROOT/run-tests.sh"
     "$REPO_ROOT/lib/platform.sh"
     "$REPO_ROOT/claude/hooks/pre-tool-use.sh"
@@ -323,7 +323,7 @@ test_install_sh_has_phase18_prologue() {
 
   # Source lib/platform.sh + bootstrap call in first 40 lines
   head -40 "$f" | grep -q 'source "\$SCRIPT_DIR/lib/platform.sh"' || { echo "install.sh missing source lib/platform.sh" >&2; errors=$((errors+1)); }
-  head -40 "$f" | grep -q 'claude_secure_bootstrap_path' || { echo "install.sh missing claude_secure_bootstrap_path call" >&2; errors=$((errors+1)); }
+  head -40 "$f" | grep -q 'claude_pod_bootstrap_path' || { echo "install.sh missing claude_pod_bootstrap_path call" >&2; errors=$((errors+1)); }
 
   # Ordering: re-exec guard MUST come before `set -euo pipefail`
   local reexec_line set_line
@@ -387,7 +387,7 @@ test_phase18_full_suite_under_macos_override() {
   (
     export CLAUDE_SECURE_PLATFORM_OVERRIDE=macos
     export __PHASE18_SUBSUITE=1
-    # Point the bootstrap at the fixture brew prefix so claude_secure_bootstrap_path
+    # Point the bootstrap at the fixture brew prefix so claude_pod_bootstrap_path
     # has a valid macOS environment to validate against.
     export CLAUDE_SECURE_BREW_PREFIX_OVERRIDE="$REPO_ROOT/tests/fixtures/brew"
     bash "$REPO_ROOT/tests/test-phase18.sh"

@@ -1,14 +1,14 @@
 ## ADDED Requirements
 
 ### Requirement: connections stored as JSON array in dedicated directory
-The `bootstrap-docs` connection config SHALL be stored at `~/.claude-secure/docs-bootstrap/connections.json` as a JSON array. The directory SHALL have mode `700` and the file SHALL have mode `600`. Each element SHALL contain `name` (string, required), `repo` (string, required), `token` (string, required), and optionally `branch` (string, default `main`).
+The `bootstrap-docs` connection config SHALL be stored at `~/.claude-pod/docs-bootstrap/connections.json` as a JSON array. The directory SHALL have mode `700` and the file SHALL have mode `600`. Each element SHALL contain `name` (string, required), `repo` (string, required), `token` (string, required), and optionally `branch` (string, default `main`).
 
 #### Scenario: Directory and file created on first add
-- **WHEN** `--add-connection` is run and `~/.claude-secure/docs-bootstrap/` does not exist
+- **WHEN** `--add-connection` is run and `~/.claude-pod/docs-bootstrap/` does not exist
 - **THEN** the directory is created with mode `700` and `connections.json` is created with mode `600` containing the new connection
 
 #### Scenario: File contains valid JSON array after add
-- **WHEN** `claude-secure bootstrap-docs --add-connection --name work-docs --repo https://github.com/org/docs --token ghp_xxx` is run
+- **WHEN** `claude-pod bootstrap-docs --add-connection --name work-docs --repo https://github.com/org/docs --token ghp_xxx` is run
 - **THEN** `connections.json` is a valid JSON array containing one object with `name`, `repo`, `token`, and `branch` fields
 
 #### Scenario: Branch defaults to main when omitted
@@ -30,18 +30,18 @@ The `bootstrap-docs` connection config SHALL be stored at `~/.claude-secure/docs
 `--remove-connection <name>` SHALL remove the connection with the given name and rewrite `connections.json`. If the name does not exist the command SHALL exit non-zero with an error message.
 
 #### Scenario: Known connection is removed
-- **WHEN** `claude-secure bootstrap-docs --remove-connection work-docs` is run and `work-docs` exists
+- **WHEN** `claude-pod bootstrap-docs --remove-connection work-docs` is run and `work-docs` exists
 - **THEN** `connections.json` no longer contains a connection named `work-docs`
 
 #### Scenario: Unknown connection name is rejected
-- **WHEN** `claude-secure bootstrap-docs --remove-connection nonexistent` is run
+- **WHEN** `claude-pod bootstrap-docs --remove-connection nonexistent` is run
 - **THEN** the command exits with status 1 and prints `Error: connection 'nonexistent' not found`
 
 ### Requirement: list-connections shows name, repo, branch without token
 `--list-connections` SHALL print each connection on its own line showing `name`, `repo`, and `branch`. The token SHALL NOT appear in the output.
 
 #### Scenario: Connections listed without token
-- **WHEN** `claude-secure bootstrap-docs --list-connections` is run with two connections configured
+- **WHEN** `claude-pod bootstrap-docs --list-connections` is run with two connections configured
 - **THEN** output contains two lines each showing name, repo, branch but no token value
 
 #### Scenario: No connections configured

@@ -20,8 +20,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/platform.sh"
 # Phase 18 PORT-01: prepend gnubin to PATH so plain date/stat/readlink/realpath
 # resolve to GNU coreutils on macOS. No-op on Linux/WSL2.
-if command -v claude_secure_bootstrap_path >/dev/null 2>&1; then
-  claude_secure_bootstrap_path || true
+if command -v claude_pod_bootstrap_path >/dev/null 2>&1; then
+  claude_pod_bootstrap_path || true
 fi
 
 _invoking_user="${SUDO_USER:-$USER}"
@@ -38,7 +38,7 @@ if [ -z "$_invoking_home" ]; then
   echo "ERROR: Could not resolve home directory for user '$_invoking_user'" >&2
   exit 1
 fi
-CONFIG_DIR="$_invoking_home/.claude-secure"
+CONFIG_DIR="$_invoking_home/.claude-pod"
 PLATFORM=""
 app_dir=""
 WITH_WEBHOOK=0
@@ -115,7 +115,7 @@ parse_args() {
 
 # PLAT-05: verify Docker Desktop >= 4.44.3 is installed and running on macOS.
 # Called from check_dependencies() only when detect_platform returns "macos".
-# Requires GNU sort on PATH (for `sort -V`) — claude_secure_bootstrap_path
+# Requires GNU sort on PATH (for `sort -V`) — claude_pod_bootstrap_path
 # must have run earlier in the Phase 18 prologue (line 23) before this.
 check_docker_desktop_version() {
   local min_version="4.44.3"
@@ -452,7 +452,7 @@ copy_app_files() {
     cp -r "$SCRIPT_DIR" "$app_dir"
     log_info "Copied project files to $app_dir"
   else
-    log_error "Cannot find docker-compose.yml in $SCRIPT_DIR. Run from the claude-secure project directory."
+    log_error "Cannot find docker-compose.yml in $SCRIPT_DIR. Run from the claude-pod project directory."
     exit 1
   fi
 
@@ -488,21 +488,21 @@ install_git_hooks() {
 }
 
 install_cli() {
-  local cli_src="$CONFIG_DIR/app/bin/claude-secure"
+  local cli_src="$CONFIG_DIR/app/bin/claude-pod"
   local target
 
   if [ -w /usr/local/bin ]; then
-    target="/usr/local/bin/claude-secure"
+    target="/usr/local/bin/claude-pod"
     cp "$cli_src" "$target"
     chmod 755 "$target"
     log_info "Installed CLI to $target"
   elif command -v sudo >/dev/null 2>&1; then
-    target="/usr/local/bin/claude-secure"
+    target="/usr/local/bin/claude-pod"
     sudo cp "$cli_src" "$target"
     sudo chmod 755 "$target"
     log_info "Installed CLI to $target (via sudo)"
   else
-    target="$_invoking_home/.local/bin/claude-secure"
+    target="$_invoking_home/.local/bin/claude-pod"
     mkdir -p "$_invoking_home/.local/bin"
     cp "$cli_src" "$target"
     chmod 755 "$target"
@@ -513,7 +513,7 @@ install_cli() {
   fi
 
   # Install bootstrap-docs templates and script to share directory.
-  local share_dir="/usr/local/share/claude-secure"
+  local share_dir="/usr/local/share/claude-pod"
   local templates_src="$CONFIG_DIR/app/scripts/templates"
   local script_src="$CONFIG_DIR/app/scripts/new-project.sh"
   if [ -d "$templates_src" ]; then
@@ -596,7 +596,7 @@ install_webhook_service() {
       echo ""
       echo "  After WSL restarts, re-run the installer or start the service manually:"
       echo ""
-      echo "      sudo systemctl enable --now claude-secure-webhook"
+      echo "      sudo systemctl enable --now claude-pod-webhook"
       echo ""
       log_warn "Installer will copy files but skip 'systemctl enable --now'."
     fi
@@ -616,13 +616,13 @@ install_webhook_service() {
     log_error "Could not resolve home directory for user '$invoking_user'"
     return 1
   fi
-  log_info "Webhook paths will be rooted at: $invoking_home/.claude-secure/"
+  log_info "Webhook paths will be rooted at: $invoking_home/.claude-pod/"
 
   # 5. Copy listener.py (always overwrite -- latest code ships)
-  sudo mkdir -p /opt/claude-secure/webhook
-  sudo cp "$app_dir/webhook/listener.py" /opt/claude-secure/webhook/listener.py
-  sudo chmod 755 /opt/claude-secure/webhook/listener.py
-  log_info "Copied listener.py to /opt/claude-secure/webhook/"
+  sudo mkdir -p /opt/claude-pod/webhook
+  sudo cp "$app_dir/webhook/listener.py" /opt/claude-pod/webhook/listener.py
+  sudo chmod 755 /opt/claude-pod/webhook/listener.py
+  log_info "Copied listener.py to /opt/claude-pod/webhook/"
 
   # 5d. Install reaper systemd unit + timer (Phase 17).
   # Mirrors step 7's pattern for the webhook listener: cp into
@@ -630,25 +630,25 @@ install_webhook_service() {
   # covers BOTH the reaper units (newly added here) and the webhook unit's
   # updated hardening directives from Phase 17 wave 1a. Always refresh: the
   # repo copies are the source of truth, no rm -rf of the destination.
-  sudo cp "$app_dir/webhook/claude-secure-reaper.service" /etc/systemd/system/claude-secure-reaper.service
-  sudo chmod 644 /etc/systemd/system/claude-secure-reaper.service
-  sudo cp "$app_dir/webhook/claude-secure-reaper.timer" /etc/systemd/system/claude-secure-reaper.timer
-  sudo chmod 644 /etc/systemd/system/claude-secure-reaper.timer
-  log_info "Installed systemd unit /etc/systemd/system/claude-secure-reaper.service"
-  log_info "Installed systemd unit /etc/systemd/system/claude-secure-reaper.timer"
+  sudo cp "$app_dir/webhook/claude-pod-reaper.service" /etc/systemd/system/claude-pod-reaper.service
+  sudo chmod 644 /etc/systemd/system/claude-pod-reaper.service
+  sudo cp "$app_dir/webhook/claude-pod-reaper.timer" /etc/systemd/system/claude-pod-reaper.timer
+  sudo chmod 644 /etc/systemd/system/claude-pod-reaper.timer
+  log_info "Installed systemd unit /etc/systemd/system/claude-pod-reaper.service"
+  log_info "Installed systemd unit /etc/systemd/system/claude-pod-reaper.timer"
 
   # 6. Copy config template (idempotent -- never overwrite existing config)
-  local webhook_config_path="${invoking_home}/.claude-secure/webhooks/webhook.json"
-  mkdir -p "${invoking_home}/.claude-secure/webhooks"
-  chmod 700 "${invoking_home}/.claude-secure/webhooks"
+  local webhook_config_path="${invoking_home}/.claude-pod/webhooks/webhook.json"
+  mkdir -p "${invoking_home}/.claude-pod/webhooks"
+  chmod 700 "${invoking_home}/.claude-pod/webhooks"
   if [ ! -f "$webhook_config_path" ]; then
     sed \
-      -e "s|__REPLACED_BY_INSTALLER__PROFILES__|${invoking_home}/.claude-secure/profiles|" \
-      -e "s|__REPLACED_BY_INSTALLER__DOCS__|${invoking_home}/.claude-secure/docs|" \
-      -e "s|__REPLACED_BY_INSTALLER__WEBHOOKS__|${invoking_home}/.claude-secure/webhooks|" \
-      -e "s|__REPLACED_BY_INSTALLER__EVENTS__|${invoking_home}/.claude-secure/events|" \
-      -e "s|__REPLACED_BY_INSTALLER__LOGS__|${invoking_home}/.claude-secure/logs|" \
-      -e "s|__REPLACED_BY_INSTALLER__CONFIG_DIR__|${invoking_home}/.claude-secure|" \
+      -e "s|__REPLACED_BY_INSTALLER__PROFILES__|${invoking_home}/.claude-pod/profiles|" \
+      -e "s|__REPLACED_BY_INSTALLER__DOCS__|${invoking_home}/.claude-pod/docs|" \
+      -e "s|__REPLACED_BY_INSTALLER__WEBHOOKS__|${invoking_home}/.claude-pod/webhooks|" \
+      -e "s|__REPLACED_BY_INSTALLER__EVENTS__|${invoking_home}/.claude-pod/events|" \
+      -e "s|__REPLACED_BY_INSTALLER__LOGS__|${invoking_home}/.claude-pod/logs|" \
+      -e "s|__REPLACED_BY_INSTALLER__CONFIG_DIR__|${invoking_home}/.claude-pod|" \
       "$app_dir/webhook/config.example.json" > "$webhook_config_path"
     chmod 600 "$webhook_config_path"
     log_info "Installed default config at $webhook_config_path"
@@ -657,59 +657,59 @@ install_webhook_service() {
   fi
 
   # 7. Install systemd unit file
-  # Patch ExecStart: use actual app_dir (so `claude-secure update` is reflected without
+  # Patch ExecStart: use actual app_dir (so `claude-pod update` is reflected without
   # copying to /opt), set User/Group to the installing user, and point --config to the
   # user-owned webhooks/webhook.json path.
   local invoking_user invoking_group
   invoking_user=$(id -un)
   invoking_group=$(id -gn)
-  sudo cp "$app_dir/webhook/claude-secure-webhook.service" /etc/systemd/system/claude-secure-webhook.service
+  sudo cp "$app_dir/webhook/claude-pod-webhook.service" /etc/systemd/system/claude-pod-webhook.service
   local invoking_home
   invoking_home=$(eval echo "~${invoking_user}")
   sudo sed -i \
-    -e "s|/opt/claude-secure/webhook/listener.py|${app_dir}/webhook/listener.py|g" \
+    -e "s|/opt/claude-pod/webhook/listener.py|${app_dir}/webhook/listener.py|g" \
     -e "s|__WEBHOOK_CONFIG_PATH__|${webhook_config_path}|g" \
     -e "s|__WEBHOOK_USER__|${invoking_user}|g" \
     -e "s|__WEBHOOK_GROUP__|${invoking_group}|g" \
     -e "s|__WEBHOOK_HOME__|${invoking_home}|g" \
-    /etc/systemd/system/claude-secure-webhook.service
-  sudo chmod 644 /etc/systemd/system/claude-secure-webhook.service
+    /etc/systemd/system/claude-pod-webhook.service
+  sudo chmod 644 /etc/systemd/system/claude-pod-webhook.service
   sudo systemctl daemon-reload 2>/dev/null || log_warn "systemctl daemon-reload failed (likely WSL2-no-systemd)"
-  log_info "Installed systemd unit /etc/systemd/system/claude-secure-webhook.service (User=${invoking_user}, config=${webhook_config_path})"
+  log_info "Installed systemd unit /etc/systemd/system/claude-pod-webhook.service (User=${invoking_user}, config=${webhook_config_path})"
 
   # 8. Enable + start (unless WSL2 gated)
   if [ "$wsl2_no_systemd" -eq 1 ]; then
     log_warn "Skipping 'systemctl enable --now' due to WSL2 systemd gate."
-    log_warn "After enabling systemd in WSL2, run: sudo systemctl enable --now claude-secure-webhook"
+    log_warn "After enabling systemd in WSL2, run: sudo systemctl enable --now claude-pod-webhook"
   else
-    if sudo systemctl enable --now claude-secure-webhook 2>/dev/null; then
+    if sudo systemctl enable --now claude-pod-webhook 2>/dev/null; then
       sleep 1
-      if sudo systemctl is-active --quiet claude-secure-webhook; then
-        log_info "Webhook listener is active -- tail logs with: journalctl -u claude-secure-webhook -f"
+      if sudo systemctl is-active --quiet claude-pod-webhook; then
+        log_info "Webhook listener is active -- tail logs with: journalctl -u claude-pod-webhook -f"
       else
-        log_error "Webhook listener failed to start. Check: journalctl -u claude-secure-webhook"
+        log_error "Webhook listener failed to start. Check: journalctl -u claude-pod-webhook"
         return 1
       fi
     else
-      log_warn "Could not enable claude-secure-webhook (systemctl enable failed)."
-      log_warn "Manually enable later with: sudo systemctl enable --now claude-secure-webhook"
+      log_warn "Could not enable claude-pod-webhook (systemctl enable failed)."
+      log_warn "Manually enable later with: sudo systemctl enable --now claude-pod-webhook"
     fi
   fi
 
   # 8b. Enable + start reaper timer (Phase 17; subject to the same WSL2 gate as step 8).
   if [ "$wsl2_no_systemd" -eq 1 ]; then
-    log_warn "Skipping 'systemctl enable --now claude-secure-reaper.timer' due to WSL2 systemd gate."
-    log_warn "After enabling systemd in WSL2, run: sudo systemctl enable --now claude-secure-reaper.timer"
+    log_warn "Skipping 'systemctl enable --now claude-pod-reaper.timer' due to WSL2 systemd gate."
+    log_warn "After enabling systemd in WSL2, run: sudo systemctl enable --now claude-pod-reaper.timer"
   else
-    if sudo systemctl enable --now claude-secure-reaper.timer 2>/dev/null; then
-      if sudo systemctl is-active --quiet claude-secure-reaper.timer; then
-        log_info "Reaper timer active -- runs every 5 minutes. View activity: journalctl -u claude-secure-reaper -f"
+    if sudo systemctl enable --now claude-pod-reaper.timer 2>/dev/null; then
+      if sudo systemctl is-active --quiet claude-pod-reaper.timer; then
+        log_info "Reaper timer active -- runs every 5 minutes. View activity: journalctl -u claude-pod-reaper -f"
       else
-        log_warn "Reaper timer enabled but not active yet. Check: systemctl status claude-secure-reaper.timer"
+        log_warn "Reaper timer enabled but not active yet. Check: systemctl status claude-pod-reaper.timer"
       fi
     else
-      log_warn "Could not enable claude-secure-reaper.timer (systemctl enable failed)."
-      log_warn "Manually enable later with: sudo systemctl enable --now claude-secure-reaper.timer"
+      log_warn "Could not enable claude-pod-reaper.timer (systemctl enable failed)."
+      log_warn "Manually enable later with: sudo systemctl enable --now claude-pod-reaper.timer"
     fi
   fi
 
@@ -717,13 +717,13 @@ install_webhook_service() {
   log_info "NOTE: Each profile that should receive webhooks needs a 'webhook_secret' field"
   log_info "      added to its profile.json. Example:"
   log_info "        jq '.webhook_secret = \"<your-github-webhook-secret>\"' \\"
-  log_info "          ~/.claude-secure/profiles/<name>/profile.json > /tmp/p.json \\"
-  log_info "          && mv /tmp/p.json ~/.claude-secure/profiles/<name>/profile.json"
+  log_info "          ~/.claude-pod/profiles/<name>/profile.json > /tmp/p.json \\"
+  log_info "          && mv /tmp/p.json ~/.claude-pod/profiles/<name>/profile.json"
 }
 
 main() {
   parse_args "$@"
-  echo "=== claude-secure installer ==="
+  echo "=== claude-pod installer ==="
   echo ""
 
   check_dependencies
@@ -753,7 +753,7 @@ main() {
 
   # Reclaim ownership of CONFIG_DIR for the invoking user (sudo creates as root).
   # install_cli + install_git_hooks + install_webhook_service deliberately leave
-  # system paths (/usr/local/bin, /etc/systemd, /opt/claude-secure) as root.
+  # system paths (/usr/local/bin, /etc/systemd, /opt/claude-pod) as root.
   chown -R "$_invoking_user:$_invoking_group" "$CONFIG_DIR"
   chmod 777 "$CONFIG_DIR/logs"
 
@@ -761,7 +761,7 @@ main() {
 
   echo ""
   log_info "Installation complete!"
-  log_info "Run 'claude-secure --profile default' to start."
+  log_info "Run 'claude-pod --profile default' to start."
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]] && [ "${__INSTALL_SOURCE_ONLY:-0}" != "1" ]; then

@@ -14,22 +14,22 @@ RUN apt-get update && \
 RUN useradd -m -s /bin/bash claude
 
 # Create log directory
-RUN mkdir -p /var/log/claude-secure && chown claude:claude /var/log/claude-secure
+RUN mkdir -p /var/log/claude-pod && chown claude:claude /var/log/claude-pod
 
 # Hook scripts -- root-owned, execute-only (per DOCK-05)
-COPY hooks/ /etc/claude-secure/hooks/
-RUN chown -R root:root /etc/claude-secure/hooks/ && \
-    chmod 555 /etc/claude-secure/hooks/ && \
-    chmod 555 /etc/claude-secure/hooks/*.sh
+COPY hooks/ /etc/claude-pod/hooks/
+RUN chown -R root:root /etc/claude-pod/hooks/ && \
+    chmod 555 /etc/claude-pod/hooks/ && \
+    chmod 555 /etc/claude-pod/hooks/*.sh
 
 # Settings with hook configuration -- placed OUTSIDE user home to avoid
 # being shadowed by any volume mount on ~/.claude.
 # Symlink ensures Claude Code finds it at the expected path.
-COPY settings.json /etc/claude-secure/settings.json
-RUN chown root:root /etc/claude-secure/settings.json && \
-    chmod 444 /etc/claude-secure/settings.json && \
+COPY settings.json /etc/claude-pod/settings.json
+RUN chown root:root /etc/claude-pod/settings.json && \
+    chmod 444 /etc/claude-pod/settings.json && \
     mkdir -p /home/claude/.claude && \
-    ln -sf /etc/claude-secure/settings.json /home/claude/.claude/settings.json && \
+    ln -sf /etc/claude-pod/settings.json /home/claude/.claude/settings.json && \
     chown -R claude:claude /home/claude/.claude
 
 # Pre-set onboarding flag so Claude Code doesn't try to reach api.anthropic.com

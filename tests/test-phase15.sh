@@ -12,9 +12,9 @@
 # GOTCHA (from Phase 14): Use `printf '%s' "$body"` NOT `echo "$body"` for HMAC
 # generation -- echo adds a trailing newline that breaks digest matching.
 #
-# This harness stubs claude-secure on PATH with a recorder that writes argv
+# This harness stubs claude-pod on PATH with a recorder that writes argv
 # to a log file. No real Docker is ever invoked by the fast path. Some tests
-# deliberately invoke the REAL bin/claude-secure under --dry-run mode (e.g.
+# deliberately invoke the REAL bin/claude-pod under --dry-run mode (e.g.
 # test_workflow_template_dry_run, test_render_handles_*) -- those tests
 # prepend $PROJECT_DIR/bin to PATH ahead of the stub dir.
 #
@@ -55,19 +55,19 @@ run_test() {
 }
 
 # =========================================================================
-# Stub builder: fake `claude-secure` binary on PATH
+# Stub builder: fake `claude-pod` binary on PATH
 # Records invocation argv to $STUB_LOG and exits 0 immediately (Phase 15
 # tests do not exercise semaphore concurrency -- that lives in Phase 14).
 # =========================================================================
 install_stub() {
   mkdir -p "$TEST_TMPDIR/bin"
-  cat > "$TEST_TMPDIR/bin/claude-secure" <<'STUB'
+  cat > "$TEST_TMPDIR/bin/claude-pod" <<'STUB'
 #!/bin/bash
 # Stub: record invocation argv and exit 0.
 printf '%s\n' "$*" >> "${STUB_LOG:-/tmp/stub.log}"
 exit 0
 STUB
-  chmod +x "$TEST_TMPDIR/bin/claude-secure"
+  chmod +x "$TEST_TMPDIR/bin/claude-pod"
   export PATH="$TEST_TMPDIR/bin:$PATH"
   export STUB_LOG
 }
@@ -83,10 +83,10 @@ STUB
 # =========================================================================
 setup_test_profile() {
   local home_dir="$TEST_TMPDIR/home"
-  local profile_dir="$home_dir/.claude-secure/profiles/test-profile"
-  local webhooks_dir="$home_dir/.claude-secure/webhooks"
+  local profile_dir="$home_dir/.claude-pod/profiles/test-profile"
+  local webhooks_dir="$home_dir/.claude-pod/webhooks"
   mkdir -p "$profile_dir" "$profile_dir/prompts" "$webhooks_dir" \
-    "$home_dir/.claude-secure/events" "$home_dir/.claude-secure/logs/spawns"
+    "$home_dir/.claude-pod/events" "$home_dir/.claude-pod/logs/spawns"
 
   # Profile: workspace + secrets. .repo is kept for replay auto-resolution
   # (resolve_profile_by_repo reads it; existing profiles may still have it).
@@ -127,18 +127,18 @@ EVENT_TYPE={{EVENT_TYPE}}
   "bind": "127.0.0.1",
   "port": $LISTENER_PORT,
   "max_concurrent_spawns": 3,
-  "profiles_dir": "$home_dir/.claude-secure/profiles",
-  "docs_dir": "$home_dir/.claude-secure/docs",
+  "profiles_dir": "$home_dir/.claude-pod/profiles",
+  "docs_dir": "$home_dir/.claude-pod/docs",
   "webhooks_dir": "$webhooks_dir",
-  "events_dir": "$home_dir/.claude-secure/events",
-  "logs_dir": "$home_dir/.claude-secure/logs",
-  "claude_secure_bin": "$TEST_TMPDIR/bin/claude-secure"
+  "events_dir": "$home_dir/.claude-pod/events",
+  "logs_dir": "$home_dir/.claude-pod/logs",
+  "claude_pod_bin": "$TEST_TMPDIR/bin/claude-pod"
 }
 JSON
 
-  # Export CONFIG_DIR so tests invoking the REAL bin/claude-secure resolve
-  # profiles under the test home, not ~/.claude-secure on the real user.
-  export CONFIG_DIR="$home_dir/.claude-secure"
+  # Export CONFIG_DIR so tests invoking the REAL bin/claude-pod resolve
+  # profiles under the test home, not ~/.claude-pod on the real user.
+  export CONFIG_DIR="$home_dir/.claude-pod"
   export HOME="$home_dir"
 }
 
@@ -148,7 +148,7 @@ install_prompts_override() {
   local name="$1"
   local content="$2"
   local home_dir="$TEST_TMPDIR/home"
-  local target="$home_dir/.claude-secure/profiles/test-profile/prompts/${name}.md"
+  local target="$home_dir/.claude-pod/profiles/test-profile/prompts/${name}.md"
   mkdir -p "$(dirname "$target")"
   printf '%s' "$content" > "$target"
 }
@@ -160,7 +160,7 @@ seed_event_file() {
   local substring="$1"
   local fixture="$2"
   local home_dir="$TEST_TMPDIR/home"
-  local events_dir="$home_dir/.claude-secure/events"
+  local events_dir="$home_dir/.claude-pod/events"
   mkdir -p "$events_dir"
   local iso
   iso=$(date -u +"%Y%m%dT%H%M%SZ")
@@ -234,18 +234,18 @@ test_issues_opened_routes() {
   # Green after Plan 15-02 / webhook-claude-filter.
   local body status stub_before
   body=$(cat "$PROJECT_DIR/tests/fixtures/github-issues-opened.json")
-  stub_before=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_before=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" 2>/dev/null | wc -l)
   status=$(post_webhook issues "$body" "issues-opened")
   [ "$status" = "202" ] || { echo "expected 202, got $status" >&2; return 1; }
   sleep 0.3
   # Event file must exist with top-level event_type=issues-opened
   local ev_file
-  ev_file=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | head -n1)
+  ev_file=$(ls "$TEST_TMPDIR/home/.claude-pod/events"/*.json 2>/dev/null | head -n1)
   [ -n "$ev_file" ] || return 1
   jq -e '.event_type == "issues-opened"' "$ev_file" >/dev/null || return 1
   # Stub must have been called (spawn_done logged after stub exits 0)
   local stub_after
-  stub_after=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_after=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" 2>/dev/null | wc -l)
   [ "$stub_after" -gt "$stub_before" ] || return 1
   return 0
 }
@@ -254,17 +254,17 @@ test_issues_labeled_routes() {
   # Green after Plan 15-02 / webhook-claude-filter.
   local body status stub_before
   body=$(cat "$PROJECT_DIR/tests/fixtures/github-issues-labeled.json")
-  stub_before=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_before=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" 2>/dev/null | wc -l)
   status=$(post_webhook issues "$body" "issues-labeled")
   [ "$status" = "202" ] || return 1
   sleep 0.3
   # Find the most recent event file and check its event_type
   local ev_file
-  ev_file=$(ls -t "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | head -n1)
+  ev_file=$(ls -t "$TEST_TMPDIR/home/.claude-pod/events"/*.json 2>/dev/null | head -n1)
   [ -n "$ev_file" ] || return 1
   jq -e '.event_type == "issues-labeled"' "$ev_file" >/dev/null || return 1
   local stub_after
-  stub_after=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_after=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" 2>/dev/null | wc -l)
   [ "$stub_after" -gt "$stub_before" ] || return 1
   return 0
 }
@@ -276,15 +276,15 @@ test_issues_labeled_routes() {
 test_push_main_routes() {
   local body status stub_before
   body=$(cat "$PROJECT_DIR/tests/fixtures/github-push.json")
-  stub_before=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_before=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" 2>/dev/null | wc -l)
   status=$(post_webhook push "$body" "push-main")
   [ "$status" = "202" ] || return 1
   sleep 0.3
   local ev_file
-  ev_file=$(ls -t "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | head -n1)
+  ev_file=$(ls -t "$TEST_TMPDIR/home/.claude-pod/events"/*.json 2>/dev/null | head -n1)
   [ -n "$ev_file" ] || return 1
   local stub_after
-  stub_after=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_after=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" 2>/dev/null | wc -l)
   [ "$stub_after" -gt "$stub_before" ] || return 1
   return 0
 }
@@ -310,16 +310,16 @@ test_push_branch_delete_no_crash() {
 test_workflow_run_failure_routes() {
   local body status stub_before
   body=$(cat "$PROJECT_DIR/tests/fixtures/github-workflow-run-failure.json")
-  stub_before=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_before=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" 2>/dev/null | wc -l)
   status=$(post_webhook workflow_run "$body" "wf-fail")
   [ "$status" = "202" ] || return 1
   sleep 0.3
   local ev_file
-  ev_file=$(ls -t "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | head -n1)
+  ev_file=$(ls -t "$TEST_TMPDIR/home/.claude-pod/events"/*.json 2>/dev/null | head -n1)
   [ -n "$ev_file" ] || return 1
   jq -e '.event_type == "workflow_run-completed"' "$ev_file" >/dev/null || return 1
   local stub_after
-  stub_after=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | wc -l)
+  stub_after=$(grep '"spawn_done"' "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" 2>/dev/null | wc -l)
   [ "$stub_after" -gt "$stub_before" ] || return 1
   return 0
 }
@@ -333,8 +333,8 @@ test_replay_finds_single_match() {
   local ev_path stub_before rc
   ev_path=$(seed_event_file "deadbeef" "$PROJECT_DIR/tests/fixtures/github-issues-opened.json")
   stub_before=$(wc -l "$STUB_LOG" 2>/dev/null | awk '{print $1}' || echo 0)
-  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-secure" \
-    "$PROJECT_DIR/bin/claude-secure" replay deadbeef >"$TEST_TMPDIR/replay1.out" 2>&1
+  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-pod" \
+    "$PROJECT_DIR/bin/claude-pod" replay deadbeef >"$TEST_TMPDIR/replay1.out" 2>&1
   rc=$?
   [ $rc -eq 0 ] || { echo "replay exited $rc: $(cat "$TEST_TMPDIR/replay1.out")" >&2; return 1; }
   local stub_after
@@ -345,7 +345,7 @@ test_replay_finds_single_match() {
 
 test_replay_ambiguous_errors() {
   local home_dir="$TEST_TMPDIR/home"
-  local events_dir="$home_dir/.claude-secure/events"
+  local events_dir="$home_dir/.claude-pod/events"
   mkdir -p "$events_dir"
   # Seed two event files both matching substring abcd1234
   local iso
@@ -355,8 +355,8 @@ test_replay_ambiguous_errors() {
   cp "$PROJECT_DIR/tests/fixtures/github-issues-opened.json" \
     "$events_dir/${iso}-abcd12349999.json"
   local rc
-  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-secure" \
-    "$PROJECT_DIR/bin/claude-secure" replay abcd1234 >"$TEST_TMPDIR/replay2.out" 2>&1
+  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-pod" \
+    "$PROJECT_DIR/bin/claude-pod" replay abcd1234 >"$TEST_TMPDIR/replay2.out" 2>&1
   rc=$?
   [ $rc -ne 0 ] || return 1
   grep -q 'abcd1234.json' "$TEST_TMPDIR/replay2.out" || return 1
@@ -366,8 +366,8 @@ test_replay_ambiguous_errors() {
 
 test_replay_no_match_errors() {
   local rc
-  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-secure" \
-    "$PROJECT_DIR/bin/claude-secure" replay zzzzzzzz >"$TEST_TMPDIR/replay3.out" 2>&1
+  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-pod" \
+    "$PROJECT_DIR/bin/claude-pod" replay zzzzzzzz >"$TEST_TMPDIR/replay3.out" 2>&1
   rc=$?
   [ $rc -ne 0 ] || return 1
   grep -q 'no event file matching' "$TEST_TMPDIR/replay3.out" || return 1
@@ -378,8 +378,8 @@ test_replay_auto_profile() {
   local ev_path stub_before rc
   ev_path=$(seed_event_file "autoprof" "$PROJECT_DIR/tests/fixtures/github-issues-opened.json")
   stub_before=$(wc -l "$STUB_LOG" 2>/dev/null | awk '{print $1}' || echo 0)
-  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-secure" \
-    "$PROJECT_DIR/bin/claude-secure" replay autoprof >"$TEST_TMPDIR/replay4.out" 2>&1
+  CLAUDE_SECURE_EXEC="$TEST_TMPDIR/bin/claude-pod" \
+    "$PROJECT_DIR/bin/claude-pod" replay autoprof >"$TEST_TMPDIR/replay4.out" 2>&1
   rc=$?
   [ $rc -eq 0 ] || return 1
   local stub_after
@@ -404,10 +404,10 @@ test_listener_starts_without_docs_dir() {
   "bind": "127.0.0.1",
   "port": $no_docs_port,
   "max_concurrent_spawns": 1,
-  "profiles_dir": "$home_dir/.claude-secure/profiles",
-  "events_dir": "$home_dir/.claude-secure/events",
-  "logs_dir": "$home_dir/.claude-secure/logs",
-  "claude_secure_bin": "/usr/local/bin/claude-secure"
+  "profiles_dir": "$home_dir/.claude-pod/profiles",
+  "events_dir": "$home_dir/.claude-pod/events",
+  "logs_dir": "$home_dir/.claude-pod/logs",
+  "claude_pod_bin": "/usr/local/bin/claude-pod"
 }
 JSON
   python3 "$PROJECT_DIR/webhook/listener.py" --config "$no_docs_config" \
@@ -457,7 +457,7 @@ PYEOF
 
 test_extract_field_truncates() {
   # Green after Plan 15-03. D-17: 8192-byte truncation with suffix.
-  # Invoke via shim: source bin/claude-secure without running main, call
+  # Invoke via shim: source bin/claude-pod without running main, call
   # extract_payload_field against a synthetic JSON.
   local big_val fake_json out_file rc byte_len
   big_val=$(printf 'a%.0s' $(seq 1 9000))
@@ -467,7 +467,7 @@ test_extract_field_truncates() {
 
   # Source mode: set a sentinel so the CLI does not execute main().
   ( export CLAUDE_SECURE_SOURCE_ONLY=1
-    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null || true
+    source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null || true
     if ! type extract_payload_field >/dev/null 2>&1; then
       echo "extract_payload_field not defined" >&2
       exit 2
@@ -494,7 +494,7 @@ test_extract_field_utf8_safe() {
   jq -n --arg v "$big_val" '{issue: {body: $v}}' > "$fake_json"
   out_file="$TEST_TMPDIR/utf8-out.txt"
   ( export CLAUDE_SECURE_SOURCE_ONLY=1
-    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null || true
+    source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null || true
     type extract_payload_field >/dev/null 2>&1 || exit 2
     extract_payload_field "$fake_json" '.issue.body' "" > "$out_file"
   )
@@ -514,7 +514,7 @@ test_event_file_has_top_level_event_type() {
   [ "$status" = "202" ] || return 1
   sleep 0.3
   local ev_file
-  ev_file=$(ls -t "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | head -n1)
+  ev_file=$(ls -t "$TEST_TMPDIR/home/.claude-pod/events"/*.json 2>/dev/null | head -n1)
   [ -n "$ev_file" ] || return 1
   jq -e '.event_type == "issues-opened"' "$ev_file" >/dev/null || return 1
   jq -e '._meta.event_type == "issues-opened"' "$ev_file" >/dev/null || return 1

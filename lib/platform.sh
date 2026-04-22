@@ -1,5 +1,5 @@
 #!/bin/bash
-# lib/platform.sh — platform detection and PATH bootstrapping for claude-secure
+# lib/platform.sh — platform detection and PATH bootstrapping for claude-pod
 #
 # MUST remain bash 3.2-safe: no associative arrays, no array-from-stdin
 # builtins, no lowercase-conversion parameter expansion, no other bash-4+
@@ -8,9 +8,9 @@
 #
 # Public API (consumed by Phase 18+ scripts):
 #   detect_platform                     -> echo "linux" | "wsl2" | "macos"; rc 0/1
-#   claude_secure_brew_prefix           -> echo brew prefix or empty; rc 0/1
-#   claude_secure_uuid_lower            -> echo a lowercase UUID
-#   claude_secure_bootstrap_path        -> idempotent, sets PATH on macOS
+#   claude_pod_brew_prefix           -> echo brew prefix or empty; rc 0/1
+#   claude_pod_uuid_lower            -> echo a lowercase UUID
+#   claude_pod_bootstrap_path        -> idempotent, sets PATH on macOS
 #
 # Environment overrides (for testing / CI):
 #   CLAUDE_SECURE_PLATFORM_OVERRIDE     = linux | wsl2 | macos (forces detect)
@@ -61,7 +61,7 @@ detect_platform() {
 
 # Print the Homebrew prefix, or empty string if brew is unavailable.
 # Honors CLAUDE_SECURE_BREW_PREFIX_OVERRIDE for CI mocking.
-claude_secure_brew_prefix() {
+claude_pod_brew_prefix() {
   if [ -n "${CLAUDE_SECURE_BREW_PREFIX_OVERRIDE:-}" ]; then
     echo "$CLAUDE_SECURE_BREW_PREFIX_OVERRIDE"
     return 0
@@ -75,7 +75,7 @@ claude_secure_brew_prefix() {
 }
 
 # Normalize a UUID to lowercase. Safe on both BSD and GNU uuidgen.
-claude_secure_uuid_lower() {
+claude_pod_uuid_lower() {
   uuidgen | tr '[:upper:]' '[:lower:]'
 }
 
@@ -88,7 +88,7 @@ claude_secure_uuid_lower() {
 # at parse time. The re-exec must therefore live in the caller's prologue
 # (added in Plan 03). This function only verifies the brew bash binary
 # exists so the caller's prologue can re-exec into it.
-claude_secure_bootstrap_path() {
+claude_pod_bootstrap_path() {
   if [ -n "${__CLAUDE_SECURE_BOOTSTRAPPED:-}" ]; then
     return 0
   fi
@@ -102,7 +102,7 @@ claude_secure_bootstrap_path() {
   fi
 
   local brew_prefix
-  brew_prefix="$(claude_secure_brew_prefix)"
+  brew_prefix="$(claude_pod_brew_prefix)"
   if [ -z "$brew_prefix" ]; then
     echo "ERROR: Homebrew is required on macOS." >&2
     echo "Install Homebrew, then re-run this command:" >&2

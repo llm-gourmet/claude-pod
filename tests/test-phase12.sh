@@ -2,8 +2,8 @@
 # test-phase12.sh -- Integration tests for Phase 12: Profile System
 # Tests PROF-01 through PROF-03, superuser mode, list, clean break
 #
-# Strategy: Use temp directories for all config to avoid touching real ~/.claude-secure.
-# Test bin/claude-secure functions by extracting/reimplementing the function signatures
+# Strategy: Use temp directories for all config to avoid touching real ~/.claude-pod.
+# Test bin/claude-pod functions by extracting/reimplementing the function signatures
 # and testing them in isolation.
 #
 # Usage: bash tests/test-phase12.sh
@@ -44,7 +44,7 @@ echo "========================================"
 echo ""
 
 # =========================================================================
-# Helper: Source profile functions from bin/claude-secure
+# Helper: Source profile functions from bin/claude-pod
 # We source the script with __CLAUDE_SECURE_SOURCE_ONLY=1 to skip execution
 # and only load function definitions.
 # =========================================================================
@@ -52,22 +52,22 @@ echo ""
 # Set up a minimal config environment so sourcing works
 _setup_source_env() {
   local tmpdir="$1"
-  mkdir -p "$tmpdir/.claude-secure/profiles"
-  cat > "$tmpdir/.claude-secure/config.sh" <<EOF
+  mkdir -p "$tmpdir/.claude-pod/profiles"
+  cat > "$tmpdir/.claude-pod/config.sh" <<EOF
 APP_DIR="$PROJECT_DIR"
 PLATFORM="linux"
 EOF
   export HOME="$tmpdir"
-  export CONFIG_DIR="$tmpdir/.claude-secure"
+  export CONFIG_DIR="$tmpdir/.claude-pod"
 }
 
-# Source bin/claude-secure functions
+# Source bin/claude-pod functions
 _source_functions() {
   local tmpdir="$1"
   _setup_source_env "$tmpdir"
   export APP_DIR="$PROJECT_DIR"
   # shellcheck source=/dev/null
-  __CLAUDE_SECURE_SOURCE_ONLY=1 source "$PROJECT_DIR/bin/claude-secure"
+  __CLAUDE_SECURE_SOURCE_ONLY=1 source "$PROJECT_DIR/bin/claude-pod"
 }
 
 # Helper: Create a valid test profile directory
@@ -96,9 +96,9 @@ test_prof_01a() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
 
-  create_test_profile "myproj" "$tmpdir/.claude-secure" "$tmpdir/ws-myproj"
+  create_test_profile "myproj" "$tmpdir/.claude-pod" "$tmpdir/ws-myproj"
 
-  local pdir="$tmpdir/.claude-secure/profiles/myproj"
+  local pdir="$tmpdir/.claude-pod/profiles/myproj"
   [ -f "$pdir/profile.json" ] || return 1
   [ -f "$pdir/.env" ] || return 1
   [ ! -f "$pdir/whitelist.json" ] || { echo "whitelist.json should not exist in new schema" >&2; return 1; }
@@ -113,9 +113,9 @@ test_prof_01b() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
 
-  create_test_profile "myproj" "$tmpdir/.claude-secure" "$tmpdir/ws-myproj"
+  create_test_profile "myproj" "$tmpdir/.claude-pod" "$tmpdir/ws-myproj"
 
-  local pdir="$tmpdir/.claude-secure/profiles/myproj"
+  local pdir="$tmpdir/.claude-pod/profiles/myproj"
   # Valid JSON
   jq empty "$pdir/profile.json" || return 1
   # Has workspace field
@@ -188,9 +188,9 @@ test_prof_02b() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
 
-  create_test_profile "myproj" "$tmpdir/.claude-secure" "$tmpdir/ws-myproj"
+  create_test_profile "myproj" "$tmpdir/.claude-pod" "$tmpdir/ws-myproj"
 
-  local pdir="$tmpdir/.claude-secure/profiles/myproj"
+  local pdir="$tmpdir/.claude-pod/profiles/myproj"
   jq -e '.secrets | type == "array"' "$pdir/profile.json" >/dev/null || return 1
   return 0
 }
@@ -220,8 +220,8 @@ test_prof_03b() {
   _source_functions "$tmpdir"
 
   # Create profile dir but no profile.json
-  mkdir -p "$tmpdir/.claude-secure/profiles/badprof"
-  echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-secure/profiles/badprof/.env"
+  mkdir -p "$tmpdir/.claude-pod/profiles/badprof"
+  echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-pod/profiles/badprof/.env"
 
   validate_profile "badprof" && return 1
   return 0
@@ -236,9 +236,9 @@ test_prof_03c() {
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _source_functions "$tmpdir"
 
-  mkdir -p "$tmpdir/.claude-secure/profiles/badprof"
-  echo "not json" > "$tmpdir/.claude-secure/profiles/badprof/profile.json"
-  echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-secure/profiles/badprof/.env"
+  mkdir -p "$tmpdir/.claude-pod/profiles/badprof"
+  echo "not json" > "$tmpdir/.claude-pod/profiles/badprof/profile.json"
+  echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-pod/profiles/badprof/.env"
 
   validate_profile "badprof" && return 1
   return 0
@@ -253,9 +253,9 @@ test_prof_03d() {
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _source_functions "$tmpdir"
 
-  mkdir -p "$tmpdir/.claude-secure/profiles/badprof"
-  echo '{}' > "$tmpdir/.claude-secure/profiles/badprof/profile.json"
-  echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-secure/profiles/badprof/.env"
+  mkdir -p "$tmpdir/.claude-pod/profiles/badprof"
+  echo '{}' > "$tmpdir/.claude-pod/profiles/badprof/profile.json"
+  echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-pod/profiles/badprof/.env"
 
   validate_profile "badprof" && return 1
   return 0
@@ -270,10 +270,10 @@ test_prof_03e() {
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _source_functions "$tmpdir"
 
-  mkdir -p "$tmpdir/.claude-secure/profiles/badprof"
+  mkdir -p "$tmpdir/.claude-pod/profiles/badprof"
   jq -n --arg ws "/nonexistent/path/$$" '{"workspace":$ws}' \
-    > "$tmpdir/.claude-secure/profiles/badprof/profile.json"
-  echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-secure/profiles/badprof/.env"
+    > "$tmpdir/.claude-pod/profiles/badprof/profile.json"
+  echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-pod/profiles/badprof/.env"
 
   validate_profile "badprof" && return 1
   return 0
@@ -290,9 +290,9 @@ test_prof_03f() {
 
   local ws="$tmpdir/ws-badprof"
   mkdir -p "$ws"
-  mkdir -p "$tmpdir/.claude-secure/profiles/badprof"
+  mkdir -p "$tmpdir/.claude-pod/profiles/badprof"
   jq -n --arg ws "$ws" '{"workspace":$ws}' \
-    > "$tmpdir/.claude-secure/profiles/badprof/profile.json"
+    > "$tmpdir/.claude-pod/profiles/badprof/profile.json"
   # No .env file
 
   validate_profile "badprof" && return 1
@@ -310,10 +310,10 @@ test_prof_03g() {
 
   local ws="$tmpdir/ws-badprof"
   mkdir -p "$ws"
-  mkdir -p "$tmpdir/.claude-secure/profiles/badprof"
+  mkdir -p "$tmpdir/.claude-pod/profiles/badprof"
   jq -n --arg ws "$ws" '{"workspace":$ws,"secrets":[{"env_var":"FOO"}]}' \
-    > "$tmpdir/.claude-secure/profiles/badprof/profile.json"
-  echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-secure/profiles/badprof/.env"
+    > "$tmpdir/.claude-pod/profiles/badprof/profile.json"
+  echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-pod/profiles/badprof/.env"
 
   validate_profile "badprof" && return 1
   return 0
@@ -329,16 +329,16 @@ test_super_01() {
   _setup_source_env "$tmpdir"
 
   # Create two profiles with different secrets
-  create_test_profile "proj-a" "$tmpdir/.claude-secure" "$tmpdir/ws-a"
-  create_test_profile "proj-b" "$tmpdir/.claude-secure" "$tmpdir/ws-b"
+  create_test_profile "proj-a" "$tmpdir/.claude-pod" "$tmpdir/ws-a"
+  create_test_profile "proj-b" "$tmpdir/.claude-pod" "$tmpdir/ws-b"
 
   # Give them distinct secrets entries in profile.json
   jq -n --arg ws "$tmpdir/ws-a" \
     '{"workspace":$ws,"secrets":[{"env_var":"GITHUB_TOKEN","redacted":"REDACTED_GH","domains":["github.com"]}]}' \
-    > "$tmpdir/.claude-secure/profiles/proj-a/profile.json"
+    > "$tmpdir/.claude-pod/profiles/proj-a/profile.json"
   jq -n --arg ws "$tmpdir/ws-b" \
     '{"workspace":$ws,"secrets":[{"env_var":"STRIPE_KEY","redacted":"REDACTED_STRIPE","domains":["stripe.com"]}]}' \
-    > "$tmpdir/.claude-secure/profiles/proj-b/profile.json"
+    > "$tmpdir/.claude-pod/profiles/proj-b/profile.json"
 
   _source_functions "$tmpdir"
 
@@ -361,12 +361,12 @@ test_super_02() {
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
 
-  create_test_profile "proj-a" "$tmpdir/.claude-secure" "$tmpdir/ws-a"
-  create_test_profile "proj-b" "$tmpdir/.claude-secure" "$tmpdir/ws-b"
+  create_test_profile "proj-a" "$tmpdir/.claude-pod" "$tmpdir/ws-a"
+  create_test_profile "proj-b" "$tmpdir/.claude-pod" "$tmpdir/ws-b"
 
   # Give them distinct env content
-  echo "GITHUB_TOKEN=gh_test_a" > "$tmpdir/.claude-secure/profiles/proj-a/.env"
-  echo "STRIPE_KEY=sk_test_b" > "$tmpdir/.claude-secure/profiles/proj-b/.env"
+  echo "GITHUB_TOKEN=gh_test_a" > "$tmpdir/.claude-pod/profiles/proj-a/.env"
+  echo "STRIPE_KEY=sk_test_b" > "$tmpdir/.claude-pod/profiles/proj-b/.env"
 
   _source_functions "$tmpdir"
 
@@ -390,16 +390,16 @@ test_super_03() {
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
 
-  create_test_profile "proj-a" "$tmpdir/.claude-secure" "$tmpdir/ws-a"
-  create_test_profile "proj-b" "$tmpdir/.claude-secure" "$tmpdir/ws-b"
+  create_test_profile "proj-a" "$tmpdir/.claude-pod" "$tmpdir/ws-a"
+  create_test_profile "proj-b" "$tmpdir/.claude-pod" "$tmpdir/ws-b"
 
   # Both profiles have GITHUB_TOKEN with different redacted values
   jq -n --arg ws "$tmpdir/ws-a" \
     '{"workspace":$ws,"secrets":[{"env_var":"GITHUB_TOKEN","redacted":"REDACTED_A","domains":["github.com"]}]}' \
-    > "$tmpdir/.claude-secure/profiles/proj-a/profile.json"
+    > "$tmpdir/.claude-pod/profiles/proj-a/profile.json"
   jq -n --arg ws "$tmpdir/ws-b" \
     '{"workspace":$ws,"secrets":[{"env_var":"GITHUB_TOKEN","redacted":"REDACTED_B","domains":["api.github.com"]}]}' \
-    > "$tmpdir/.claude-secure/profiles/proj-b/profile.json"
+    > "$tmpdir/.claude-pod/profiles/proj-b/profile.json"
 
   _source_functions "$tmpdir"
 
@@ -422,7 +422,7 @@ test_list_01() {
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
 
-  create_test_profile "myproj" "$tmpdir/.claude-secure" "$tmpdir/ws-myproj"
+  create_test_profile "myproj" "$tmpdir/.claude-pod" "$tmpdir/ws-myproj"
   _source_functions "$tmpdir"
 
   local output
@@ -445,7 +445,7 @@ test_noinstance_01() {
   _setup_source_env "$tmpdir"
 
   local output
-  output=$(HOME="$tmpdir" bash "$PROJECT_DIR/bin/claude-secure" --instance test 2>&1) && return 1
+  output=$(HOME="$tmpdir" bash "$PROJECT_DIR/bin/claude-pod" --instance test 2>&1) && return 1
   echo "$output" | grep -qi "no longer supported\|ERROR\|unknown" || return 1
   return 0
 }
@@ -459,7 +459,7 @@ test_stat_01() {
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
 
   # Minimal config so load_superuser_config does not prompt for workspace
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg"
   cat > "$cfg/config.sh" <<EOF
 APP_DIR="$PROJECT_DIR"
@@ -486,7 +486,7 @@ DOCKER
 
   local output
   output=$(HOME="$tmpdir" CONFIG_DIR="$cfg" PATH="$fake_bin:$PATH" \
-    bash "$PROJECT_DIR/bin/claude-secure" status 2>/dev/null)
+    bash "$PROJECT_DIR/bin/claude-pod" status 2>/dev/null)
 
   # claude-* and cs-* rows must appear
   echo "$output" | grep -q "claude-myprofile-claude-1" || return 1
@@ -504,7 +504,7 @@ run_test "STAT-01: status (no name) filters to claude-*/cs-* containers" test_st
 test_stop_01() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles"
 
   create_test_profile "alpha" "$cfg" "$tmpdir/ws-alpha"
@@ -526,7 +526,7 @@ DOCKER
   HOME="$tmpdir" \
   CONFIG_DIR="$cfg" \
   PATH="$fake_bin:$PATH" \
-    bash "$PROJECT_DIR/bin/claude-secure" stop 2>/dev/null
+    bash "$PROJECT_DIR/bin/claude-pod" stop 2>/dev/null
 
   grep -q "^claude-alpha$" "$down_log" || return 1
   grep -q "^claude-beta$"  "$down_log" || return 1
@@ -540,7 +540,7 @@ run_test "STOP-01: stop (no name) calls docker compose down for each profile" te
 test_stop_02() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles"
 
   create_test_profile "alpha" "$cfg" "$tmpdir/ws-alpha"
@@ -561,7 +561,7 @@ DOCKER
   HOME="$tmpdir" \
   CONFIG_DIR="$cfg" \
   PATH="$fake_bin:$PATH" \
-    bash "$PROJECT_DIR/bin/claude-secure" stop alpha 2>/dev/null
+    bash "$PROJECT_DIR/bin/claude-pod" stop alpha 2>/dev/null
 
   # Only alpha must be stopped
   grep -q "^claude-alpha$" "$down_log" || return 1
@@ -575,7 +575,7 @@ run_test "STOP-02: stop <name> only stops profile X, not others" test_stop_02
 # =========================================================================
 test_sess_01() {
   # Static check: docker compose down must follow docker compose exec in source.
-  local src="$PROJECT_DIR/bin/claude-secure"
+  local src="$PROJECT_DIR/bin/claude-pod"
   local exec_line down_line
   exec_line=$(grep -n "docker compose exec -it claude claude" "$src" | head -1 | cut -d: -f1)
   down_line=$(grep -n "docker compose down" "$src" \

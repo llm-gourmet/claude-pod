@@ -2,7 +2,7 @@
 # test-gh-webhook-listener-filter-cli.sh -- Unit tests for gh-webhook-listener filter CLI
 # Tests WLFILTER-01 through WLFILTER-09
 #
-# Strategy: source bin/claude-secure with __CLAUDE_SECURE_SOURCE_ONLY=1 to
+# Strategy: source bin/claude-pod with __CLAUDE_SECURE_SOURCE_ONLY=1 to
 # load function definitions, use temp dirs as CONFIG_DIR and HOME.
 # No Docker, no network.
 #
@@ -36,7 +36,7 @@ setup_cli() {
   export HOME="$fake_home"
   export __CLAUDE_SECURE_SOURCE_ONLY=1
   # shellcheck source=/dev/null
-  source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null || true
+  source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------

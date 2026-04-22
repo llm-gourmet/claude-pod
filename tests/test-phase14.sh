@@ -6,7 +6,7 @@
 # GOTCHA 2 (from 14-RESEARCH.md): Use `printf '%s' "$body"` NOT `echo "$body"` for HMAC
 # generation -- echo adds a trailing newline that breaks digest matching.
 #
-# This harness stubs /usr/local/bin/claude-secure with a fake binary that records
+# This harness stubs /usr/local/bin/claude-pod with a fake binary that records
 # its argv to a log file. No real Docker is ever invoked by the fast path.
 #
 # Wave 0 expectation: many tests will FAIL until Plan 02 (listener.py),
@@ -51,13 +51,13 @@ run_test() {
 }
 
 # =========================================================================
-# Stub builder: fake `claude-secure` binary on PATH
+# Stub builder: fake `claude-pod` binary on PATH
 # Records invocation argv to $STUB_LOG and sleeps 1.0s so concurrency /
 # semaphore / active_spawns tests can observe overlap.
 # =========================================================================
 install_stub() {
   mkdir -p "$TEST_TMPDIR/bin"
-  cat > "$TEST_TMPDIR/bin/claude-secure" <<'STUB'
+  cat > "$TEST_TMPDIR/bin/claude-pod" <<'STUB'
 #!/bin/bash
 # Stub: record invocation argv and exit 0 after brief simulated work.
 printf '%s\n' "$*" >> "${STUB_LOG:-/tmp/stub.log}"
@@ -67,7 +67,7 @@ printf '%s\n' "$*" >> "${STUB_LOG:-/tmp/stub.log}"
 sleep 1.0
 exit 0
 STUB
-  chmod +x "$TEST_TMPDIR/bin/claude-secure"
+  chmod +x "$TEST_TMPDIR/bin/claude-pod"
   export PATH="$TEST_TMPDIR/bin:$PATH"
   export STUB_LOG
 }
@@ -77,9 +77,9 @@ STUB
 # =========================================================================
 setup_test_profile() {
   local home_dir="$TEST_TMPDIR/home"
-  local profile_dir="$home_dir/.claude-secure/profiles/test-profile"
-  local webhooks_dir="$home_dir/.claude-secure/webhooks"
-  mkdir -p "$profile_dir" "$webhooks_dir" "$home_dir/.claude-secure/events" "$home_dir/.claude-secure/logs/spawns"
+  local profile_dir="$home_dir/.claude-pod/profiles/test-profile"
+  local webhooks_dir="$home_dir/.claude-pod/webhooks"
+  mkdir -p "$profile_dir" "$webhooks_dir" "$home_dir/.claude-pod/events" "$home_dir/.claude-pod/logs/spawns"
   # Profile: workspace + empty secrets (webhook credentials live in connections.json)
   cat > "$profile_dir/profile.json" <<JSON
 {
@@ -105,11 +105,11 @@ JSON
   "bind": "127.0.0.1",
   "port": $LISTENER_PORT,
   "max_concurrent_spawns": 3,
-  "profiles_dir": "$home_dir/.claude-secure/profiles",
+  "profiles_dir": "$home_dir/.claude-pod/profiles",
   "webhooks_dir": "$webhooks_dir",
-  "events_dir": "$home_dir/.claude-secure/events",
-  "logs_dir": "$home_dir/.claude-secure/logs",
-  "claude_secure_bin": "$TEST_TMPDIR/bin/claude-secure"
+  "events_dir": "$home_dir/.claude-pod/events",
+  "logs_dir": "$home_dir/.claude-pod/logs",
+  "claude_pod_bin": "$TEST_TMPDIR/bin/claude-pod"
 }
 JSON
 }
@@ -149,11 +149,11 @@ gen_sig() {
 
 test_unit_file_lint() {
   # Will return 1 in Wave 0 (file absent); passes after Plan 03 creates the unit file.
-  test -f "$PROJECT_DIR/webhook/claude-secure-webhook.service" || return 1
+  test -f "$PROJECT_DIR/webhook/claude-pod-webhook.service" || return 1
   # systemd-analyze verify requires a running systemd instance (unavailable in
   # WSL2 and sandbox environments). Always use structural grep checks instead.
-  grep -q '^\[Unit\]' "$PROJECT_DIR/webhook/claude-secure-webhook.service" && \
-    grep -q '^\[Service\]' "$PROJECT_DIR/webhook/claude-secure-webhook.service"
+  grep -q '^\[Unit\]' "$PROJECT_DIR/webhook/claude-pod-webhook.service" && \
+    grep -q '^\[Service\]' "$PROJECT_DIR/webhook/claude-pod-webhook.service"
 }
 
 test_install_webhook() {
@@ -162,8 +162,8 @@ test_install_webhook() {
   grep -q -- '--with-webhook' "$PROJECT_DIR/install.sh" || return 1
   grep -q 'systemctl daemon-reload' "$PROJECT_DIR/install.sh" || return 1
   grep -q '__REPLACED_BY_INSTALLER__PROFILES__' "$PROJECT_DIR/install.sh" || return 1
-  grep -q '/opt/claude-secure/webhook/listener.py' "$PROJECT_DIR/install.sh" || return 1
-  grep -q '\.claude-secure/webhooks/webhook\.json' "$PROJECT_DIR/install.sh" || return 1
+  grep -q '/opt/claude-pod/webhook/listener.py' "$PROJECT_DIR/install.sh" || return 1
+  grep -q '\.claude-pod/webhooks/webhook\.json' "$PROJECT_DIR/install.sh" || return 1
   return 0
 }
 
@@ -175,7 +175,7 @@ test_systemd_start() {
   fi
   # Requires unit file installed and systemctl available.
   command -v systemctl >/dev/null 2>&1 || return 1
-  systemctl is-active claude-secure-webhook >/dev/null 2>&1
+  systemctl is-active claude-pod-webhook >/dev/null 2>&1
 }
 
 # =========================================================================
@@ -197,7 +197,7 @@ test_hmac_valid() {
   [ "$status" = "202" ] || { echo "expected 202, got $status" >&2; return 1; }
   # Event file must appear in test home events dir
   sleep 0.2
-  [ -n "$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null)" ] || return 1
+  [ -n "$(ls "$TEST_TMPDIR/home/.claude-pod/events"/*.json 2>/dev/null)" ] || return 1
   return 0
 }
 
@@ -209,7 +209,7 @@ test_hmac_invalid() {
   delivery_id="test-invalid-$(uuidgen)"
   # Snapshot event file list BEFORE request
   local before_count
-  before_count=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
+  before_count=$(ls "$TEST_TMPDIR/home/.claude-pod/events"/*.json 2>/dev/null | wc -l)
   status=$(curl -sS -o /dev/null -w '%{http_code}' \
     -X POST "http://127.0.0.1:$LISTENER_PORT/webhook" \
     -H "Content-Type: application/json" \
@@ -221,7 +221,7 @@ test_hmac_invalid() {
   # NO new event file must be created on HMAC failure
   sleep 0.2
   local after_count
-  after_count=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
+  after_count=$(ls "$TEST_TMPDIR/home/.claude-pod/events"/*.json 2>/dev/null | wc -l)
   [ "$before_count" = "$after_count" ] || return 1
   return 0
 }
@@ -274,8 +274,8 @@ test_unknown_repo_404() {
     --data-binary "$body")
   [ "$status" = "404" ] || { echo "expected 404, got $status" >&2; return 1; }
   # Listener log must not reference invalid_signature for this delivery
-  if [ -f "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" ]; then
-    if grep "$delivery_id" "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null | grep -q 'invalid_signature'; then
+  if [ -f "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" ]; then
+    if grep "$delivery_id" "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" 2>/dev/null | grep -q 'invalid_signature'; then
       return 1
     fi
   fi
@@ -313,11 +313,11 @@ test_concurrent_5() {
   sleep 2.5
   # Verify 5 event files were created (could be more from other tests, so check minimum)
   local ev_count
-  ev_count=$(ls "$TEST_TMPDIR/home/.claude-secure/events"/*.json 2>/dev/null | wc -l)
+  ev_count=$(ls "$TEST_TMPDIR/home/.claude-pod/events"/*.json 2>/dev/null | wc -l)
   [ "$ev_count" -ge 5 ] || return 1
   # Verify 5 spawn_done entries in webhook.jsonl
   local skip_count
-  skip_count=$(grep -c '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || echo 0)
+  skip_count=$(grep -c '"spawn_done"' "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" 2>/dev/null || echo 0)
   [ "$skip_count" -ge 5 ] || return 1
   return 0
 }
@@ -328,7 +328,7 @@ test_semaphore_queue() {
   sig=$(gen_sig "test-secret-abc123" "$body")
   # Snapshot spawn_done count before
   local before_count
-  before_count=$(grep -c '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || echo 0)
+  before_count=$(grep -c '"spawn_done"' "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" 2>/dev/null || echo 0)
   # Fire 6 parallel curls with max_concurrent_spawns=3
   local pids=()
   for i in 1 2 3 4 5 6; do
@@ -351,7 +351,7 @@ test_semaphore_queue() {
   # last batch finishes at ~2.0s. Sleep 2.5s to avoid flakiness.
   sleep 2.5
   local after_count
-  after_count=$(grep -c '"spawn_done"' "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || echo 0)
+  after_count=$(grep -c '"spawn_done"' "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" 2>/dev/null || echo 0)
   [ $((after_count - before_count)) -ge 6 ] || return 1
   return 0
 }
@@ -371,8 +371,8 @@ test_health_active_spawns() {
     --data-binary "$body" >/dev/null || return 1
   sleep 0.3
   # Confirm spawn_start was logged for this delivery (logged before subprocess.run)
-  grep -q "spawn_start" "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || return 1
-  grep -q "$delivery_id" "$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl" 2>/dev/null || return 1
+  grep -q "spawn_start" "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" 2>/dev/null || return 1
+  grep -q "$delivery_id" "$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl" 2>/dev/null || return 1
   # Health endpoint must be reachable and return active_spawns field
   response=$(curl -fsS "http://127.0.0.1:$LISTENER_PORT/health" 2>/dev/null) || return 1
   echo "$response" | grep -q '"active_spawns"' || return 1

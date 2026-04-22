@@ -12,7 +12,7 @@
 # Idempotent: re-running on already-migrated profiles is a no-op.
 set -euo pipefail
 
-CONFIG_DIR="${CONFIG_DIR:-$HOME/.claude-secure}"
+CONFIG_DIR="${CONFIG_DIR:-$HOME/.claude-pod}"
 PROFILES_DIR="$CONFIG_DIR/profiles"
 
 if [ ! -d "$PROFILES_DIR" ]; then

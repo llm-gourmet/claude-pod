@@ -11,7 +11,7 @@
 #   2. Concurrent execution      -- 3 parallel valid POSTs, all reports pushed
 #   3. Resource limit enforcement -- docker inspect verifies mem_limit: 1g
 #   4. Orphan cleanup            -- backdated sentinel container reaped by
-#                                   `claude-secure reap`; real containers untouched
+#                                   `claude-pod reap`; real containers untouched
 #
 # Wired in 17-03 (Wave 1b): all four scenarios run against a live listener
 # subprocess, a runtime-injected file:// bare report repo, and the Phase 16
@@ -51,7 +51,7 @@ cleanup() {
   # orphan (Pitfall 4: no backdating). Suppress all errors -- the trap must
   # not mask the original exit code.
   REAPER_ORPHAN_AGE_SECS=0 INSTANCE_PREFIX="cs-e2e-" \
-    "$PROJECT_DIR/bin/claude-secure" reap >/dev/null 2>&1 || true
+    "$PROJECT_DIR/bin/claude-pod" reap >/dev/null 2>&1 || true
   # Best-effort: also remove the scenario-4 inspect container if it survived.
   docker rm -f cs-e2e-limits-claude >/dev/null 2>&1 || true
   rm -rf "$TEST_TMPDIR"
@@ -144,7 +144,7 @@ setup_e2e_profile() {
   bare=$(setup_bare_repo "e2e-reports")
   [ -n "$bare" ] || { echo "FAIL setup: bare repo creation returned empty" >&2; return 1; }
 
-  export CONFIG_DIR="$TEST_TMPDIR/.claude-secure"
+  export CONFIG_DIR="$TEST_TMPDIR/.claude-pod"
   export CLAUDE_SECURE_INSTANCE=e2e
   export INSTANCE_PREFIX="cs-e2e-"
   mkdir -p "$CONFIG_DIR/profiles" "$CONFIG_DIR/logs" "$CONFIG_DIR/events" \
@@ -197,12 +197,12 @@ start_listener() {
   "webhooks_dir": "$CONFIG_DIR/webhooks",
   "events_dir": "$CONFIG_DIR/events",
   "logs_dir": "$CONFIG_DIR/logs",
-  "claude_secure_bin": "$PROJECT_DIR/bin/claude-secure"
+  "claude_pod_bin": "$PROJECT_DIR/bin/claude-pod"
 }
 EOF
 
   # Launch listener in background. Env is inherited by subprocess.Popen so
-  # CLAUDE_SECURE_FAKE_CLAUDE_STDOUT and CONFIG_DIR flow into `claude-secure spawn`.
+  # CLAUDE_SECURE_FAKE_CLAUDE_STDOUT and CONFIG_DIR flow into `claude-pod spawn`.
   (
     cd "$PROJECT_DIR"
     PATH="$PROJECT_DIR/bin:$PATH" \
@@ -275,7 +275,7 @@ scenario_hmac_rejection() {
 # POSTs 3 HMAC-valid payloads in parallel against the Phase 14 Semaphore(3)
 # bound and asserts:
 #   - 3 'routed' lines appear in webhook.jsonl (jq-parseable, no corruption)
-# Spawn calls claude-secure via subprocess. D-12 gate: proves D-11 hardening
+# Spawn calls claude-pod via subprocess. D-12 gate: proves D-11 hardening
 # did not break the routing pipeline for valid concurrent webhooks.
 # -------------------------------------------------------------------------
 scenario_concurrent_execution() {
@@ -329,7 +329,7 @@ scenario_concurrent_execution() {
 # Pitfall 4: Docker does NOT let us backdate Container Created timestamps,
 # so we set REAPER_ORPHAN_AGE_SECS=0 to count ALL ages as orphan. A real
 # busybox sentinel is spawned with the exact com.docker.compose.project
-# label format the reaper matches, then we invoke `claude-secure reap` and
+# label format the reaper matches, then we invoke `claude-pod reap` and
 # assert the sentinel is gone from `docker ps -a`.
 # -------------------------------------------------------------------------
 scenario_orphan_cleanup() {
@@ -366,7 +366,7 @@ EOF
 
   # Run reap with zero-age threshold (Pitfall 4) so any age qualifies.
   REAPER_ORPHAN_AGE_SECS=0 INSTANCE_PREFIX="cs-e2e-" \
-    "$PROJECT_DIR/bin/claude-secure" reap >/dev/null 2>&1 || true
+    "$PROJECT_DIR/bin/claude-pod" reap >/dev/null 2>&1 || true
 
   # docker ps -a catches stopped-but-not-removed as well as running state.
   if docker ps -aq --filter "label=com.docker.compose.project=$orphan_project" | grep -q .; then

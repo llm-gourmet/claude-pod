@@ -4,15 +4,15 @@
 TBD - created by archiving change refactor-cli-profile-commands. Update Purpose after archive.
 ## Requirements
 
-<!-- REMOVED by change unify-cli-and-readme: Requirement "--profile flag only creates a profile and exits" was removed. The `--profile` flag is replaced by `claude-secure profile create <name>`. All profile operations now live under the `profile` subcommand. See unified-cli spec. -->
+<!-- REMOVED by change unify-cli-and-readme: Requirement "--profile flag only creates a profile and exits" was removed. The `--profile` flag is replaced by `claude-pod profile create <name>`. All profile operations now live under the `profile` subcommand. See unified-cli spec. -->
 
 <!-- REMOVED by change profile-scaffold-event-tasks: Requirements "system-prompt set subcommand", "system-prompt get subcommand", and "system-prompt clear subcommand" were removed. System prompts moved to system_prompts/default.md file-based configuration. -->
 
 ### Requirement: profile create scaffolds profile directory
-`claude-secure profile create <name>` SHALL create the following structure:
+`claude-pod profile create <name>` SHALL create the following structure:
 
 ```
-~/.claude-secure/profiles/<name>/
+~/.claude-pod/profiles/<name>/
   profile.json
   .env
   tasks/
@@ -28,11 +28,11 @@ TBD - created by archiving change refactor-cli-profile-commands. Update Purpose 
 ```
 
 #### Scenario: Full directory structure is created
-- **WHEN** `claude-secure profile create myproj` completes
-- **THEN** all files listed above exist under `~/.claude-secure/profiles/myproj/`
+- **WHEN** `claude-pod profile create myproj` completes
+- **THEN** all files listed above exist under `~/.claude-pod/profiles/myproj/`
 
 #### Scenario: system-prompt subcommand is gone
-- **WHEN** `claude-secure profile myproj system-prompt set "hello"` is run
+- **WHEN** `claude-pod profile myproj system-prompt set "hello"` is run
 - **THEN** exit code is non-zero and an "unknown subcommand" error is printed
 
 ### Requirement: profile create scaffolds task files with payload documentation

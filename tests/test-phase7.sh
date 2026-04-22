@@ -69,9 +69,9 @@ echo "Building and starting containers..."
 # Build proxy image. Ignore the non-fatal buildx activity-file error that
 # occurs in sandbox/CI environments (read-only ~/.docker/buildx/activity/).
 docker compose build --quiet proxy >/dev/null 2>&1 || true
-docker image inspect claude-secure-proxy >/dev/null 2>&1 || { echo "FATAL: proxy build failed"; exit 1; }
+docker image inspect claude-pod-proxy >/dev/null 2>&1 || { echo "FATAL: proxy build failed"; exit 1; }
 # Remove stale workspace volume to avoid interactive "Recreate?" prompt.
-docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
+docker volume rm -f claude-pod_workspace >/dev/null 2>&1 || true
 docker compose up -d >/dev/null 2>&1 || { echo "FATAL: docker compose up failed"; exit 1; }
 
 # Wait for proxy container to be ready
@@ -135,7 +135,7 @@ result=$(docker compose exec -T proxy printenv GITHUB_TOKEN 2>/dev/null)
 test "$result" = "ghp_test_token_for_phase7"
 has_token=$?
 # Verify proxy can read profile (redaction config)
-wl_check=$(docker compose exec -T proxy cat /etc/claude-secure/profile.json 2>/dev/null | jq -r '.secrets[0].env_var')
+wl_check=$(docker compose exec -T proxy cat /etc/claude-pod/profile.json 2>/dev/null | jq -r '.secrets[0].env_var')
 test "$wl_check" = "GITHUB_TOKEN"
 has_whitelist=$?
 test "$has_token" -eq 0 -a "$has_whitelist" -eq 0
@@ -151,7 +151,7 @@ echo "ANTHROPIC_API_KEY=sk-ant-test-minimal" > "$TEMP_ENV_MINIMAL"
 export SECRETS_FILE="$TEMP_ENV_MINIMAL"
 export ANTHROPIC_API_KEY=sk-ant-test-minimal
 
-docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
+docker volume rm -f claude-pod_workspace >/dev/null 2>&1 || true
 docker compose up -d >/dev/null 2>&1
 # Wait for proxy to be ready
 READY=false
@@ -195,7 +195,7 @@ export SECRETS_FILE="$TEMP_ENV_APIKEY"
 # substitution in any remaining ${VAR} references.
 export ANTHROPIC_API_KEY=sk-ant-test-phase7-apikey
 
-docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
+docker volume rm -f claude-pod_workspace >/dev/null 2>&1 || true
 docker compose up -d >/dev/null 2>&1
 
 READY=false
@@ -243,7 +243,7 @@ _CLEANUP_FILES_EXTRA+=("$TEMP_ENV_WRONGNAME" "$TEMP_REMAP_OUT")
 
 printf 'ANTHROPIC_API_KEY=sk-ant-test\nANTHROPIC_BASE_URL=https://remap.example.com/v1\n' > "$TEMP_ENV_WRONGNAME"
 
-# Inline the remap logic from project_env_for_containers (bin/claude-secure)
+# Inline the remap logic from project_env_for_containers (bin/claude-pod)
 LC_ALL=C grep -v '^ANTHROPIC_BASE_URL=' "$TEMP_ENV_WRONGNAME" > "$TEMP_REMAP_OUT" || true
 if LC_ALL=C grep -q '^ANTHROPIC_BASE_URL=' "$TEMP_ENV_WRONGNAME" && \
    ! LC_ALL=C grep -q '^REAL_ANTHROPIC_BASE_URL=' "$TEMP_ENV_WRONGNAME"; then

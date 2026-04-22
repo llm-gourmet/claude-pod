@@ -18,12 +18,12 @@ __RUN_TESTS_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$__RUN_TESTS_SELF_DIR/lib/platform.sh" ]; then
   # shellcheck source=lib/platform.sh
   source "$__RUN_TESTS_SELF_DIR/lib/platform.sh"
-  if command -v claude_secure_bootstrap_path >/dev/null 2>&1; then
-    claude_secure_bootstrap_path || true
+  if command -v claude_pod_bootstrap_path >/dev/null 2>&1; then
+    claude_pod_bootstrap_path || true
   fi
 fi
 
-# claude-secure test runner
+# claude-pod test runner
 # Convenience wrapper for running integration tests manually.
 # chmod +x run-tests.sh
 
@@ -37,7 +37,7 @@ trap 'rm -f "$TEST_PROFILE"' EXIT
 
 echo ""
 echo "========================================"
-echo "  claude-secure test runner"
+echo "  claude-pod test runner"
 echo "========================================"
 
 # Determine which tests to run

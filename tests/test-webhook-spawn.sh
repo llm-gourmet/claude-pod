@@ -1,9 +1,9 @@
 #!/bin/bash
 # tests/test-webhook-spawn.sh -- Webhook spawn subprocess tests
-# Tasks 4.3-4.6: verify that _spawn_worker actually calls claude-secure spawn
+# Tasks 4.3-4.6: verify that _spawn_worker actually calls claude-pod spawn
 # and logs the correct events.
 #
-# Uses a stub claude-secure binary that records argv. Exit-code is controlled
+# Uses a stub claude-pod binary that records argv. Exit-code is controlled
 # per-test via the STUB_EXIT_CODE env var (default 0).
 
 set -uo pipefail
@@ -41,24 +41,24 @@ run_test() {
 install_stub() {
   local exit_code="${1:-0}"
   mkdir -p "$TEST_TMPDIR/bin"
-  cat > "$TEST_TMPDIR/bin/claude-secure" <<STUB
+  cat > "$TEST_TMPDIR/bin/claude-pod" <<STUB
 #!/bin/bash
 printf '%s\n' "\$*" >> "\${STUB_LOG:-/tmp/stub.log}"
 exit ${exit_code}
 STUB
-  chmod +x "$TEST_TMPDIR/bin/claude-secure"
+  chmod +x "$TEST_TMPDIR/bin/claude-pod"
   export PATH="$TEST_TMPDIR/bin:$PATH"
   export STUB_LOG
 }
 
 setup_test_profile() {
   local home_dir="$TEST_TMPDIR/home"
-  local webhooks_dir="$home_dir/.claude-secure/webhooks"
-  mkdir -p "$home_dir/.claude-secure/profiles/test-profile" \
+  local webhooks_dir="$home_dir/.claude-pod/webhooks"
+  mkdir -p "$home_dir/.claude-pod/profiles/test-profile" \
     "$webhooks_dir" \
-    "$home_dir/.claude-secure/events" \
-    "$home_dir/.claude-secure/logs"
-  cat > "$home_dir/.claude-secure/profiles/test-profile/profile.json" <<JSON
+    "$home_dir/.claude-pod/events" \
+    "$home_dir/.claude-pod/logs"
+  cat > "$home_dir/.claude-pod/profiles/test-profile/profile.json" <<JSON
 {
   "workspace": "$TEST_TMPDIR/workspace",
   "secrets": []
@@ -80,11 +80,11 @@ JSON
   "bind": "127.0.0.1",
   "port": $LISTENER_PORT,
   "max_concurrent_spawns": 3,
-  "profiles_dir": "$home_dir/.claude-secure/profiles",
+  "profiles_dir": "$home_dir/.claude-pod/profiles",
   "webhooks_dir": "$webhooks_dir",
-  "events_dir": "$home_dir/.claude-secure/events",
-  "logs_dir": "$home_dir/.claude-secure/logs",
-  "claude_secure_bin": "$TEST_TMPDIR/bin/claude-secure"
+  "events_dir": "$home_dir/.claude-pod/events",
+  "logs_dir": "$home_dir/.claude-pod/logs",
+  "claude_pod_bin": "$TEST_TMPDIR/bin/claude-pod"
 }
 JSON
 }
@@ -126,7 +126,7 @@ post_push() {
 }
 
 # ---------------------------------------------------------------------------
-# 4.3: valid push → claude-secure spawn called with --event-file
+# 4.3: valid push → claude-pod spawn called with --event-file
 # ---------------------------------------------------------------------------
 test_spawn_called_with_event_file() {
   local body status delivery_id out
@@ -157,7 +157,7 @@ test_spawn_exit_0_logs_spawn_done() {
   status=$(printf '%s' "$out" | head -n1)
   [ "$status" = "202" ] || { echo "expected 202, got $status" >&2; return 1; }
   sleep 0.3
-  local log="$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl"
+  local log="$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl"
   grep -q '"spawn_start"' "$log" 2>/dev/null || { echo "no spawn_start in log" >&2; return 1; }
   grep -q '"spawn_done"' "$log" 2>/dev/null || { echo "no spawn_done in log" >&2; return 1; }
   grep -q "$delivery_id" "$log" 2>/dev/null || { echo "delivery_id not in log" >&2; return 1; }
@@ -178,7 +178,7 @@ test_spawn_exit_nonzero_logs_spawn_error() {
   status=$(printf '%s' "$out" | head -n1)
   [ "$status" = "202" ] || { echo "expected 202, got $status" >&2; return 1; }
   sleep 0.3
-  local log="$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl"
+  local log="$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl"
   grep -q '"spawn_error"' "$log" 2>/dev/null || { echo "no spawn_error in log" >&2; return 1; }
   grep -q '"exit_code": 1' "$log" 2>/dev/null || { echo "no exit_code:1 in log" >&2; return 1; }
   grep -q "$delivery_id" "$log" 2>/dev/null || { echo "delivery_id not in log" >&2; return 1; }
@@ -199,7 +199,7 @@ test_spawn_log_file_written() {
   status=$(printf '%s' "$out" | head -n1)
   [ "$status" = "202" ] || { echo "expected 202, got $status" >&2; return 1; }
   sleep 0.3
-  local logs_dir="$TEST_TMPDIR/home/.claude-secure/logs"
+  local logs_dir="$TEST_TMPDIR/home/.claude-pod/logs"
   # Spawn log filename: spawn-<delivery_id[:12]>.log
   local short="${delivery_id:0:12}"
   local log_file="$logs_dir/spawn-${short}.log"
@@ -210,7 +210,7 @@ test_spawn_log_file_written() {
 set_skip_filter() {
   local filter="$1"
   local home_dir="$TEST_TMPDIR/home"
-  local webhooks_dir="$home_dir/.claude-secure/webhooks"
+  local webhooks_dir="$home_dir/.claude-pod/webhooks"
   cat > "$webhooks_dir/connections.json" <<JSON
 [{"name":"test-profile","repo":"test-org/test-repo","webhook_secret":"test-secret-abc123","skip_filters":["$filter"]}]
 JSON
@@ -219,7 +219,7 @@ JSON
 
 clear_skip_filters() {
   local home_dir="$TEST_TMPDIR/home"
-  local webhooks_dir="$home_dir/.claude-secure/webhooks"
+  local webhooks_dir="$home_dir/.claude-pod/webhooks"
   cat > "$webhooks_dir/connections.json" <<JSON
 [{"name":"test-profile","repo":"test-org/test-repo","webhook_secret":"test-secret-abc123"}]
 JSON
@@ -246,7 +246,7 @@ test_filter_all_prefixed_skips_spawn() {
   status=$(printf '%s' "$out" | head -n1)
   [ "$status" = "200" ] || { echo "expected HTTP 200 (skipped), got $status" >&2; return 1; }
   sleep 0.3
-  local log="$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl"
+  local log="$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl"
   grep -q '"skipped"' "$log" 2>/dev/null || { echo "no 'skipped' event in log" >&2; return 1; }
   grep "$delivery_id" "$log" 2>/dev/null | grep -q '"spawn_start"' && \
     { echo "spawn_start logged despite filter match" >&2; return 1; }
@@ -274,7 +274,7 @@ test_filter_mixed_commits_spawns() {
   status=$(printf '%s' "$out" | head -n1)
   [ "$status" = "202" ] || { echo "expected HTTP 202 (spawn), got $status" >&2; return 1; }
   sleep 0.3
-  local log="$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl"
+  local log="$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl"
   grep "$delivery_id" "$log" 2>/dev/null | grep -q '"spawn_start"' || \
     { echo "spawn_start not found for mixed push" >&2; return 1; }
   clear_skip_filters
@@ -293,7 +293,7 @@ test_filter_empty_filters_spawns() {
   status=$(printf '%s' "$out" | head -n1)
   [ "$status" = "202" ] || { echo "expected HTTP 202, got $status" >&2; return 1; }
   sleep 0.3
-  local log="$TEST_TMPDIR/home/.claude-secure/logs/webhook.jsonl"
+  local log="$TEST_TMPDIR/home/.claude-pod/logs/webhook.jsonl"
   grep "$delivery_id" "$log" 2>/dev/null | grep -q '"spawn_start"' || \
     { echo "spawn_start not found for empty-filter push" >&2; return 1; }
   return 0

@@ -2,7 +2,7 @@
 # test-gh-webhook-listener-cli.sh -- Unit tests for gh-webhook-listener CLI subcommand
 # Tests WLCLI-01 through WLCLI-13
 #
-# Strategy: source bin/claude-secure with __CLAUDE_SECURE_SOURCE_ONLY=1 to
+# Strategy: source bin/claude-pod with __CLAUDE_SECURE_SOURCE_ONLY=1 to
 # load function definitions, use temp dirs as CONFIG_DIR and HOME.
 # No Docker, no network.
 #
@@ -37,7 +37,7 @@ setup_cli() {
   export HOME="$fake_home"
   export __CLAUDE_SECURE_SOURCE_ONLY=1
   # shellcheck source=/dev/null
-  source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null || true
+  source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
@@ -73,7 +73,7 @@ test_set_bind_writes_webhook_json() {
   setup_cli "$tmpdir" "$tmpdir"
   cmd_gh_webhook_listener --set-bind "0.0.0.0" 2>/dev/null
 
-  local wjson="$tmpdir/.claude-secure/webhooks/webhook.json"
+  local wjson="$tmpdir/.claude-pod/webhooks/webhook.json"
   [ -f "$wjson" ] || { echo "webhook.json not created at $wjson" >&2; return 1; }
   local bind
   bind=$(jq -r '.bind // ""' "$wjson" 2>/dev/null)
@@ -91,7 +91,7 @@ test_set_port_writes_number() {
   setup_cli "$tmpdir" "$tmpdir"
   cmd_gh_webhook_listener --set-port "9001" 2>/dev/null
 
-  local wjson="$tmpdir/.claude-secure/webhooks/webhook.json"
+  local wjson="$tmpdir/.claude-pod/webhooks/webhook.json"
   [ -f "$wjson" ] || { echo "webhook.json not created" >&2; return 1; }
   local port_type
   port_type=$(jq -r '.port | type' "$wjson" 2>/dev/null)
@@ -113,7 +113,7 @@ test_key_update_preserves_others() {
   cmd_gh_webhook_listener --set-port "9001" 2>/dev/null
   cmd_gh_webhook_listener --set-bind "0.0.0.0" 2>/dev/null
 
-  local wjson="$tmpdir/.claude-secure/webhooks/webhook.json"
+  local wjson="$tmpdir/.claude-pod/webhooks/webhook.json"
   local port bind
   port=$(jq -r '.port' "$wjson" 2>/dev/null)
   bind=$(jq -r '.bind' "$wjson" 2>/dev/null)
@@ -133,7 +133,7 @@ test_key_update_no_duplicate() {
   cmd_gh_webhook_listener --set-port "9001" 2>/dev/null
   cmd_gh_webhook_listener --set-port "9002" 2>/dev/null
 
-  local wjson="$tmpdir/.claude-secure/webhooks/webhook.json"
+  local wjson="$tmpdir/.claude-pod/webhooks/webhook.json"
   local port
   port=$(jq -r '.port' "$wjson" 2>/dev/null)
   [ "$port" = "9002" ] || { echo "Expected updated port 9002, got: $port" >&2; return 1; }
@@ -213,9 +213,9 @@ srv.serve_forever()
   done
 
   # Write webhook.json with test bind/port
-  mkdir -p "$tmpdir/.claude-secure/webhooks"
+  mkdir -p "$tmpdir/.claude-pod/webhooks"
   jq -n --arg b "127.0.0.1" --argjson p "$port" '{"bind": $b, "port": $p}' \
-    > "$tmpdir/.claude-secure/webhooks/webhook.json"
+    > "$tmpdir/.claude-pod/webhooks/webhook.json"
 
   setup_cli "$tmpdir" "$tmpdir"
   local output
@@ -416,7 +416,7 @@ test_add_connection_profile_not_rejected_by_global_guard() {
   mkdir -p "$tmpdir/webhooks"
 
   local output rc=0
-  output=$(CONFIG_DIR="$tmpdir" "$PROJECT_DIR/bin/claude-secure" \
+  output=$(CONFIG_DIR="$tmpdir" "$PROJECT_DIR/bin/claude-pod" \
     gh-webhook-listener --add-connection \
     --name "test-obsidian" \
     --repo "llm-gourmet/obsidian" \
