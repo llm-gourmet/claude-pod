@@ -4,6 +4,143 @@ Run Claude Code inside a Docker sandbox where no secret can leave without your p
 
 ---
 
+## Quickstart
+
+**Prerequisites:** Docker Engine 24+, Docker Compose v2, `curl`, `jq`, `uuidgen` — Linux or WSL2.
+
+**1. Install**
+
+```bash
+git clone <repo-url>
+cd claude-secure
+sudo bash install.sh
+```
+
+**2. Get an OAuth token** (first time only)
+
+```bash
+# on a machine where you already installed claude
+claude setup-token
+```
+
+> Using an API key instead? See [Installation](#installation) for the `ANTHROPIC_API_KEY` option.
+
+**3. Create a profile**
+
+```bash
+# creates a new profile. Each profile requires the its own Anthropic-Auth via Oauth / Api Key
+
+claude-secure profile create myapp
+
+# creates
+# ~/.claude-secure/profiles/myapp/.env
+# ~/.claude-secure/profiles/myapp/profile.json
+# ~/.claude-secure/profiles/myapp/system_prompts/
+# ~/.claude-secure/profiles/myapp/tasks/
+```
+
+**4. Add a secret**
+
+```bash
+# Key Features of this package are used in this command
+claude-secure profile myapp secret add GITHUB_TOKEN gh_xyxyxyxyxyx --redacted REDACTED_GITHUB_TOKEN --domains "github.com","api.github.com","raw.githubusercontent.com"
+
+# You set GITHUB_TOKEN with its real value and provide the redacted name REDACTED_GITHUB_TOKEN which will be sent to anthropic in case claude tries to send your secret to the API
+# the 3 domains are whitelisted and allow to have sent Payload ( and auth )
+# Only the domains from ~/.claude-secure/profiles/<name>/profile.json are whitelisted and allowed to receive payload
+
+```
+
+**5. Start a session**
+
+```bash
+claude-secure start myapp
+```
+
+Claude Code is now running inside the Docker sandbox — no secret can leave without passing through the security layers.
+
+**6. Edit tasks and system prompt**
+
+`profile create` scaffolds stub files that drive Claude's behavior on every session and spawn:
+
+```bash
+# Task prompt (required) — what Claude should do. Passed as -p on start/spawn.
+nano ~/.claude-secure/profiles/myapp/tasks/default.md
+
+# System prompt (optional) — Claude's persona and constraints.
+nano ~/.claude-secure/profiles/myapp/system_prompts/default.md
+```
+
+For event-driven spawns you can add per-event overrides (`push.md`, `issues-opened.md`, …). The full webhook event JSON is always appended to the task prompt automatically — Claude receives the raw payload without needing to call any API.
+
+**7. Set up a GitHub webhook**
+
+If you installed without `--with-webhook`, reinstall first:
+
+```bash
+sudo bash install.sh --with-webhook
+```
+
+Then register the connection and verify the listener:
+
+```bash
+# Link the GitHub repo to the myapp profile
+claude-secure gh-webhook-listener --add-connection \
+  --name myapp --repo org/myapp --webhook-secret mysecretvalue
+
+# Should show: Systemd: active, Health: ok
+claude-secure gh-webhook-listener status
+```
+
+Register the webhook on GitHub: **Settings → Webhooks → Add webhook**
+
+| Field | Value |
+|---|---|
+| Payload URL | `https://<your-host>:9000/webhook` |
+| Content type | `application/json` |
+| Secret | `mysecretvalue` |
+
+GitHub sends a ping on creation — the listener responds HTTP 200.
+
+**8. (Optional) Bootstrap documentation**
+
+Scaffold a standard documentation structure into a remote git repo — runs on the host, no Docker or Claude involved:
+
+```bash
+# Register the target repo once
+claude-secure bootstrap-docs --add-connection --name work-docs \
+  --repo https://github.com/you/vault.git --token ghp_...
+
+# Scaffold a new project inside it
+claude-secure bootstrap-docs --connection work-docs projects/myapp
+```
+
+Creates `VISION.md`, `GOALS.md`, `AGREEMENTS.md`, `TODOS.md`, `TASKS.md`, `decisions/`, `ideas/`, `done/` under `projects/myapp/`.
+
+**9. Test the webhook**
+
+Before relying on real GitHub events, verify the full pipeline locally:
+
+```bash
+# Dry run — preview which task/system-prompt files resolve and show rendered content
+claude-secure spawn myapp \
+  --event '{"action":"opened","repository":{"full_name":"org/myapp"}}' \
+  --dry-run
+
+# Live test — spawn Claude with a synthetic event
+claude-secure spawn myapp \
+  --event '{"action":"opened","repository":{"full_name":"org/myapp"}}'
+
+# Follow the output in real time
+claude-secure logs myapp
+```
+
+Use GitHub's **Redeliver** button (Settings → Webhooks → Recent Deliveries) to replay a real event once everything is wired up.
+
+**Next steps:** [Profiles](#profiles) — credentials & secrets · [Webhooks](#webhooks) — full webhook reference · [Docs Bootstrap](#docs-bootstrap) — documentation scaffolding · [CLI](#cli) — full command reference.
+
+---
+
 ## Installation
 
 **Prerequisites:** Docker Engine 24+, Docker Compose v2, `curl`, `jq`, `uuidgen`
@@ -367,6 +504,72 @@ Skipped events return HTTP 200 and a `skipped` entry is written to `webhook.json
 ### Docs-oriented profiles
 
 Profiles for documentation tools (e.g. an Obsidian vault) can live under `~/.claude-secure/docs/<name>/` instead of `~/.claude-secure/profiles/<name>/`. The structure is identical. The listener and CLI probe both directories; `profiles/` takes priority on name collision.
+
+---
+
+## Ubuntu: Exposing the Webhook Listener
+
+The listener binds to `127.0.0.1:9000` by default — local only. GitHub must POST to a public HTTPS URL. Three options:
+
+### Option A — nginx reverse proxy (recommended)
+
+```bash
+sudo apt install nginx certbot python3-certbot-nginx
+```
+
+Create `/etc/nginx/sites-available/claude-webhook`:
+
+```nginx
+server {
+    server_name webhook.example.com;
+
+    location /webhook {
+        proxy_pass http://127.0.0.1:9000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+Enable and issue a certificate:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/claude-webhook /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d webhook.example.com
+```
+
+GitHub webhook URL: `https://webhook.example.com/webhook`
+
+The listener stays on `127.0.0.1` — never exposed directly to the internet.
+
+### Option B — direct port (simpler, no TLS)
+
+```bash
+# Change bind address
+claude-secure gh-webhook-listener --set-bind 0.0.0.0
+
+# Open the firewall
+sudo ufw allow 9000/tcp
+sudo ufw reload
+```
+
+GitHub webhook URL: `http://<server-ip>:9000/webhook`
+
+GitHub requires HTTPS for production webhooks. HTTP works only with **Disable SSL verification** enabled on the webhook settings page — not recommended outside of LAN setups.
+
+### Option C — ngrok (local development)
+
+```bash
+ngrok http 9000
+```
+
+ngrok prints a temporary public HTTPS URL (e.g. `https://abc123.ngrok.io`).
+
+GitHub webhook URL: `https://abc123.ngrok.io/webhook`
+
+The URL changes on every restart. Use a paid ngrok plan for a stable domain, or switch to Option A for a permanent setup.
 
 ---
 
