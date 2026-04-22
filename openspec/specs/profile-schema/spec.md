@@ -9,12 +9,11 @@ Each profile SHALL be fully described by two files: `profile.json` (configuratio
 - **AND** no `whitelist.json` file SHALL be present
 
 ### Requirement: profile.json schema
-`profile.json` SHALL contain exactly the following top-level fields:
+`profile.json` SHALL contain the following top-level fields:
 - `workspace` (string, required): absolute path to the Claude Code workspace directory
-- `system_prompt` (string, optional): system prompt passed to Claude on startup
 - `secrets` (array, optional): list of secret entries (see Requirement: secrets array schema)
 
-No other fields SHALL be written by the system. Unknown fields SHALL be ignored on read.
+The `system_prompt` field SHALL NOT be written or read by the system. Unknown fields SHALL be ignored on read.
 
 #### Scenario: Minimal valid profile.json
 - **WHEN** a profile is created with only a workspace path
@@ -35,6 +34,11 @@ No other fields SHALL be written by the system. Unknown fields SHALL be ignored 
     ]
   }
   ```
+
+#### Scenario: system_prompt field ignored if present
+- **WHEN** a legacy `profile.json` still contains a `system_prompt` field post-migration
+- **THEN** the field SHALL be ignored by spawn
+- **AND** `migrate-profile-prompts.sh` SHALL remove it on next run
 
 ### Requirement: secrets array schema
 Each entry in `secrets[]` SHALL have:
