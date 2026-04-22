@@ -1,4 +1,4 @@
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: --set-token writes GitHub PAT to connections.json
 The `claude-secure gh-webhook-listener --set-token <pat>` subcommand SHALL write `github_token` into the named connection's entry in `~/.claude-secure/webhooks/connections.json`. The `--name <name>` flag SHALL be required. If the named connection does not exist the command exits non-zero with an error.
