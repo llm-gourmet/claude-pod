@@ -1,6 +1,7 @@
 services:
   claude:
     build: ./claude
+    image: claude-pod-claude
     stdin_open: true
     tty: true
     command: ["sleep", "infinity"]
@@ -42,6 +43,7 @@ services:
 
   proxy:
     build: ./proxy
+    image: claude-pod-proxy
     env_file:
       - ${SECRETS_FILE:-/dev/null}
     environment:
@@ -70,6 +72,7 @@ services:
 
   validator:
     build: ./validator
+    image: claude-pod-validator
     network_mode: "service:claude"
     cap_add:
       - NET_ADMIN
