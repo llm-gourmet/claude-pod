@@ -2610,7 +2610,7 @@ FIRST_ARG="${ARGS[0]:-}"
 # Superuser mode (allowed for most commands). Skip config load for commands
 # that don't need a merged workspace or that manage their own profile resolution.
 case "$FIRST_ARG" in
-  list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs|gh-webhook-listener|start|stop|remove|logs|profile)
+  list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs|gh-webhook-listener|start|stop|remove|logs|profile|uninstall)
     : # skip superuser load
     ;;
   *)
@@ -2813,6 +2813,10 @@ case "$CMD" in
     echo "  reap               Clean up orphaned spawn containers and stale event files"
     echo "  bootstrap-docs     Scaffold project docs in configured remote repo"
     echo "  gh-webhook-listener   Configure and inspect the webhook listener service"
+    echo "  uninstall          Remove claude-secure (binary, services, config dir)"
+    echo "  uninstall --dry-run        Preview what would be removed"
+    echo "  uninstall --keep-data      Remove binaries/services, preserve ~/.claude-secure/"
+    echo "  uninstall --remove-images  Also remove Docker images"
     echo "  help               Show this help message"
     echo ""
     echo "Spawn flags:"
@@ -2846,6 +2850,15 @@ case "$CMD" in
   reap)
     # Drop the "reap" literal so only the remaining flags (if any) go to do_reap.
     do_reap "${REMAINING_ARGS[@]:1}"
+    ;;
+  uninstall)
+    _uninstall_script="$APP_DIR/uninstall.sh"
+    if [ ! -f "$_uninstall_script" ]; then
+      echo "ERROR: uninstall.sh not found at $_uninstall_script" >&2
+      echo "Run 'claude-secure update' first, or run uninstall.sh directly from the source tree." >&2
+      exit 1
+    fi
+    bash "$_uninstall_script" "${REMAINING_ARGS[@]:1}"
     ;;
   start)
     require_profile_arg

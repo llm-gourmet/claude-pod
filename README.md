@@ -36,6 +36,27 @@ sudo -E ANTHROPIC_API_KEY="$KEY" REAL_ANTHROPIC_BASE_URL="https://yourcompany.co
 
 ---
 
+## Uninstallation
+
+```bash
+# Preview what would be removed (no changes made)
+claude-secure uninstall --dry-run
+
+# Full uninstall — removes binary, systemd services, /opt/claude-secure/, shared templates
+# Prompts before deleting ~/.claude-secure/ (contains your API keys and profiles)
+claude-secure uninstall
+
+# Keep user data, remove everything else
+claude-secure uninstall --keep-data
+
+# Also remove Docker images built by the installer
+claude-secure uninstall --remove-images
+```
+
+The uninstaller is idempotent — if something is already absent it warns and continues. Exit code is always 0.
+
+---
+
 ## CLI
 
 ```bash
@@ -72,6 +93,10 @@ claude-secure list                    # List profiles and running state
 claude-secure update                  # Pull latest source, rebuild, update CLI
 claude-secure upgrade                 # Rebuild Claude image with latest Claude Code
 claude-secure reap                    # Clean up orphaned containers and stale events
+claude-secure uninstall               # Remove claude-secure completely
+claude-secure uninstall --dry-run     # Preview what would be removed
+claude-secure uninstall --keep-data   # Remove binaries/services, preserve ~/.claude-secure/
+claude-secure uninstall --remove-images  # Also remove Docker images
 claude-secure help                    # Show all commands
 
 # Webhook listener
