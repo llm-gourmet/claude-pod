@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/etc/claude-secure/hooks/pre-tool-use.sh"
+            "command": "/etc/claude-pod/hooks/pre-tool-use.sh"
           }
         ]
       }

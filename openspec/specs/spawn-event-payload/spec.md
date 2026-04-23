@@ -1,7 +1,7 @@
 ## Requirements
 
 ### Requirement: spawn appends full event JSON to the human-turn prompt
-When `$EVENT_JSON` is non-empty, `do_spawn` in `bin/claude-secure` SHALL append the full event payload to the rendered task prompt before passing it to `claude -p`. The appended block SHALL be separated from the task content by a `---` line, labeled with the event type, and wrapped in a fenced `json` code block.
+When `$EVENT_JSON` is non-empty, `do_spawn` in `bin/claude-pod` SHALL append the full event payload to the rendered task prompt before passing it to `claude -p`. The appended block SHALL be separated from the task content by a `---` line, labeled with the event type, and wrapped in a fenced `json` code block.
 
 #### Scenario: Webhook-triggered spawn includes payload block
 - **WHEN** spawn is called with `--event-file` pointing to a valid push event

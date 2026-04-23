@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-profile-secret.sh -- Unit tests for `claude-secure profile <name> secret` subcommands
+# test-profile-secret.sh -- Unit tests for `claude-pod profile <name> secret` subcommands
 #
 # Tests:
 #   PROFS-01: Static checks — functions present, profile in skip-superuser-load case
@@ -18,7 +18,7 @@ TOTAL=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CLI="$PROJECT_DIR/bin/claude-secure"
+CLI="$PROJECT_DIR/bin/claude-pod"
 
 run_test() {
   local name="$1"; shift
@@ -46,7 +46,7 @@ _make_cfg() {
   local tmpdir="$1"
   local profname="${2:-testprof}"
 
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   local ws="$tmpdir/workspace"
   mkdir -p "$cfg/profiles/$profname" "$ws"
 

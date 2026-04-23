@@ -3,7 +3,7 @@
 # Tests INST-01 through INST-06, PLAT-01 through PLAT-03
 #
 # Strategy: Source install.sh (which has a BASH_SOURCE guard) to test individual
-# functions in isolation. Use temp directories to avoid touching real ~/.claude-secure.
+# functions in isolation. Use temp directories to avoid touching real ~/.claude-pod.
 # For Docker integration tests, use the project's docker-compose.yml directly.
 #
 # Usage: bash tests/test-phase4.sh
@@ -105,7 +105,7 @@ report "PLAT-03" "Platform detection includes iptables version check" $?
   trap 'rm -rf "$TMPDIR_AUTH"' EXIT
 
   # Source install.sh first (defines functions), then override CONFIG_DIR
-  # (sourcing install.sh sets CONFIG_DIR=$HOME/.claude-secure, so we must override after)
+  # (sourcing install.sh sets CONFIG_DIR=$HOME/.claude-pod, so we must override after)
   source "$PROJECT_DIR/install.sh"
   CONFIG_DIR="$TMPDIR_AUTH"
 
@@ -135,7 +135,7 @@ report "INST-03" "Auth setup writes .env with chmod 600 permissions" $?
 
   # Source install.sh first (defines functions), then override CONFIG_DIR
   source "$PROJECT_DIR/install.sh"
-  CONFIG_DIR="$TMPDIR_DIR/claude-secure-test"
+  CONFIG_DIR="$TMPDIR_DIR/claude-pod-test"
 
   setup_directories > /dev/null 2>&1
 
@@ -169,9 +169,9 @@ report "INST-05" "docker-compose.yml validates (compose config --quiet)" $?
   WORKSPACE_PATH="${WORKSPACE_PATH:-$HOME/claude-workspace}" \
     docker compose build --quiet > /dev/null 2>&1 || true
   # Verify all three images exist.
-  docker image inspect claude-secure-claude > /dev/null 2>&1 || exit 1
-  docker image inspect claude-secure-proxy > /dev/null 2>&1 || exit 1
-  docker image inspect claude-secure-validator > /dev/null 2>&1 || exit 1
+  docker image inspect claude-pod-claude > /dev/null 2>&1 || exit 1
+  docker image inspect claude-pod-proxy > /dev/null 2>&1 || exit 1
+  docker image inspect claude-pod-validator > /dev/null 2>&1 || exit 1
 )
 report "INST-05b" "Docker images build successfully" $?
 
@@ -180,11 +180,11 @@ report "INST-05b" "Docker images build successfully" $?
 # =========================================================================
 (
   RESULT=0
-  bash -n "$PROJECT_DIR/bin/claude-secure" > /dev/null 2>&1 || RESULT=1
-  grep -q 'docker compose down' "$PROJECT_DIR/bin/claude-secure" || RESULT=1
-  grep -q 'docker compose ps' "$PROJECT_DIR/bin/claude-secure" || RESULT=1
-  grep -q 'COMPOSE_FILE' "$PROJECT_DIR/bin/claude-secure" || RESULT=1
-  grep -q 'config\.sh' "$PROJECT_DIR/bin/claude-secure" || RESULT=1
+  bash -n "$PROJECT_DIR/bin/claude-pod" > /dev/null 2>&1 || RESULT=1
+  grep -q 'docker compose down' "$PROJECT_DIR/bin/claude-pod" || RESULT=1
+  grep -q 'docker compose ps' "$PROJECT_DIR/bin/claude-pod" || RESULT=1
+  grep -q 'COMPOSE_FILE' "$PROJECT_DIR/bin/claude-pod" || RESULT=1
+  grep -q 'config\.sh' "$PROJECT_DIR/bin/claude-pod" || RESULT=1
   exit "$RESULT"
 )
 report "INST-06" "CLI wrapper has valid syntax and expected subcommands" $?
@@ -200,7 +200,7 @@ report "INST-06" "CLI wrapper has valid syntax and expected subcommands" $?
 
   # Remove any stale workspace volume whose device path differs from ours
   # (avoids the interactive "Recreate?" prompt from docker compose).
-  docker volume rm -f claude-secure_workspace > /dev/null 2>&1 || true
+  docker volume rm -f claude-pod_workspace > /dev/null 2>&1 || true
 
   WORKSPACE_PATH="$_TMP_WS" \
     docker compose up -d --wait --timeout 30 > /dev/null 2>&1 || exit 1

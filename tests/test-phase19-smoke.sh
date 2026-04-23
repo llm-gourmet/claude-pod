@@ -90,7 +90,7 @@ check "validator /register reachable" \
 # Layer 4: hook file installed and executable inside claude container
 # shellcheck disable=SC2086
 check "hook installed in claude container" \
-  $COMPOSE exec -T claude test -x /etc/claude-secure/hooks/pre-tool-use.sh
+  $COMPOSE exec -T claude test -x /etc/claude-pod/hooks/pre-tool-use.sh
 
 echo ""
 if [ "$FAILED" -eq 0 ]; then

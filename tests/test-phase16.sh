@@ -11,7 +11,7 @@
 #   - 16-04 (Wave 2): installer extension (covered by static greps here)
 #
 # Guardrails copied from Phase 15:
-#   - Stubs claude-secure on PATH with a recorder (no real Docker)
+#   - Stubs claude-pod on PATH with a recorder (no real Docker)
 #   - Uses $TEST_TMPDIR with trap EXIT cleanup
 #   - Uses HOME + CONFIG_DIR redirection so tests never touch the real home
 #   - Local bare report repo under $TEST_TMPDIR/report-repo-bare.git (not the
@@ -54,18 +54,18 @@ run_test() {
 }
 
 # =========================================================================
-# Stub builder: fake `claude-secure` binary on PATH.
+# Stub builder: fake `claude-pod` binary on PATH.
 # Records invocation argv to $STUB_LOG and exits 0 immediately.
 # =========================================================================
 install_stub() {
   mkdir -p "$TEST_TMPDIR/bin"
-  cat > "$TEST_TMPDIR/bin/claude-secure" <<'STUB'
+  cat > "$TEST_TMPDIR/bin/claude-pod" <<'STUB'
 #!/bin/bash
 # Stub: record invocation argv and exit 0.
 printf '%s\n' "$*" >> "${STUB_LOG:-/tmp/stub.log}"
 exit 0
 STUB
-  chmod +x "$TEST_TMPDIR/bin/claude-secure"
+  chmod +x "$TEST_TMPDIR/bin/claude-pod"
   export PATH="$TEST_TMPDIR/bin:$PATH"
   export STUB_LOG
 }
@@ -84,9 +84,9 @@ STUB
 # =========================================================================
 setup_test_profile() {
   local home_dir="$TEST_TMPDIR/home"
-  local profile_dir="$home_dir/.claude-secure/profiles/test-profile"
+  local profile_dir="$home_dir/.claude-pod/profiles/test-profile"
   mkdir -p "$profile_dir" "$profile_dir/tasks" "$profile_dir/report-templates" \
-    "$home_dir/.claude-secure/events" "$home_dir/.claude-secure/logs/spawns"
+    "$home_dir/.claude-pod/events" "$home_dir/.claude-pod/logs/spawns"
   printf 'phase16 task placeholder.\n' > "$profile_dir/tasks/default.md"
 
   local report_repo="${TEST_REPORT_REPO:-}"
@@ -123,7 +123,7 @@ setup_test_profile() {
   fi
 
   # Redirect config discovery to the test home.
-  export CONFIG_DIR="$home_dir/.claude-secure"
+  export CONFIG_DIR="$home_dir/.claude-pod"
   export HOME="$home_dir"
 }
 
@@ -189,12 +189,12 @@ test_fixtures_exist() {
 }
 
 test_no_force_push_grep() {
-  # Static invariant: bin/claude-secure must never use git push --force,
+  # Static invariant: bin/claude-pod must never use git push --force,
   # --force-with-lease, -f, or refspec-force (+refs). Wave 0 state: bin has
   # no push code yet, so the grep naturally returns no matches and this
   # function passes. Later waves must keep it passing.
-  local bin="$PROJECT_DIR/bin/claude-secure"
-  [ -f "$bin" ] || { echo "bin/claude-secure missing" >&2; return 1; }
+  local bin="$PROJECT_DIR/bin/claude-pod"
+  [ -f "$bin" ] || { echo "bin/claude-pod missing" >&2; return 1; }
   if grep -nE 'git[[:space:]]+push[^#\n]*(--force|--force-with-lease|[[:space:]]-f[[:space:]]|\+refs)' "$bin" >/dev/null; then
     echo "force-push pattern detected in $bin" >&2
     return 1
@@ -207,7 +207,7 @@ test_resolve_report_template_from_docs_dir() {
   # resolve_report_template should find templates under docs/<profile>/report-templates/
   # when not present under profiles/<profile>/report-templates/.
   local home_dir="$TEST_TMPDIR/home"
-  local docs_reports="$home_dir/.claude-secure/docs/test-profile/report-templates"
+  local docs_reports="$home_dir/.claude-pod/docs/test-profile/report-templates"
   mkdir -p "$docs_reports"
   local marker; marker="DOCS_REPORT_$(uuidgen | tr -d '-')"
   printf '%s\n' "$marker content" > "$docs_reports/push.md"
@@ -216,13 +216,13 @@ test_resolve_report_template_from_docs_dir() {
   local rc=0
   (
     set +e
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
-    export CONFIG_DIR="$home_dir/.claude-secure"
+    export __CLAUDE_POD_SOURCE_ONLY=1
+    export CONFIG_DIR="$home_dir/.claude-pod"
     export HOME="$home_dir"
     export PROFILE="test-profile"
     # shellcheck disable=SC1090
-    source "$PROJECT_DIR/bin/claude-secure" >/dev/null 2>&1
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    source "$PROJECT_DIR/bin/claude-pod" >/dev/null 2>&1
+    unset __CLAUDE_POD_SOURCE_ONLY
     resolve_report_template "push" > "$out_file"
     exit $?
   )
@@ -247,12 +247,12 @@ test_resolve_report_template_from_docs_dir() {
 #                         [--report-repo <url>] [--report-token <tok>] \
 #                         [--fake-exit <code>] [--env-file <path>]
 #
-# Creates a fresh profile under $TEST_TMPDIR/<test_id>/home/.claude-secure,
-# sources bin/claude-secure in source-only mode, sets REMAINING_ARGS, and
+# Creates a fresh profile under $TEST_TMPDIR/<test_id>/home/.claude-pod,
+# sources bin/claude-pod in source-only mode, sets REMAINING_ARGS, and
 # calls do_spawn. Returns do_spawn's exit code. Populates these globals
 # (in the subshell) that callers can inspect AFTER the subshell via files:
 #   $TEST_TMPDIR/<test_id>/envelope.out    -- captured stdout
-#   $TEST_TMPDIR/<test_id>/home/.claude-secure/logs/test-profile-executions.jsonl
+#   $TEST_TMPDIR/<test_id>/home/.claude-pod/logs/test-profile-executions.jsonl
 #   $TEST_TMPDIR/<test_id>/clone/          -- checkout of bare repo post-push
 # =========================================================================
 run_spawn_integration() {
@@ -273,9 +273,9 @@ run_spawn_integration() {
 
   local tdir="$TEST_TMPDIR/$tid"
   local home_dir="$tdir/home"
-  local profile_dir="$home_dir/.claude-secure/profiles/test-profile"
+  local profile_dir="$home_dir/.claude-pod/profiles/test-profile"
   rm -rf "$tdir"
-  mkdir -p "$profile_dir" "$profile_dir/tasks" "$home_dir/.claude-secure/logs"
+  mkdir -p "$profile_dir" "$profile_dir/tasks" "$home_dir/.claude-pod/logs"
   mkdir -p "$tdir/workspace"
   printf 'audit harness task placeholder.\n' > "$profile_dir/tasks/default.md"
 
@@ -306,17 +306,17 @@ run_spawn_integration() {
 
   (
     set +e
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
-    export CONFIG_DIR="$home_dir/.claude-secure"
+    export CONFIG_DIR="$home_dir/.claude-pod"
     export HOME="$home_dir"
     export PROFILE="test-profile"
     export PLATFORM="linux"
-    export CLAUDE_SECURE_FAKE_CLAUDE_STDOUT="$fake_stdout_file"
-    export CLAUDE_SECURE_FAKE_CLAUDE_EXIT="$fake_exit"
+    export CLAUDE_POD_FAKE_CLAUDE_STDOUT="$fake_stdout_file"
+    export CLAUDE_POD_FAKE_CLAUDE_EXIT="$fake_exit"
     # shellcheck disable=SC1090
-    source "$PROJECT_DIR/bin/claude-secure" 2>&1
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    source "$PROJECT_DIR/bin/claude-pod" 2>&1
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "test-profile"
     # Simulate REMAINING_ARGS that do_spawn parses.
     REMAINING_ARGS=("spawn" "--event-file" "$event_fixture")
@@ -332,7 +332,7 @@ run_spawn_integration() {
 
 # Audit log path for a given test id.
 audit_log_path() {
-  echo "$TEST_TMPDIR/$1/home/.claude-secure/logs/test-profile-executions.jsonl"
+  echo "$TEST_TMPDIR/$1/home/.claude-pod/logs/test-profile-executions.jsonl"
 }
 
 # =========================================================================
@@ -347,7 +347,7 @@ test_audit_file_path() {
   stdout=$(jq -c '.claude' "$PROJECT_DIR/tests/fixtures/envelope-success.json")
   run_spawn_integration "$tid" "$event" "$stdout" || return 1
 
-  local audit="$TEST_TMPDIR/$tid/home/.claude-secure/logs/test-profile-executions.jsonl"
+  local audit="$TEST_TMPDIR/$tid/home/.claude-pod/logs/test-profile-executions.jsonl"
   [ -s "$audit" ] || { echo "audit file missing at $audit"; return 1; }
   return 0
 }
@@ -361,7 +361,7 @@ test_audit_creates_log_dir() {
   # Remove logs dir entirely before running.
   rm -rf "$TEST_TMPDIR/$tid" 2>/dev/null || true
   run_spawn_integration "$tid" "$event" "$stdout" || return 1
-  local audit="$TEST_TMPDIR/$tid/home/.claude-secure/logs/test-profile-executions.jsonl"
+  local audit="$TEST_TMPDIR/$tid/home/.claude-pod/logs/test-profile-executions.jsonl"
   [ -f "$audit" ] || { echo "log dir not auto-created"; return 1; }
   return 0
 }
@@ -424,22 +424,22 @@ test_audit_spawn_error() {
   # D-17: missing --event => status=spawn_error, spawn returns nonzero.
   local tid="spawn_err"
   local home_dir="$TEST_TMPDIR/$tid/home"
-  local profile_dir="$home_dir/.claude-secure/profiles/test-profile"
-  mkdir -p "$profile_dir" "$home_dir/.claude-secure/logs"
+  local profile_dir="$home_dir/.claude-pod/profiles/test-profile"
+  mkdir -p "$profile_dir" "$home_dir/.claude-pod/logs"
   jq -n '{name:"test-profile", repo:"test-org/test-repo", webhook_secret:"s", workspace:"'"$TEST_TMPDIR/$tid/ws"'", report_repo:"", report_branch:"main", report_path_prefix:"reports"}' \
     > "$profile_dir/profile.json"
   : > "$profile_dir/.env"
 
   (
     set +e
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
-    export CONFIG_DIR="$home_dir/.claude-secure"
+    export CONFIG_DIR="$home_dir/.claude-pod"
     export HOME="$home_dir"
     export PROFILE="test-profile"
     export PLATFORM="linux"
-    source "$PROJECT_DIR/bin/claude-secure"
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    source "$PROJECT_DIR/bin/claude-pod"
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "test-profile"
     # No --event: should trigger spawn_error audit.
     REMAINING_ARGS=("spawn")
@@ -449,7 +449,7 @@ test_audit_spawn_error() {
   local rc=$?
   [ "$rc" -ne 0 ] || { echo "do_spawn should have failed"; return 1; }
 
-  local audit="$home_dir/.claude-secure/logs/test-profile-executions.jsonl"
+  local audit="$home_dir/.claude-pod/logs/test-profile-executions.jsonl"
   [ -s "$audit" ] || { echo "no audit line on spawn_error"; return 1; }
   local status
   status=$(tail -n1 "$audit" | jq -r '.status')
@@ -517,22 +517,22 @@ test_audit_concurrent_safe() {
   # We exercise it via sourcing and direct function calls in the background.
   local tid="concurrent"
   local home_dir="$TEST_TMPDIR/$tid/home"
-  local profile_dir="$home_dir/.claude-secure/profiles/test-profile"
-  mkdir -p "$profile_dir" "$home_dir/.claude-secure/logs"
+  local profile_dir="$home_dir/.claude-pod/profiles/test-profile"
+  mkdir -p "$profile_dir" "$home_dir/.claude-pod/logs"
   jq -n '{name:"test-profile", repo:"test-org/test-repo", webhook_secret:"s", workspace:"/tmp", report_repo:"", report_branch:"main", report_path_prefix:"reports"}' \
     > "$profile_dir/profile.json"
   : > "$profile_dir/.env"
 
   (
     set +e
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
-    export CONFIG_DIR="$home_dir/.claude-secure"
+    export CONFIG_DIR="$home_dir/.claude-pod"
     export HOME="$home_dir"
     export PROFILE="test-profile"
     export PLATFORM="linux"
-    source "$PROJECT_DIR/bin/claude-secure"
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    source "$PROJECT_DIR/bin/claude-pod"
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "test-profile"
     local i
     for i in 1 2 3 4 5 6 7 8 9 10; do
@@ -543,7 +543,7 @@ test_audit_concurrent_safe() {
     exit 0
   ) >/dev/null 2>&1
 
-  local audit="$home_dir/.claude-secure/logs/test-profile-executions.jsonl"
+  local audit="$home_dir/.claude-pod/logs/test-profile-executions.jsonl"
   local count
   count=$(wc -l < "$audit")
   [ "$count" -eq 10 ] || { echo "got $count lines (want 10)"; return 1; }
@@ -556,12 +556,12 @@ test_audit_concurrent_safe() {
 }
 
 test_audit_replay_identical() {
-  # Replay path (CLAUDE_SECURE_EXEC set) must produce identical audit shape,
+  # Replay path (CLAUDE_POD_EXEC set) must produce identical audit shape,
   # just with delivery_id=replay-<uuid>.
   local tid="replay_shape"
   local home_dir="$TEST_TMPDIR/$tid/home"
-  local profile_dir="$home_dir/.claude-secure/profiles/test-profile"
-  mkdir -p "$profile_dir" "$profile_dir/tasks" "$home_dir/.claude-secure/logs"
+  local profile_dir="$home_dir/.claude-pod/profiles/test-profile"
+  mkdir -p "$profile_dir" "$profile_dir/tasks" "$home_dir/.claude-pod/logs"
   jq -n '{name:"test-profile", repo:"test-org/test-repo", webhook_secret:"s", workspace:"'"$TEST_TMPDIR/$tid/ws"'", report_repo:"", report_branch:"main", report_path_prefix:"reports"}' \
     > "$profile_dir/profile.json"
   mkdir -p "$TEST_TMPDIR/$tid/ws"
@@ -573,23 +573,23 @@ test_audit_replay_identical() {
 
   (
     set +e
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
-    export CONFIG_DIR="$home_dir/.claude-secure"
+    export CONFIG_DIR="$home_dir/.claude-pod"
     export HOME="$home_dir"
     export PROFILE="test-profile"
     export PLATFORM="linux"
-    export CLAUDE_SECURE_EXEC="/bin/true"  # triggers replay-<uuid> path
-    export CLAUDE_SECURE_FAKE_CLAUDE_STDOUT="$fake_stdout_file"
-    source "$PROJECT_DIR/bin/claude-secure"
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    export CLAUDE_POD_EXEC="/bin/true"  # triggers replay-<uuid> path
+    export CLAUDE_POD_FAKE_CLAUDE_STDOUT="$fake_stdout_file"
+    source "$PROJECT_DIR/bin/claude-pod"
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "test-profile"
     REMAINING_ARGS=("spawn" "--event-file" "$PROJECT_DIR/tests/fixtures/github-issues-opened.json")
     do_spawn
     exit $?
   ) >/dev/null 2>&1
 
-  local audit="$home_dir/.claude-secure/logs/test-profile-executions.jsonl"
+  local audit="$home_dir/.claude-pod/logs/test-profile-executions.jsonl"
   [ -s "$audit" ] || return 1
   local did
   did=$(tail -n1 "$audit" | jq -r '.delivery_id')
@@ -599,7 +599,7 @@ test_audit_replay_identical() {
 }
 
 test_audit_manual_synthetic_id() {
-  # Manual path (no _meta.delivery_id, no CLAUDE_SECURE_EXEC) => manual-<uuid32>.
+  # Manual path (no _meta.delivery_id, no CLAUDE_POD_EXEC) => manual-<uuid32>.
   local tid="manual_id"
   local event="$PROJECT_DIR/tests/fixtures/github-issues-opened.json"
   local stdout

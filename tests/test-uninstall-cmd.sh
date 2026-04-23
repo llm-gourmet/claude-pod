@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-uninstall-cmd.sh -- Unit tests for `claude-secure uninstall` subcommand
+# test-uninstall-cmd.sh -- Unit tests for `claude-pod uninstall` subcommand
 #
 # Tests:
 #   UNINST-01: Static -- 'uninstall' is in the skip-superuser-load case
@@ -20,7 +20,7 @@ TOTAL=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CLI="$PROJECT_DIR/bin/claude-secure"
+CLI="$PROJECT_DIR/bin/claude-pod"
 UNINSTALL_SH="$PROJECT_DIR/uninstall.sh"
 
 run_test() {
@@ -50,7 +50,7 @@ echo ""
 # Build a minimal CONFIG_DIR pointing APP_DIR at PROJECT_DIR.
 _make_config_dir() {
   local tmpdir="$1"
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles/default" "$cfg/logs"
   cat > "$cfg/config.sh" <<EOF
 APP_DIR="$PROJECT_DIR"
@@ -90,7 +90,7 @@ test_uninst02_handler_exists() {
   # There must be a 'uninstall)' arm in the case "$CMD" block
   grep -q 'uninstall)' "$CLI"
 }
-run_test "UNINST-02: 'uninstall)' case arm present in bin/claude-secure" \
+run_test "UNINST-02: 'uninstall)' case arm present in bin/claude-pod" \
   test_uninst02_handler_exists
 
 test_uninst02_calls_uninstall_sh() {
@@ -117,7 +117,7 @@ run_test "UNINST-03: uninstall handler uses REMAINING_ARGS for flag pass-through
 echo ""
 
 # =========================================================================
-# UNINST-04: Behaviour -- claude-secure uninstall --dry-run
+# UNINST-04: Behaviour -- claude-pod uninstall --dry-run
 # =========================================================================
 echo "--- UNINST-04: dry-run mode works end-to-end ---"
 
@@ -147,7 +147,7 @@ test_uninst04_dryrun_touches_no_files() {
   cfg=$(_make_config_dir "$tmpdir")
 
   # Create a fake config dir so uninstall.sh can prompt (it won't - non-TTY)
-  mkdir -p "$tmpdir/.claude-secure"
+  mkdir -p "$tmpdir/.claude-pod"
 
   # Record mtimes of all files in cfg before
   local before after
@@ -177,7 +177,7 @@ test_uninst05_missing_uninstall_sh() {
   # Config pointing APP_DIR to a dir WITHOUT uninstall.sh
   local fake_app
   fake_app=$(mktemp -d -p "$TEST_TMPDIR")
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles/default" "$cfg/logs"
   cat > "$cfg/config.sh" <<EOF
 APP_DIR="$fake_app"

@@ -22,7 +22,7 @@ PASS=0; FAIL=0; TOTAL=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CLI="$PROJECT_DIR/bin/claude-secure"
+CLI="$PROJECT_DIR/bin/claude-pod"
 MIGRATE="$PROJECT_DIR/scripts/migrate-profile-prompts.sh"
 
 run_test() {
@@ -44,7 +44,7 @@ trap cleanup EXIT
 _make_profile() {
   local tmpdir="$1"
   local profname="${2:-testprof}"
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   local ws="$tmpdir/workspace"
   mkdir -p "$cfg/profiles/$profname" "$ws"
   cat > "$cfg/config.sh" <<EOF
@@ -182,7 +182,7 @@ run_test "PTP-07: --dry-run prints task path + system prompt path + content" \
 # -------------------------------------------------------------------------
 test_ptp08_migration_moves_system_prompt() {
   local t; t=$(mktemp -d -p "$TEST_TMPDIR")
-  local cfg="$t/.claude-secure"
+  local cfg="$t/.claude-pod"
   mkdir -p "$cfg/profiles/p1"
   jq -n --arg ws "/tmp" --arg sp "Hello world." \
     '{workspace:$ws, secrets:[], system_prompt:$sp}' > "$cfg/profiles/p1/profile.json"
@@ -202,7 +202,7 @@ run_test "PTP-08: migration moves system_prompt to system_prompts/default.md" \
 # -------------------------------------------------------------------------
 test_ptp09_migration_idempotent() {
   local t; t=$(mktemp -d -p "$TEST_TMPDIR")
-  local cfg="$t/.claude-secure"
+  local cfg="$t/.claude-pod"
   mkdir -p "$cfg/profiles/p1/system_prompts"
   printf 'EXISTING\n' > "$cfg/profiles/p1/system_prompts/default.md"
   jq -n --arg ws "/tmp" --arg sp "new value" \

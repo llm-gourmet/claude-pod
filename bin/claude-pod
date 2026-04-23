@@ -18,31 +18,31 @@ set -euo pipefail
 # Phase 18 PORT-01: source the platform library and bootstrap PATH so GNU
 # coreutils (date, stat, readlink, realpath, sed, grep) shadow BSD versions
 # on macOS. No-op on Linux/WSL2.
-__CLAUDE_SECURE_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$__CLAUDE_SECURE_SELF_DIR/../lib/platform.sh" ]; then
+__CLAUDE_POD_SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$__CLAUDE_POD_SELF_DIR/../lib/platform.sh" ]; then
   # shellcheck source=../lib/platform.sh
-  source "$__CLAUDE_SECURE_SELF_DIR/../lib/platform.sh"
-elif [ -f "$__CLAUDE_SECURE_SELF_DIR/lib/platform.sh" ]; then
+  source "$__CLAUDE_POD_SELF_DIR/../lib/platform.sh"
+elif [ -f "$__CLAUDE_POD_SELF_DIR/lib/platform.sh" ]; then
   # Installed layout: lib/ alongside bin/
   # shellcheck source=lib/platform.sh
-  source "$__CLAUDE_SECURE_SELF_DIR/lib/platform.sh"
-elif [ -f "/usr/local/share/claude-secure/lib/platform.sh" ]; then
-  # shellcheck source=/usr/local/share/claude-secure/lib/platform.sh
-  source "/usr/local/share/claude-secure/lib/platform.sh"
+  source "$__CLAUDE_POD_SELF_DIR/lib/platform.sh"
+elif [ -f "/usr/local/share/claude-pod/lib/platform.sh" ]; then
+  # shellcheck source=/usr/local/share/claude-pod/lib/platform.sh
+  source "/usr/local/share/claude-pod/lib/platform.sh"
 fi
-if command -v claude_secure_bootstrap_path >/dev/null 2>&1; then
-  claude_secure_bootstrap_path || true
+if command -v claude_pod_bootstrap_path >/dev/null 2>&1; then
+  claude_pod_bootstrap_path || true
 fi
 
 # Source-only mode: load function definitions without executing main logic.
-# Used by tests: __CLAUDE_SECURE_SOURCE_ONLY=1 source bin/claude-secure
-# (also accepts CLAUDE_SECURE_SOURCE_ONLY without leading underscores for the
+# Used by tests: __CLAUDE_POD_SOURCE_ONLY=1 source bin/claude-pod
+# (also accepts CLAUDE_POD_SOURCE_ONLY without leading underscores for the
 # Phase 15 test harness)
-if [ -z "${__CLAUDE_SECURE_SOURCE_ONLY:-}" ]; then
-  __CLAUDE_SECURE_SOURCE_ONLY="${CLAUDE_SECURE_SOURCE_ONLY:-0}"
+if [ -z "${__CLAUDE_POD_SOURCE_ONLY:-}" ]; then
+  __CLAUDE_POD_SOURCE_ONLY="${CLAUDE_POD_SOURCE_ONLY:-0}"
 fi
 
-CONFIG_DIR="${CONFIG_DIR:-$HOME/.claude-secure}"
+CONFIG_DIR="${CONFIG_DIR:-$HOME/.claude-pod}"
 
 # Temp files to clean up on exit (superuser mode merged configs)
 _CLEANUP_FILES=()
@@ -92,7 +92,7 @@ validate_profile() {
 
   if [ ! -d "$pdir" ]; then
     echo "ERROR: Profile '$name' does not exist at $pdir" >&2
-    echo "Run: claude-secure profile create $name" >&2
+    echo "Run: claude-pod profile create $name" >&2
     return 1
   fi
   if [ ! -f "$pdir/profile.json" ]; then
@@ -301,7 +301,7 @@ This file is a placeholder. You are reading it because no custom system prompt
 has been configured yet for this profile. Please let the user know they can
 customize this file at:
 
-  ~/.claude-secure/profiles/$name/system_prompts/
+  ~/.claude-pod/profiles/$name/system_prompts/
 
 Replace this content with the role, tone, and constraints for Claude in this
 profile. Delete the file to omit --system-prompt entirely.
@@ -449,11 +449,11 @@ load_profile_config() {
   else
     export SECRETS_FILE="$pdir/.env"
   fi
-  CLAUDE_SECURE_SYSTEM_PROMPT=""
+  CLAUDE_POD_SYSTEM_PROMPT=""
   if [ -f "$pdir/system_prompts/default.md" ]; then
-    CLAUDE_SECURE_SYSTEM_PROMPT=$(cat "$pdir/system_prompts/default.md")
+    CLAUDE_POD_SYSTEM_PROMPT=$(cat "$pdir/system_prompts/default.md")
   fi
-  export CLAUDE_SECURE_SYSTEM_PROMPT
+  export CLAUDE_POD_SYSTEM_PROMPT
   export PROFILE_PATH="$pdir/profile.json"
   export LOG_DIR="$CONFIG_DIR/logs"
   export LOG_PREFIX="${name}-"
@@ -479,14 +479,14 @@ require_profile_arg() {
   local name="${REMAINING_ARGS[1]:-}"
   if [ -z "$name" ]; then
     echo "ERROR: <profile-name> is required" >&2
-    echo "Usage: claude-secure $CMD <profile-name>" >&2
+    echo "Usage: claude-pod $CMD <profile-name>" >&2
     exit 1
   fi
   validate_profile_name "$name"
   local pdir
   pdir=$(resolve_profile_dir "$name")
   if [ ! -f "$pdir/profile.json" ]; then
-    echo "ERROR: profile '$name' not found. Run: claude-secure profile create $name" >&2
+    echo "ERROR: profile '$name' not found. Run: claude-pod profile create $name" >&2
     exit 1
   fi
   PROFILE="$name"
@@ -572,7 +572,7 @@ cmd_profile() {
     local prof_name="${2:-}"
     if [ -z "$prof_name" ]; then
       echo "ERROR: profile name is required" >&2
-      echo "Usage: claude-secure profile create <name>" >&2
+      echo "Usage: claude-pod profile create <name>" >&2
       exit 1
     fi
     validate_profile_name "$prof_name"
@@ -583,7 +583,7 @@ cmd_profile() {
     else
       create_profile "$prof_name"
     fi
-    echo "Run 'claude-secure start $prof_name' to start a session."
+    echo "Run 'claude-pod start $prof_name' to start a session."
     exit 0
   fi
 
@@ -591,15 +591,15 @@ cmd_profile() {
   local prof_name="$first"
   if [ -z "$prof_name" ]; then
     echo "ERROR: profile name or 'create' is required" >&2
-    echo "Usage: claude-secure profile create <name>" >&2
-    echo "       claude-secure profile <name> [secret] [args...]" >&2
+    echo "Usage: claude-pod profile create <name>" >&2
+    echo "       claude-pod profile <name> [secret] [args...]" >&2
     exit 1
   fi
   validate_profile_name "$prof_name"
   local prof_dir
   prof_dir=$(resolve_profile_dir "$prof_name")
   if [ ! -f "$prof_dir/profile.json" ]; then
-    echo "ERROR: Profile '$prof_name' not found. Run: claude-secure profile create $prof_name" >&2
+    echo "ERROR: Profile '$prof_name' not found. Run: claude-pod profile create $prof_name" >&2
     exit 1
   fi
   local subcmd="${2:-}"
@@ -612,7 +612,7 @@ cmd_profile() {
         list)   profile_secret_list "$prof_dir" ;;
         "")
           echo "ERROR: Action required: add, remove, list" >&2
-          echo "Usage: claude-secure profile <name> secret <add|remove|list>" >&2
+          echo "Usage: claude-pod profile <name> secret <add|remove|list>" >&2
           exit 1
           ;;
         *)
@@ -1356,7 +1356,7 @@ do_spawn() {
   # Help check before profile guard so `spawn --help` works without a profile name
   for _arg in "${REMAINING_ARGS[@]}"; do
     if [ "$_arg" = "--help" ] || [ "$_arg" = "-h" ]; then
-      echo "Usage: claude-secure spawn <name> --event '<json>'"
+      echo "Usage: claude-pod spawn <name> --event '<json>'"
       echo ""
       echo "Spawn flags:"
       echo "  --event '<json>'       Inline GitHub webhook event JSON"
@@ -1381,7 +1381,7 @@ do_spawn() {
       local _spawn_pdir
       _spawn_pdir=$(resolve_profile_dir "$PROFILE")
       if [ ! -f "$_spawn_pdir/profile.json" ]; then
-        echo "ERROR: profile '$PROFILE' not found. Run: claude-secure profile create $PROFILE" >&2
+        echo "ERROR: profile '$PROFILE' not found. Run: claude-pod profile create $PROFILE" >&2
         _spawn_error_audit "spawn: profile '$PROFILE' not found"
         return 1
       fi
@@ -1390,7 +1390,7 @@ do_spawn() {
   fi
   if [ -z "${PROFILE:-}" ]; then
     echo "ERROR: profile name is required for spawn" >&2
-    echo "Usage: claude-secure spawn <name> --event '<json>'" >&2
+    echo "Usage: claude-pod spawn <name> --event '<json>'" >&2
     _spawn_error_audit "spawn: profile name is required"
     return 1
   fi
@@ -1424,7 +1424,7 @@ do_spawn() {
   # Validate event JSON is provided and valid
   if [ -z "$EVENT_JSON" ]; then
     echo "ERROR: --event or --event-file is required for spawn" >&2
-    echo "Usage: claude-secure spawn <name> --event '<json>'" >&2
+    echo "Usage: claude-pod spawn <name> --event '<json>'" >&2
     _spawn_error_audit "spawn: --event or --event-file is required"
     return 1
   fi
@@ -1447,11 +1447,11 @@ do_spawn() {
   event_type=$(echo "$EVENT_JSON" | jq -r '.event_type // ._meta.event_type // .action // "unknown"')
 
   # Phase 16 / D-12: derive delivery_id.
-  # Priority: ._meta.delivery_id (webhook path) > replay-<uuid> (CLAUDE_SECURE_EXEC set) > manual-<uuid>.
+  # Priority: ._meta.delivery_id (webhook path) > replay-<uuid> (CLAUDE_POD_EXEC set) > manual-<uuid>.
   local delivery_id webhook_id delivery_id_short _did_stripped
   delivery_id=$(echo "$EVENT_JSON" | jq -r '._meta.delivery_id // empty')
   if [ -z "$delivery_id" ]; then
-    if [ -n "${CLAUDE_SECURE_EXEC:-}" ]; then
+    if [ -n "${CLAUDE_POD_EXEC:-}" ]; then
       delivery_id="replay-$(uuidgen 2>/dev/null | tr -d - | head -c 32 || echo unknown)"
     else
       delivery_id="manual-$(uuidgen 2>/dev/null | tr -d - | head -c 32 || echo unknown)"
@@ -1492,12 +1492,12 @@ ${EVENT_JSON}
   local system_prompt_file system_prompt_source="none"
   system_prompt_file=$(resolve_system_prompt_file "$event_type")
   if [ -n "$system_prompt_file" ]; then
-    CLAUDE_SECURE_SYSTEM_PROMPT=$(cat "$system_prompt_file")
+    CLAUDE_POD_SYSTEM_PROMPT=$(cat "$system_prompt_file")
     system_prompt_source="$system_prompt_file"
   else
-    CLAUDE_SECURE_SYSTEM_PROMPT=""
+    CLAUDE_POD_SYSTEM_PROMPT=""
   fi
-  export CLAUDE_SECURE_SYSTEM_PROMPT
+  export CLAUDE_POD_SYSTEM_PROMPT
 
   # --dry-run: print resolved paths + content and exit.
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -1522,8 +1522,8 @@ ${EVENT_JSON}
   # Until empirical testing confirms hooks survive --bare, we do NOT use it.
   # The small startup time cost is acceptable vs risking security bypass.
   local claude_args=("$rendered_prompt" "--output-format" "json" "--dangerously-skip-permissions")
-  if [ -n "${CLAUDE_SECURE_SYSTEM_PROMPT:-}" ]; then
-    claude_args+=("--system-prompt" "$CLAUDE_SECURE_SYSTEM_PROMPT")
+  if [ -n "${CLAUDE_POD_SYSTEM_PROMPT:-}" ]; then
+    claude_args+=("--system-prompt" "$CLAUDE_POD_SYSTEM_PROMPT")
   fi
 
   # Execute headless Claude Code (per D-06, D-09)
@@ -1531,12 +1531,12 @@ ${EVENT_JSON}
   claude_stderr_file=$(mktemp)
   _CLEANUP_FILES+=("$claude_stderr_file")
 
-  # Phase 16 test escape hatch: if CLAUDE_SECURE_FAKE_CLAUDE_STDOUT points at a
+  # Phase 16 test escape hatch: if CLAUDE_POD_FAKE_CLAUDE_STDOUT points at a
   # file, skip docker and use its contents as the envelope stdout. Mirrors the
-  # Phase 15 CLAUDE_SECURE_EXEC pattern. Production path unchanged.
-  if [ -n "${CLAUDE_SECURE_FAKE_CLAUDE_STDOUT:-}" ] && [ -f "${CLAUDE_SECURE_FAKE_CLAUDE_STDOUT}" ]; then
-    claude_stdout=$(cat "${CLAUDE_SECURE_FAKE_CLAUDE_STDOUT}")
-    claude_exit="${CLAUDE_SECURE_FAKE_CLAUDE_EXIT:-0}"
+  # Phase 15 CLAUDE_POD_EXEC pattern. Production path unchanged.
+  if [ -n "${CLAUDE_POD_FAKE_CLAUDE_STDOUT:-}" ] && [ -f "${CLAUDE_POD_FAKE_CLAUDE_STDOUT}" ]; then
+    claude_stdout=$(cat "${CLAUDE_POD_FAKE_CLAUDE_STDOUT}")
+    claude_exit="${CLAUDE_POD_FAKE_CLAUDE_EXIT:-0}"
   else
     docker compose up -d --wait
     claude_stdout=$(docker compose exec -T claude claude -p "${claude_args[@]}" < /dev/null 2>"$claude_stderr_file") || claude_exit=$?
@@ -1649,7 +1649,7 @@ do_replay() {
 
   if [ -z "$delivery_substring" ]; then
     echo "ERROR: replay requires a delivery-id substring" >&2
-    echo "Usage: claude-secure replay <name> <delivery-id> [--dry-run]" >&2
+    echo "Usage: claude-pod replay <name> <delivery-id> [--dry-run]" >&2
     return 1
   fi
 
@@ -1688,7 +1688,7 @@ do_replay() {
     local repo
     repo=$(jq -r '.repository.full_name // empty' "$event_file")
     if [ -z "$repo" ]; then
-      echo "ERROR: cannot determine repository from $event_file -- pass profile name: claude-secure replay <name> <delivery-id>" >&2
+      echo "ERROR: cannot determine repository from $event_file -- pass profile name: claude-pod replay <name> <delivery-id>" >&2
       return 1
     fi
     explicit_profile=$(resolve_profile_by_repo "$repo") || return 1
@@ -1696,12 +1696,12 @@ do_replay() {
 
   echo "Replaying $event_file as profile '$explicit_profile'..."
 
-  # D-20 / Pattern 9: exec recursively into claude-secure so we reuse
+  # D-20 / Pattern 9: exec recursively into claude-pod so we reuse
   # do_spawn without duplicating its lifecycle. Test harnesses that invoke
-  # REAL claude-secure directly (by full path) may set CLAUDE_SECURE_EXEC
+  # REAL claude-pod directly (by full path) may set CLAUDE_POD_EXEC
   # to point at a stub binary so the exec target is recorded rather than
   # running the full spawn path. Falls back to `$0` when unset.
-  local exec_target="${CLAUDE_SECURE_EXEC:-$0}"
+  local exec_target="${CLAUDE_POD_EXEC:-$0}"
   local args=(spawn "$explicit_profile" --event-file "$event_file")
   if [ "$dry_run" = 1 ]; then
     args+=(--dry-run)
@@ -1712,7 +1712,7 @@ do_replay() {
 # =========================================================================
 # Phase 17: Reaper (OPS-03)
 # Cleans up orphaned spawn containers + stale event files. Invoked via the
-# `reap` subcommand or the claude-secure-reaper.timer systemd unit.
+# `reap` subcommand or the claude-pod-reaper.timer systemd unit.
 # Locked by .planning/phases/17-operational-hardening/17-CONTEXT.md D-01..D-12.
 # =========================================================================
 
@@ -1813,7 +1813,7 @@ reap_orphan_projects() {
 # D-06 / Phase 14 D-20 fold-in: delete event files older than REAPER_EVENT_AGE_SECS.
 # Pure age-based; no audit cross-reference. Default threshold 86400s = 24h.
 reap_stale_event_files() {
-  local events_dir="${CONFIG_DIR:-$HOME/.claude-secure}/events"
+  local events_dir="${CONFIG_DIR:-$HOME/.claude-pod}/events"
   local age_secs="${REAPER_EVENT_AGE_SECS:-86400}"
   local age_mins=$((age_secs / 60))
 
@@ -1847,13 +1847,13 @@ do_reap() {
     case "$1" in
       --dry-run) dry_run=1; shift ;;
       --help|-h)
-        echo "Usage: claude-secure reap [--dry-run]"
+        echo "Usage: claude-pod reap [--dry-run]"
         echo "  Cleans up orphaned spawn containers and stale event files."
         return 0
         ;;
       *)
         echo "reaper: unknown flag '$1'" >&2
-        echo "Usage: claude-secure reap [--dry-run]" >&2
+        echo "Usage: claude-pod reap [--dry-run]" >&2
         return 2
         ;;
     esac
@@ -1949,7 +1949,7 @@ _bootstrap_docs_find_templates() {
   self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   local dev_templates="$self_dir/../scripts/templates"
   local app_templates="${APP_DIR:-}/scripts/templates"
-  local installed_templates="/usr/local/share/claude-secure/scripts/templates"
+  local installed_templates="/usr/local/share/claude-pod/scripts/templates"
   if [ -d "$dev_templates" ]; then
     echo "$dev_templates"
   elif [ -n "${APP_DIR:-}" ] && [ -d "$app_templates" ]; then
@@ -1995,10 +1995,10 @@ cmd_bootstrap_docs() {
       --token)             conn_token="$2";            shift 2 ;;
       --branch)            conn_branch="$2";           shift 2 ;;
       --help|-h)
-        echo "Usage: claude-secure bootstrap-docs --connection <name> <path>"
-        echo "       claude-secure bootstrap-docs --add-connection --name <n> --repo <url> --token <t> [--branch <b>]"
-        echo "       claude-secure bootstrap-docs --remove-connection <name>"
-        echo "       claude-secure bootstrap-docs --list-connections"
+        echo "Usage: claude-pod bootstrap-docs --connection <name> <path>"
+        echo "       claude-pod bootstrap-docs --add-connection --name <n> --repo <url> --token <t> [--branch <b>]"
+        echo "       claude-pod bootstrap-docs --remove-connection <name>"
+        echo "       claude-pod bootstrap-docs --list-connections"
         echo ""
         echo "Scaffold project documentation at <path> in the named connection's docs repo."
         echo "<path> is relative to the repo root, e.g. projects/JAD or custom/myproject"
@@ -2059,13 +2059,13 @@ cmd_bootstrap_docs() {
   # Bootstrap action: --connection required
   if [ -z "$connection_name" ]; then
     echo "Error: --connection <name> is required" >&2
-    echo "Run 'claude-secure bootstrap-docs --list-connections' to see available connections." >&2
+    echo "Run 'claude-pod bootstrap-docs --list-connections' to see available connections." >&2
     return 1
   fi
 
   if [ -z "$path_arg" ]; then
-    echo "Usage: claude-secure bootstrap-docs --connection <name> <path>" >&2
-    echo "Run 'claude-secure bootstrap-docs --help' for more information." >&2
+    echo "Usage: claude-pod bootstrap-docs --connection <name> <path>" >&2
+    echo "Run 'claude-pod bootstrap-docs --help' for more information." >&2
     return 1
   fi
 
@@ -2121,20 +2121,20 @@ ASKPASS
   _bootstrap_docs_scaffold "$path_arg" "$repo_dir" "$templates_dir"
 
   if ! LC_ALL=C \
-       GIT_AUTHOR_NAME="claude-secure" \
-       GIT_AUTHOR_EMAIL="claude-secure@localhost" \
-       GIT_COMMITTER_NAME="claude-secure" \
-       GIT_COMMITTER_EMAIL="claude-secure@localhost" \
+       GIT_AUTHOR_NAME="claude-pod" \
+       GIT_AUTHOR_EMAIL="claude-pod@localhost" \
+       GIT_COMMITTER_NAME="claude-pod" \
+       GIT_COMMITTER_EMAIL="claude-pod@localhost" \
        git -C "$repo_dir" -c core.autocrlf=false add "$path_arg"; then
     echo "Error: git add failed" >&2
     return 1
   fi
 
   if ! LC_ALL=C \
-       GIT_AUTHOR_NAME="claude-secure" \
-       GIT_AUTHOR_EMAIL="claude-secure@localhost" \
-       GIT_COMMITTER_NAME="claude-secure" \
-       GIT_COMMITTER_EMAIL="claude-secure@localhost" \
+       GIT_AUTHOR_NAME="claude-pod" \
+       GIT_AUTHOR_EMAIL="claude-pod@localhost" \
+       GIT_COMMITTER_NAME="claude-pod" \
+       GIT_COMMITTER_EMAIL="claude-pod@localhost" \
        git -C "$repo_dir" -c core.autocrlf=false commit -q -m "bootstrap: $path_arg"; then
     echo "Error: git commit failed" >&2
     return 1
@@ -2156,7 +2156,7 @@ ASKPASS
 }
 
 # =========================================================================
-# webhook-connections: manage ~/.claude-secure/webhooks/connections.json
+# webhook-connections: manage ~/.claude-pod/webhooks/connections.json
 # =========================================================================
 
 _webhook_connections_file() {
@@ -2326,7 +2326,7 @@ cmd_gh_webhook_filter() {
     list)   _gh_webhook_filter_list "$@" ;;
     remove) _gh_webhook_filter_remove "$@" ;;
     *)
-      echo "Usage: claude-secure gh-webhook-listener filter <add|list|remove> ..." >&2
+      echo "Usage: claude-pod gh-webhook-listener filter <add|list|remove> ..." >&2
       echo "  filter add \"<value>\" --name <connection>" >&2
       echo "  filter list --name <connection>" >&2
       echo "  filter remove \"<value>\" --name <connection>" >&2
@@ -2341,10 +2341,10 @@ cmd_gh_webhook_filter() {
 
 # Show status of the webhook listener service.
 _gh_webhook_listener_status() {
-  local webhook_json="${WEBHOOK_CONFIG:-$HOME/.claude-secure/webhooks/webhook.json}"
+  local webhook_json="${WEBHOOK_CONFIG:-$HOME/.claude-pod/webhooks/webhook.json}"
 
   if [ ! -r "$webhook_json" ]; then
-    echo "No listener configured. Run claude-secure gh-webhook-listener --help"
+    echo "No listener configured. Run claude-pod gh-webhook-listener --help"
     return 0
   fi
 
@@ -2356,7 +2356,7 @@ _gh_webhook_listener_status() {
 
   local systemd_status="unknown"
   if command -v systemctl >/dev/null 2>&1; then
-    systemd_status=$(systemctl is-active claude-secure-webhook 2>/dev/null || echo "inactive")
+    systemd_status=$(systemctl is-active claude-pod-webhook 2>/dev/null || echo "inactive")
   fi
 
   local health_status="unreachable"
@@ -2413,20 +2413,20 @@ cmd_gh_webhook_listener() {
       --repo)              conn_repo="$2";          shift 2 ;;
       --webhook-secret)    conn_secret="$2";        shift 2 ;;
       --help|-h)
-        echo "Usage: claude-secure gh-webhook-listener [subcommand]"
-        echo "       claude-secure gh-webhook-listener --add-connection --name <n> --repo <r> --webhook-secret <s> [--profile <p>]"
-        echo "       claude-secure gh-webhook-listener --remove-connection <name>"
-        echo "       claude-secure gh-webhook-listener --list-connections"
-        echo "       claude-secure gh-webhook-listener --set-profile <profile> --name <name>"
-        echo "       claude-secure gh-webhook-listener --set-bind <addr>"
-        echo "       claude-secure gh-webhook-listener --set-port <port>"
-        echo "       claude-secure gh-webhook-listener status"
-        echo "       claude-secure gh-webhook-listener filter add \"<value>\" --name <connection>"
-        echo "       claude-secure gh-webhook-listener filter list --name <connection>"
-        echo "       claude-secure gh-webhook-listener filter remove \"<value>\" --name <connection>"
+        echo "Usage: claude-pod gh-webhook-listener [subcommand]"
+        echo "       claude-pod gh-webhook-listener --add-connection --name <n> --repo <r> --webhook-secret <s> [--profile <p>]"
+        echo "       claude-pod gh-webhook-listener --remove-connection <name>"
+        echo "       claude-pod gh-webhook-listener --list-connections"
+        echo "       claude-pod gh-webhook-listener --set-profile <profile> --name <name>"
+        echo "       claude-pod gh-webhook-listener --set-bind <addr>"
+        echo "       claude-pod gh-webhook-listener --set-port <port>"
+        echo "       claude-pod gh-webhook-listener status"
+        echo "       claude-pod gh-webhook-listener filter add \"<value>\" --name <connection>"
+        echo "       claude-pod gh-webhook-listener filter list --name <connection>"
+        echo "       claude-pod gh-webhook-listener filter remove \"<value>\" --name <connection>"
         echo ""
-        echo "Connections are stored in ~/.claude-secure/webhooks/connections.json."
-        echo "Bind/port are persisted to ~/.claude-secure/webhooks/webhook.json."
+        echo "Connections are stored in ~/.claude-pod/webhooks/connections.json."
+        echo "Bind/port are persisted to ~/.claude-pod/webhooks/webhook.json."
         return 0
         ;;
       filter) shift; cmd_gh_webhook_filter "$@"; return $? ;;
@@ -2436,7 +2436,7 @@ cmd_gh_webhook_listener() {
     esac
   done
 
-  local WEBHOOK_JSON="${WEBHOOK_CONFIG:-$HOME/.claude-secure/webhooks/webhook.json}"
+  local WEBHOOK_JSON="${WEBHOOK_CONFIG:-$HOME/.claude-pod/webhooks/webhook.json}"
 
   # --add-connection
   if [ "$add_connection" -eq 1 ]; then
@@ -2542,8 +2542,8 @@ cmd_gh_webhook_listener() {
   case "${subcmd:-}" in
     status) _gh_webhook_listener_status ;;
     "")
-      echo "Usage: claude-secure gh-webhook-listener [status|--add-connection|--set-token|--set-bind|--set-port]" >&2
-      echo "Run 'claude-secure gh-webhook-listener --help' for more information." >&2
+      echo "Usage: claude-pod gh-webhook-listener [status|--add-connection|--set-token|--set-bind|--set-port]" >&2
+      echo "Run 'claude-pod gh-webhook-listener --help' for more information." >&2
       return 1
       ;;
     *)
@@ -2556,7 +2556,7 @@ cmd_gh_webhook_listener() {
 # =========================================================================
 # Source-only guard: if sourced by tests, stop here
 # =========================================================================
-if [ "$__CLAUDE_SECURE_SOURCE_ONLY" = "1" ]; then
+if [ "$__CLAUDE_POD_SOURCE_ONLY" = "1" ]; then
   return 0 2>/dev/null || true
 fi
 
@@ -2565,7 +2565,7 @@ fi
 # =========================================================================
 
 # Verify installation (or auto-derive APP_DIR when running from a dev checkout
-# so `bin/claude-secure` can be invoked against a test CONFIG_DIR).
+# so `bin/claude-pod` can be invoked against a test CONFIG_DIR).
 if [ -f "$CONFIG_DIR/config.sh" ]; then
   # Load global config (APP_DIR, PLATFORM, optionally DEFAULT_WORKSPACE)
   # shellcheck source=/dev/null
@@ -2580,7 +2580,7 @@ else
     APP_DIR="$_CANDIDATE_APP_DIR"
     PLATFORM="${PLATFORM:-linux}"
   else
-    echo "ERROR: claude-secure not installed. Run install.sh first." >&2
+    echo "ERROR: claude-pod not installed. Run install.sh first." >&2
     exit 1
   fi
   unset _SELF_DIR _CANDIDATE_APP_DIR
@@ -2595,11 +2595,11 @@ while [[ $# -gt 0 ]]; do
         ARGS+=("$1"); shift
       else
         _profile_hint="${2:-<name>}"
-        echo "ERROR: --profile flag removed. Use: claude-secure profile create $_profile_hint" >&2
+        echo "ERROR: --profile flag removed. Use: claude-pod profile create $_profile_hint" >&2
         exit 1
       fi ;;
     --instance)
-      echo "ERROR: --instance is no longer supported. Use: claude-secure profile create <name>" >&2
+      echo "ERROR: --instance is no longer supported. Use: claude-pod profile create <name>" >&2
       exit 1 ;;
     *) ARGS+=("$1"); shift ;;
   esac
@@ -2657,7 +2657,7 @@ case "$CMD" in
         echo "Claude Code version: $(docker compose exec -T claude claude --version 2>/dev/null || echo 'unknown')"
       fi
     else
-      # No profile: show all claude-secure containers across all profiles/spawns.
+      # No profile: show all claude-pod containers across all profiles/spawns.
       # Container names start with the compose project name (claude-<profile>,
       # claude-superuser, cs-<profile>-<uuid>).
       docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Command}}\t{{.CreatedAt}}\t{{.Status}}\t{{.Ports}}" | \
@@ -2677,8 +2677,8 @@ case "$CMD" in
     fi
     # Update CLI wrapper if source changed (do this before rebuilding images
     # so the new binary is in place if the user re-runs after a partial failure)
-    CLI_INSTALLED="$(command -v claude-secure)"
-    CLI_SOURCE="$APP_DIR/bin/claude-secure"
+    CLI_INSTALLED="$(command -v claude-pod)"
+    CLI_SOURCE="$APP_DIR/bin/claude-pod"
     if [ -f "$CLI_SOURCE" ] && ! diff -q "$CLI_SOURCE" "$CLI_INSTALLED" >/dev/null 2>&1; then
       echo "CLI wrapper changed, updating..."
       if [ -w "$(dirname "$CLI_INSTALLED")" ]; then
@@ -2752,7 +2752,7 @@ case "$CMD" in
   logs)
     if [ -z "${REMAINING_ARGS[1]:-}" ]; then
       echo "ERROR: profile name required" >&2
-      echo "Usage: claude-secure logs <name> [hook|anthropic|iptables|clear]" >&2
+      echo "Usage: claude-pod logs <name> [hook|anthropic|iptables|clear]" >&2
       exit 1
     fi
     require_profile_arg
@@ -2777,7 +2777,7 @@ case "$CMD" in
         ;;
       *)
         echo "Unknown log service: $LOG_SVC"
-        echo "Usage: claude-secure logs <name> [hook|anthropic|iptables|clear]"
+        echo "Usage: claude-pod logs <name> [hook|anthropic|iptables|clear]"
         exit 1
         ;;
     esac
@@ -2786,7 +2786,7 @@ case "$CMD" in
     cmd_profile "${REMAINING_ARGS[@]:1}"
     ;;
   help|--help|-h)
-    echo "Usage: claude-secure <command> [args] [log flags]"
+    echo "Usage: claude-pod <command> [args] [log flags]"
     echo ""
     echo "Profile:"
     echo "  profile create <name>  Create a profile interactively, then exit"
@@ -2808,14 +2808,14 @@ case "$CMD" in
     echo "  list               List all profiles and their status"
     echo ""
     echo "System:"
-    echo "  update             Pull latest claude-secure, rebuild all images"
+    echo "  update             Pull latest claude-pod, rebuild all images"
     echo "  upgrade            Upgrade Claude Code to latest version"
     echo "  reap               Clean up orphaned spawn containers and stale event files"
     echo "  bootstrap-docs     Scaffold project docs in configured remote repo"
     echo "  gh-webhook-listener   Configure and inspect the webhook listener service"
-    echo "  uninstall          Remove claude-secure (binary, services, config dir)"
+    echo "  uninstall          Remove claude-pod (binary, services, config dir)"
     echo "  uninstall --dry-run        Preview what would be removed"
-    echo "  uninstall --keep-data      Remove binaries/services, preserve ~/.claude-secure/"
+    echo "  uninstall --keep-data      Remove binaries/services, preserve ~/.claude-pod/"
     echo "  uninstall --remove-images  Also remove Docker images"
     echo "  help               Show this help message"
     echo ""
@@ -2855,7 +2855,7 @@ case "$CMD" in
     _uninstall_script="$APP_DIR/uninstall.sh"
     if [ ! -f "$_uninstall_script" ]; then
       echo "ERROR: uninstall.sh not found at $_uninstall_script" >&2
-      echo "Run 'claude-secure update' first, or run uninstall.sh directly from the source tree." >&2
+      echo "Run 'claude-pod update' first, or run uninstall.sh directly from the source tree." >&2
       exit 1
     fi
     bash "$_uninstall_script" "${REMAINING_ARGS[@]:1}"
@@ -2868,8 +2868,8 @@ case "$CMD" in
     cleanup_containers
     docker compose up -d
     _interactive_args=(--dangerously-skip-permissions)
-    if [ -n "${CLAUDE_SECURE_SYSTEM_PROMPT:-}" ]; then
-      _interactive_args+=(--system-prompt "$CLAUDE_SECURE_SYSTEM_PROMPT")
+    if [ -n "${CLAUDE_POD_SYSTEM_PROMPT:-}" ]; then
+      _interactive_args+=(--system-prompt "$CLAUDE_POD_SYSTEM_PROMPT")
     fi
     docker compose exec -it claude claude "${_interactive_args[@]}"
     docker compose down
@@ -2877,7 +2877,7 @@ case "$CMD" in
   *)
     if [ -n "$CMD" ]; then
       echo "ERROR: Unknown command '$CMD'" >&2
-      echo "Run: claude-secure help" >&2
+      echo "Run: claude-pod help" >&2
       exit 1
     fi
     # No command, no --profile: superuser interactive session (merged all profiles)
@@ -2887,8 +2887,8 @@ case "$CMD" in
     cleanup_containers
     docker compose up -d
     _interactive_args=(--dangerously-skip-permissions)
-    if [ -n "${CLAUDE_SECURE_SYSTEM_PROMPT:-}" ]; then
-      _interactive_args+=(--system-prompt "$CLAUDE_SECURE_SYSTEM_PROMPT")
+    if [ -n "${CLAUDE_POD_SYSTEM_PROMPT:-}" ]; then
+      _interactive_args+=(--system-prompt "$CLAUDE_POD_SYSTEM_PROMPT")
     fi
     docker compose exec -it claude claude "${_interactive_args[@]}"
     docker compose down

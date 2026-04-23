@@ -18,8 +18,8 @@
 #
 # Guardrails:
 #   - Stubs `docker` on PATH (no real Docker daemon touched)
-#   - __CLAUDE_SECURE_SOURCE_ONLY=1 to expose bin/claude-secure internals
-#   - TEST_TMPDIR cleanup via trap EXIT, nothing touches real ~/.claude-secure
+#   - __CLAUDE_POD_SOURCE_ONLY=1 to expose bin/claude-pod internals
+#   - TEST_TMPDIR cleanup via trap EXIT, nothing touches real ~/.claude-pod
 #
 # Usage:
 #   bash tests/test-phase17.sh                         # run full suite
@@ -108,19 +108,19 @@ STUB
 # =========================================================================
 
 # =========================================================================
-# Source bin/claude-secure with __CLAUDE_SECURE_SOURCE_ONLY=1 so tests can
+# Source bin/claude-pod with __CLAUDE_POD_SOURCE_ONLY=1 so tests can
 # invoke internal functions (do_reap, reap_orphan_projects, etc.) directly.
 # After 17-02 lands, these functions exist and flip the sentinels green.
 # =========================================================================
-source_claude_secure_for_unit_test() {
-  export __CLAUDE_SECURE_SOURCE_ONLY=1
-  export CONFIG_DIR="$TEST_TMPDIR/home/.claude-secure"
+source_claude_pod_for_unit_test() {
+  export __CLAUDE_POD_SOURCE_ONLY=1
+  export CONFIG_DIR="$TEST_TMPDIR/home/.claude-pod"
   export APP_DIR="$PROJECT_DIR"
   export PROFILE="${PROFILE:-test-profile}"
   mkdir -p "$CONFIG_DIR/events" "$CONFIG_DIR/logs/spawns"
   # shellcheck disable=SC1090
-  source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null || true
-  unset __CLAUDE_SECURE_SOURCE_ONLY
+  source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null || true
+  unset __CLAUDE_POD_SOURCE_ONLY
 }
 
 # =========================================================================
@@ -164,24 +164,24 @@ test_e2e_token_no_ghp_prefix() {
 }
 
 test_reaper_unit_files_exist() {
-  [ -f "$PROJECT_DIR/webhook/claude-secure-reaper.service" ] \
-    || { echo "MISSING: webhook/claude-secure-reaper.service" >&2; return 1; }
-  [ -f "$PROJECT_DIR/webhook/claude-secure-reaper.timer" ] \
-    || { echo "MISSING: webhook/claude-secure-reaper.timer" >&2; return 1; }
+  [ -f "$PROJECT_DIR/webhook/claude-pod-reaper.service" ] \
+    || { echo "MISSING: webhook/claude-pod-reaper.service" >&2; return 1; }
+  [ -f "$PROJECT_DIR/webhook/claude-pod-reaper.timer" ] \
+    || { echo "MISSING: webhook/claude-pod-reaper.timer" >&2; return 1; }
   return 0
 }
 
 test_reap_grep_guard() {
   # OPS-03 static invariant (Specific Idea in 17-CONTEXT.md):
   # The reaper is privileged -- paranoia about its scope is warranted.
-  # Reject dangerous command shapes in bin/claude-secure:
+  # Reject dangerous command shapes in bin/claude-pod:
   #   - `docker ... --force`         (untargeted docker force)
   #   - `rm -rf /opt`                 (install dir destruction)
   #   - `rm -rf /etc`                 (systemd unit destruction)
   # In Wave 0 there is no reaper code, so this naturally returns zero
   # matches and passes. Later waves must keep it passing.
-  local bin="$PROJECT_DIR/bin/claude-secure"
-  [ -f "$bin" ] || { echo "bin/claude-secure missing" >&2; return 1; }
+  local bin="$PROJECT_DIR/bin/claude-pod"
+  [ -f "$bin" ] || { echo "bin/claude-pod missing" >&2; return 1; }
   if grep -nE 'docker.*--force|rm -rf /opt|rm -rf /etc' "$bin" >/dev/null; then
     echo "Dangerous pattern detected in $bin" >&2
     return 1
@@ -194,7 +194,7 @@ test_reap_grep_guard() {
 # =========================================================================
 
 test_reap_subcommand_exists() {
-  local bin="$PROJECT_DIR/bin/claude-secure"
+  local bin="$PROJECT_DIR/bin/claude-pod"
   grep -q '^do_reap()' "$bin" || { echo "missing do_reap() in $bin" >&2; return 1; }
   grep -q '^reap_orphan_projects()' "$bin" || { echo "missing reap_orphan_projects()" >&2; return 1; }
   grep -q '^reap_stale_event_files()' "$bin" || { echo "missing reap_stale_event_files()" >&2; return 1; }
@@ -206,32 +206,32 @@ test_reap_subcommand_exists() {
 test_reaper_unit_files_lint() {
   if ! command -v systemd-analyze >/dev/null 2>&1; then
     # No systemd on this host; fall back to structural grep
-    grep -q '^\[Unit\]' "$PROJECT_DIR/webhook/claude-secure-reaper.service" || return 1
-    grep -q '^\[Service\]' "$PROJECT_DIR/webhook/claude-secure-reaper.service" || return 1
-    grep -q '^\[Install\]' "$PROJECT_DIR/webhook/claude-secure-reaper.service" || return 1
-    grep -q '^\[Unit\]' "$PROJECT_DIR/webhook/claude-secure-reaper.timer" || return 1
-    grep -q '^\[Timer\]' "$PROJECT_DIR/webhook/claude-secure-reaper.timer" || return 1
-    grep -q '^\[Install\]' "$PROJECT_DIR/webhook/claude-secure-reaper.timer" || return 1
+    grep -q '^\[Unit\]' "$PROJECT_DIR/webhook/claude-pod-reaper.service" || return 1
+    grep -q '^\[Service\]' "$PROJECT_DIR/webhook/claude-pod-reaper.service" || return 1
+    grep -q '^\[Install\]' "$PROJECT_DIR/webhook/claude-pod-reaper.service" || return 1
+    grep -q '^\[Unit\]' "$PROJECT_DIR/webhook/claude-pod-reaper.timer" || return 1
+    grep -q '^\[Timer\]' "$PROJECT_DIR/webhook/claude-pod-reaper.timer" || return 1
+    grep -q '^\[Install\]' "$PROJECT_DIR/webhook/claude-pod-reaper.timer" || return 1
     return 0
   fi
   # systemd-analyze verify emits warnings for env-specific issues (ExecStart path
   # not present in test environment); we only fail on parse errors. The exit
   # code is what matters to us -- if it's 0 or the only issues are "file not
   # found" warnings (resolved at install time), we pass. Since the ExecStart
-  # binary /usr/local/bin/claude-secure won't exist on this dev host, we run
+  # binary /usr/local/bin/claude-pod won't exist on this dev host, we run
   # verify and tolerate its exit status, only requiring the files parse structurally.
   systemd-analyze verify \
-    "$PROJECT_DIR/webhook/claude-secure-reaper.service" \
-    "$PROJECT_DIR/webhook/claude-secure-reaper.timer" 2>&1 | \
+    "$PROJECT_DIR/webhook/claude-pod-reaper.service" \
+    "$PROJECT_DIR/webhook/claude-pod-reaper.timer" 2>&1 | \
     grep -viE 'does not exist|command .* is not executable|No such file or directory|is not installed' | \
     grep -iE '(error|invalid|bad)' && return 1
   return 0
 }
 
 test_reaper_service_directives() {
-  local f="$PROJECT_DIR/webhook/claude-secure-reaper.service"
+  local f="$PROJECT_DIR/webhook/claude-pod-reaper.service"
   grep -q '^Type=oneshot$' "$f" || { echo "missing Type=oneshot" >&2; return 1; }
-  grep -q '^ExecStart=/usr/local/bin/claude-secure reap$' "$f" || { echo "missing ExecStart" >&2; return 1; }
+  grep -q '^ExecStart=/usr/local/bin/claude-pod reap$' "$f" || { echo "missing ExecStart" >&2; return 1; }
   grep -q '^User=root$' "$f" || { echo "missing User=root" >&2; return 1; }
   grep -q '^Group=root$' "$f" || { echo "missing Group=root" >&2; return 1; }
   grep -q '^StandardOutput=journal$' "$f" || { echo "missing StandardOutput=journal" >&2; return 1; }
@@ -240,18 +240,18 @@ test_reaper_service_directives() {
 }
 
 test_reaper_timer_directives() {
-  local f="$PROJECT_DIR/webhook/claude-secure-reaper.timer"
+  local f="$PROJECT_DIR/webhook/claude-pod-reaper.timer"
   grep -q '^OnBootSec=2min$' "$f" || { echo "missing OnBootSec=2min" >&2; return 1; }
   grep -q '^OnUnitActiveSec=5min$' "$f" || { echo "missing OnUnitActiveSec=5min" >&2; return 1; }
   grep -q '^AccuracySec=30s$' "$f" || { echo "missing AccuracySec=30s" >&2; return 1; }
   grep -q '^Persistent=true$' "$f" || { echo "missing Persistent=true" >&2; return 1; }
-  grep -q '^Unit=claude-secure-reaper.service$' "$f" || { echo "missing Unit= binding" >&2; return 1; }
+  grep -q '^Unit=claude-pod-reaper.service$' "$f" || { echo "missing Unit= binding" >&2; return 1; }
   return 0
 }
 
 test_reaper_install_sections() {
-  local svc="$PROJECT_DIR/webhook/claude-secure-reaper.service"
-  local timer="$PROJECT_DIR/webhook/claude-secure-reaper.timer"
+  local svc="$PROJECT_DIR/webhook/claude-pod-reaper.service"
+  local timer="$PROJECT_DIR/webhook/claude-pod-reaper.timer"
   grep -q '^WantedBy=multi-user.target$' "$svc" || { echo "service missing WantedBy=multi-user.target" >&2; return 1; }
   grep -q '^WantedBy=timers.target$' "$timer" || { echo "timer missing WantedBy=timers.target" >&2; return 1; }
   return 0
@@ -262,7 +262,7 @@ test_reaper_install_sections() {
 # =========================================================================
 
 test_reap_age_threshold_select() {
-  source_claude_secure_for_unit_test
+  source_claude_pod_for_unit_test
   : > "$MOCK_DOCKER_LOG"
   export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
   export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
@@ -276,7 +276,7 @@ test_reap_age_threshold_select() {
 }
 
 test_reap_age_threshold_skip() {
-  source_claude_secure_for_unit_test
+  source_claude_pod_for_unit_test
   : > "$MOCK_DOCKER_LOG"
   export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
   # Created just now -> age 0, threshold huge -> skip
@@ -291,7 +291,7 @@ test_reap_age_threshold_skip() {
 }
 
 test_reap_compose_down_invocation() {
-  source_claude_secure_for_unit_test
+  source_claude_pod_for_unit_test
   : > "$MOCK_DOCKER_LOG"
   export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
   export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
@@ -305,7 +305,7 @@ test_reap_compose_down_invocation() {
 }
 
 test_reap_rmi_local_in_compose_down() {
-  source_claude_secure_for_unit_test
+  source_claude_pod_for_unit_test
   : > "$MOCK_DOCKER_LOG"
   export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
   export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
@@ -323,7 +323,7 @@ test_reap_rmi_local_in_compose_down() {
 }
 
 test_reap_instance_prefix_scoping() {
-  source_claude_secure_for_unit_test
+  source_claude_pod_for_unit_test
   : > "$MOCK_DOCKER_LOG"
   export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111\nns-other-44444444'
   export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
@@ -343,7 +343,7 @@ test_reap_instance_prefix_scoping() {
 }
 
 test_reap_per_project_failure_continues() {
-  source_claude_secure_for_unit_test
+  source_claude_pod_for_unit_test
   : > "$MOCK_DOCKER_LOG"
   export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111\ncs-test-22222222'
   export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
@@ -361,7 +361,7 @@ test_reap_per_project_failure_continues() {
 }
 
 test_reap_whole_cycle_failure_exits_nonzero() {
-  source_claude_secure_for_unit_test
+  source_claude_pod_for_unit_test
   : > "$MOCK_DOCKER_LOG"
   export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
   export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
@@ -380,7 +380,7 @@ test_reap_whole_cycle_failure_exits_nonzero() {
 }
 
 test_reap_dry_run() {
-  source_claude_secure_for_unit_test
+  source_claude_pod_for_unit_test
   : > "$MOCK_DOCKER_LOG"
   export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
   export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
@@ -405,7 +405,7 @@ test_reap_dry_run() {
 # =========================================================================
 
 test_reap_stale_event_files_deleted() {
-  source_claude_secure_for_unit_test
+  source_claude_pod_for_unit_test
   local events="$CONFIG_DIR/events"
   mkdir -p "$events"
   local stale="$events/stale-aaaaaaaa.json"
@@ -423,7 +423,7 @@ test_reap_stale_event_files_deleted() {
 }
 
 test_reap_fresh_event_files_preserved() {
-  source_claude_secure_for_unit_test
+  source_claude_pod_for_unit_test
   local events="$CONFIG_DIR/events"
   mkdir -p "$events"
   local fresh="$events/fresh-bbbbbbbb.json"
@@ -438,7 +438,7 @@ test_reap_fresh_event_files_preserved() {
 }
 
 test_reap_event_age_secs_override() {
-  source_claude_secure_for_unit_test
+  source_claude_pod_for_unit_test
   local events="$CONFIG_DIR/events"
   mkdir -p "$events"
   local fresh="$events/override-cccccccc.json"
@@ -461,7 +461,7 @@ test_reap_event_age_secs_override() {
 # =========================================================================
 
 test_reap_mkdir_lock_single_flight() {
-  source_claude_secure_for_unit_test
+  source_claude_pod_for_unit_test
   : > "$MOCK_DOCKER_LOG"
   export MOCK_DOCKER_PS_OUTPUT=$'cs-test-11111111'
   export MOCK_DOCKER_INSPECT_CREATED="2000-01-01T00:00:00Z"
@@ -498,7 +498,7 @@ test_reap_mkdir_lock_single_flight() {
 }
 
 test_reap_mkdir_lock_stale_reclaim() {
-  source_claude_secure_for_unit_test
+  source_claude_pod_for_unit_test
   : > "$MOCK_DOCKER_LOG"
   export MOCK_DOCKER_PS_OUTPUT=""
   export INSTANCE_PREFIX="cs-"
@@ -527,7 +527,7 @@ test_reap_mkdir_lock_stale_reclaim() {
 }
 
 test_reap_no_jsonl_output() {
-  local bin="$PROJECT_DIR/bin/claude-secure"
+  local bin="$PROJECT_DIR/bin/claude-pod"
   local body
   body=$(awk '/^do_reap\(\)/,/^}$/' "$bin")
   if echo "$body" | grep -q '>>'; then
@@ -538,7 +538,7 @@ test_reap_no_jsonl_output() {
 }
 
 test_reap_log_format() {
-  source_claude_secure_for_unit_test
+  source_claude_pod_for_unit_test
   : > "$MOCK_DOCKER_LOG"
   export MOCK_DOCKER_PS_OUTPUT=""
   export REAPER_ORPHAN_AGE_SECS=0
@@ -559,8 +559,8 @@ test_reap_log_format() {
 
 test_d11_directives_present() {
   local files=(
-    "$PROJECT_DIR/webhook/claude-secure-reaper.service"
-    "$PROJECT_DIR/webhook/claude-secure-webhook.service"
+    "$PROJECT_DIR/webhook/claude-pod-reaper.service"
+    "$PROJECT_DIR/webhook/claude-pod-webhook.service"
   )
   local directives=(
     ProtectKernelTunables
@@ -585,8 +585,8 @@ test_d11_directives_present() {
 
 test_d11_forbidden_directives_absent() {
   local files=(
-    "$PROJECT_DIR/webhook/claude-secure-reaper.service"
-    "$PROJECT_DIR/webhook/claude-secure-webhook.service"
+    "$PROJECT_DIR/webhook/claude-pod-reaper.service"
+    "$PROJECT_DIR/webhook/claude-pod-webhook.service"
   )
   local forbidden='^(NoNewPrivileges|ProtectSystem|PrivateTmp|CapabilityBoundingSet|ProtectHome|PrivateDevices)='
   local f
@@ -602,8 +602,8 @@ test_d11_forbidden_directives_absent() {
 
 test_d11_comment_block_present() {
   local files=(
-    "$PROJECT_DIR/webhook/claude-secure-reaper.service"
-    "$PROJECT_DIR/webhook/claude-secure-webhook.service"
+    "$PROJECT_DIR/webhook/claude-pod-reaper.service"
+    "$PROJECT_DIR/webhook/claude-pod-webhook.service"
   )
   local f
   for f in "${files[@]}"; do
@@ -648,24 +648,24 @@ test_installer_step_5d_present() {
     echo "missing step 5d comment header"
     return 1
   fi
-  if ! grep -q '/etc/systemd/system/claude-secure-reaper\.service' "$installer"; then
-    echo "missing /etc/systemd/system/claude-secure-reaper.service path"
+  if ! grep -q '/etc/systemd/system/claude-pod-reaper\.service' "$installer"; then
+    echo "missing /etc/systemd/system/claude-pod-reaper.service path"
     return 1
   fi
-  if ! grep -q '/etc/systemd/system/claude-secure-reaper\.timer' "$installer"; then
-    echo "missing /etc/systemd/system/claude-secure-reaper.timer path"
+  if ! grep -q '/etc/systemd/system/claude-pod-reaper\.timer' "$installer"; then
+    echo "missing /etc/systemd/system/claude-pod-reaper.timer path"
     return 1
   fi
   # Both unit files must be chmodded 644
   local chmod_count
-  chmod_count=$(grep -c 'sudo chmod 644 /etc/systemd/system/claude-secure-reaper' "$installer")
+  chmod_count=$(grep -c 'sudo chmod 644 /etc/systemd/system/claude-pod-reaper' "$installer")
   if [ "$chmod_count" -lt 2 ]; then
     echo "expected 2 chmod 644 lines for reaper unit+timer, got $chmod_count"
     return 1
   fi
   # Both unit files must be cp'd from $app_dir/webhook/
   local cp_count
-  cp_count=$(grep -c 'sudo cp .*claude-secure-reaper' "$installer")
+  cp_count=$(grep -c 'sudo cp .*claude-pod-reaper' "$installer")
   if [ "$cp_count" -lt 2 ]; then
     echo "expected 2 cp lines for reaper unit+timer, got $cp_count"
     return 1
@@ -680,13 +680,13 @@ test_installer_enables_timer() {
     return 1
   fi
   # Must enable the timer via systemctl, subject to the WSL2 gate.
-  # Expect at least two references to 'enable --now claude-secure-reaper.timer':
+  # Expect at least two references to 'enable --now claude-pod-reaper.timer':
   # 1. The real enable call
   # 2. The WSL2 manual-instructions fallback log_warn
   local enable_count
-  enable_count=$(grep -c 'enable --now claude-secure-reaper\.timer' "$installer")
+  enable_count=$(grep -c 'enable --now claude-pod-reaper\.timer' "$installer")
   if [ "$enable_count" -lt 2 ]; then
-    echo "expected >=2 'enable --now claude-secure-reaper.timer', got $enable_count"
+    echo "expected >=2 'enable --now claude-pod-reaper.timer', got $enable_count"
     return 1
   fi
   # WSL2 gate reuse: wsl2_no_systemd must be referenced near the new enable
@@ -697,8 +697,8 @@ test_installer_enables_timer() {
     return 1
   fi
   # is-active check on the timer after enable
-  if ! grep -q 'systemctl is-active --quiet claude-secure-reaper\.timer' "$installer"; then
-    echo "missing is-active check for claude-secure-reaper.timer"
+  if ! grep -q 'systemctl is-active --quiet claude-pod-reaper\.timer' "$installer"; then
+    echo "missing is-active check for claude-pod-reaper.timer"
     return 1
   fi
   return 0
@@ -710,10 +710,10 @@ test_installer_post_install_hint() {
     echo "install.sh missing"
     return 1
   fi
-  # D-18: installer prints the exact `journalctl -u claude-secure-reaper -f`
+  # D-18: installer prints the exact `journalctl -u claude-pod-reaper -f`
   # hint so operators know how to tail reaper activity.
-  if ! grep -q 'journalctl -u claude-secure-reaper -f' "$installer"; then
-    echo "missing 'journalctl -u claude-secure-reaper -f' post-install hint"
+  if ! grep -q 'journalctl -u claude-pod-reaper -f' "$installer"; then
+    echo "missing 'journalctl -u claude-pod-reaper -f' post-install hint"
     return 1
   fi
   # Cadence hint: '5 minutes' must appear in the hint for operator context.

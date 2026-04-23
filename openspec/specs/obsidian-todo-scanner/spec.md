@@ -1,11 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: obsidian profile routes push events from llm-gourmet/obsidian
-A claude-secure profile named `obsidian` SHALL exist with `"repo": "llm-gourmet/obsidian"`, a `webhook_secret`, and a push event filter restricted to `["master", "main"]`. The webhook listener SHALL route all matching push events to this profile.
+A claude-pod profile named `obsidian` SHALL exist with `"repo": "llm-gourmet/obsidian"`, a `webhook_secret`, and a push event filter restricted to `["master", "main"]`. The webhook listener SHALL route all matching push events to this profile.
 
 #### Scenario: Push to master triggers spawn
 - **WHEN** GitHub sends a push event for `llm-gourmet/obsidian` on branch `master`
-- **THEN** the webhook listener resolves the `obsidian` profile, verifies the HMAC signature, and calls `claude-secure spawn --profile obsidian --event-file <path>`
+- **THEN** the webhook listener resolves the `obsidian` profile, verifies the HMAC signature, and calls `claude-pod spawn --profile obsidian --event-file <path>`
 
 #### Scenario: Push to non-master branch is filtered
 - **WHEN** GitHub sends a push event for `llm-gourmet/obsidian` on branch `feature/xyz`
@@ -42,8 +42,8 @@ Caddy SHALL be configured as a reverse proxy forwarding requests to `<public-hos
 - **THEN** the listener returns HTTP 200 with `{"status": "ok"}`
 
 ### Requirement: Spawn result captured in logs
-The output of the Claude TODO-scanner session SHALL be captured in `~/.claude-secure/logs/spawns/<delivery_id>.log` and accessible without additional tooling.
+The output of the Claude TODO-scanner session SHALL be captured in `~/.claude-pod/logs/spawns/<delivery_id>.log` and accessible without additional tooling.
 
 #### Scenario: Scan result visible in spawn log
 - **WHEN** a spawn completes (TODO found or not found)
-- **THEN** `~/.claude-secure/logs/spawns/<delivery_id>.log` contains Claude's one-line output
+- **THEN** `~/.claude-pod/logs/spawns/<delivery_id>.log` contains Claude's one-line output

@@ -7,6 +7,6 @@
   "webhooks_dir": "__REPLACED_BY_INSTALLER__WEBHOOKS__",
   "events_dir": "__REPLACED_BY_INSTALLER__EVENTS__",
   "logs_dir": "__REPLACED_BY_INSTALLER__LOGS__",
-  "claude_secure_bin": "/usr/local/bin/claude-secure",
+  "claude_pod_bin": "/usr/local/bin/claude-pod",
   "config_dir": "__REPLACED_BY_INSTALLER__CONFIG_DIR__"
 }

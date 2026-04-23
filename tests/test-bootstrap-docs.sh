@@ -2,7 +2,7 @@
 # test-bootstrap-docs.sh -- Unit tests for bootstrap-docs subcommand
 # Tests BOOT-01 through BOOT-15
 #
-# Strategy: source bin/claude-secure with __CLAUDE_SECURE_SOURCE_ONLY=1 to
+# Strategy: source bin/claude-pod with __CLAUDE_POD_SOURCE_ONLY=1 to
 # load function definitions, use temp dirs as CONFIG_DIR and local bare repos
 # as git remote. No Docker, no real credentials needed.
 #
@@ -33,12 +33,12 @@ run_test() {
 _run_cmd() {
   local cfg="$1"; shift
   bash -c "
-    __CLAUDE_SECURE_SOURCE_ONLY=1
+    __CLAUDE_POD_SOURCE_ONLY=1
     CONFIG_DIR='$cfg'
     _CLEANUP_FILES=()
     cleanup() { for f in \"\${_CLEANUP_FILES[@]:-}\"; do rm -rf \"\$f\"; done; }
     trap cleanup EXIT
-    source '$PROJECT_DIR/bin/claude-secure'
+    source '$PROJECT_DIR/bin/claude-pod'
     cmd_bootstrap_docs $*
   "
 }
@@ -103,9 +103,9 @@ test_add_connection_duplicate() {
     --repo https://github.com/org/docs --token ghp_xxx >/dev/null
   local out rc=0
   out=$(bash -c "
-    __CLAUDE_SECURE_SOURCE_ONLY=1
+    __CLAUDE_POD_SOURCE_ONLY=1
     CONFIG_DIR='$cfg'
-    source '$PROJECT_DIR/bin/claude-secure'
+    source '$PROJECT_DIR/bin/claude-pod'
     cmd_bootstrap_docs --add-connection --name work-docs \
       --repo https://github.com/org/docs2 --token ghp_yyy 2>&1
   ") || rc=$?
@@ -154,9 +154,9 @@ test_remove_connection_unknown() {
     --repo https://github.com/org/docs --token ghp_xxx >/dev/null
   local out rc=0
   out=$(bash -c "
-    __CLAUDE_SECURE_SOURCE_ONLY=1
+    __CLAUDE_POD_SOURCE_ONLY=1
     CONFIG_DIR='$cfg'
-    source '$PROJECT_DIR/bin/claude-secure'
+    source '$PROJECT_DIR/bin/claude-pod'
     cmd_bootstrap_docs --remove-connection nonexistent 2>&1
   ") || rc=$?
   rm -rf "$cfg"
@@ -173,9 +173,9 @@ test_list_connections_output() {
     --repo https://github.com/org/docs --token ghp_secret --branch main >/dev/null
   local out
   out=$(bash -c "
-    __CLAUDE_SECURE_SOURCE_ONLY=1
+    __CLAUDE_POD_SOURCE_ONLY=1
     CONFIG_DIR='$cfg'
-    source '$PROJECT_DIR/bin/claude-secure'
+    source '$PROJECT_DIR/bin/claude-pod'
     cmd_bootstrap_docs --list-connections 2>&1
   ")
   rm -rf "$cfg"
@@ -193,9 +193,9 @@ test_list_connections_empty() {
   local cfg; cfg=$(mktemp -d)
   local out rc=0
   out=$(bash -c "
-    __CLAUDE_SECURE_SOURCE_ONLY=1
+    __CLAUDE_POD_SOURCE_ONLY=1
     CONFIG_DIR='$cfg'
-    source '$PROJECT_DIR/bin/claude-secure'
+    source '$PROJECT_DIR/bin/claude-pod'
     cmd_bootstrap_docs --list-connections 2>&1
   ") || rc=$?
   rm -rf "$cfg"
@@ -210,10 +210,10 @@ test_missing_connection_flag() {
   local cfg; cfg=$(mktemp -d)
   local out rc=0
   out=$(bash -c "
-    __CLAUDE_SECURE_SOURCE_ONLY=1
+    __CLAUDE_POD_SOURCE_ONLY=1
     CONFIG_DIR='$cfg'
     _CLEANUP_FILES=()
-    source '$PROJECT_DIR/bin/claude-secure'
+    source '$PROJECT_DIR/bin/claude-pod'
     cmd_bootstrap_docs projects/JAD 2>&1
   ") || rc=$?
   rm -rf "$cfg"
@@ -230,10 +230,10 @@ test_unknown_connection_name() {
     --repo https://github.com/org/docs --token ghp_xxx >/dev/null
   local out rc=0
   out=$(bash -c "
-    __CLAUDE_SECURE_SOURCE_ONLY=1
+    __CLAUDE_POD_SOURCE_ONLY=1
     CONFIG_DIR='$cfg'
     _CLEANUP_FILES=()
-    source '$PROJECT_DIR/bin/claude-secure'
+    source '$PROJECT_DIR/bin/claude-pod'
     cmd_bootstrap_docs --connection nosuchname projects/JAD 2>&1
   ") || rc=$?
   rm -rf "$cfg"
@@ -280,12 +280,12 @@ test_path_already_exists_error() {
 
   local out rc=0
   out=$(bash -c "
-    __CLAUDE_SECURE_SOURCE_ONLY=1
+    __CLAUDE_POD_SOURCE_ONLY=1
     CONFIG_DIR='$cfg'
     _CLEANUP_FILES=()
     cleanup() { for f in \"\${_CLEANUP_FILES[@]:-}\"; do rm -rf \"\$f\"; done; }
     trap cleanup EXIT
-    source '$PROJECT_DIR/bin/claude-secure'
+    source '$PROJECT_DIR/bin/claude-pod'
     cmd_bootstrap_docs --add-connection --name testconn \
       --repo 'file://$remote/repo.git' --token dummy-token --branch main >/dev/null
     cmd_bootstrap_docs --connection testconn projects/JAD 2>&1
@@ -310,12 +310,12 @@ test_e2e_scaffold() {
   rm -rf "$work"
 
   bash -c "
-    __CLAUDE_SECURE_SOURCE_ONLY=1
+    __CLAUDE_POD_SOURCE_ONLY=1
     CONFIG_DIR='$cfg'
     _CLEANUP_FILES=()
     cleanup() { for f in \"\${_CLEANUP_FILES[@]:-}\"; do rm -rf \"\$f\"; done; }
     trap cleanup EXIT
-    source '$PROJECT_DIR/bin/claude-secure'
+    source '$PROJECT_DIR/bin/claude-pod'
     cmd_bootstrap_docs --add-connection --name testconn \
       --repo 'file://$remote/repo.git' --token dummy-token --branch main >/dev/null
     cmd_bootstrap_docs --connection testconn projects/MYPROJECT >/dev/null 2>&1
@@ -351,12 +351,12 @@ test_no_tmpdir_after_run() {
   local before after
   before=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name "cs-bootstrap-*" 2>/dev/null | wc -l)
   bash -c "
-    __CLAUDE_SECURE_SOURCE_ONLY=1
+    __CLAUDE_POD_SOURCE_ONLY=1
     CONFIG_DIR='$cfg'
     _CLEANUP_FILES=()
     cleanup() { for f in \"\${_CLEANUP_FILES[@]:-}\"; do rm -rf \"\$f\"; done; }
     trap cleanup EXIT
-    source '$PROJECT_DIR/bin/claude-secure'
+    source '$PROJECT_DIR/bin/claude-pod'
     cmd_bootstrap_docs --add-connection --name testconn \
       --repo 'file://$remote/repo.git' --token dummy-token --branch main >/dev/null
     cmd_bootstrap_docs --connection testconn projects/CLEANUP >/dev/null 2>&1

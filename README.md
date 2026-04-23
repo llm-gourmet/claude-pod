@@ -1,4 +1,4 @@
-# claude-secure
+# claude-pod
 
 Run Claude Code inside a Docker sandbox where no secret can leave without your permission.
 
@@ -12,7 +12,7 @@ Run Claude Code inside a Docker sandbox where no secret can leave without your p
 
 ```bash
 git clone <repo-url>
-cd claude-secure
+cd claude-pod
 sudo bash install.sh
 ```
 
@@ -30,31 +30,31 @@ claude setup-token
 ```bash
 # creates a new profile. Each profile requires the its own Anthropic-Auth via Oauth / Api Key
 
-claude-secure profile create myapp
+claude-pod profile create myapp
 
 # creates
-# ~/.claude-secure/profiles/myapp/.env
-# ~/.claude-secure/profiles/myapp/profile.json
-# ~/.claude-secure/profiles/myapp/system_prompts/
-# ~/.claude-secure/profiles/myapp/tasks/
+# ~/.claude-pod/profiles/myapp/.env
+# ~/.claude-pod/profiles/myapp/profile.json
+# ~/.claude-pod/profiles/myapp/system_prompts/
+# ~/.claude-pod/profiles/myapp/tasks/
 ```
 
 **4. Add a secret**
 
 ```bash
 # Key Features of this package are used in this command
-claude-secure profile myapp secret add GITHUB_TOKEN gh_xyxyxyxyxyx --redacted REDACTED_GITHUB_TOKEN --domains "github.com","api.github.com","raw.githubusercontent.com"
+claude-pod profile myapp secret add GITHUB_TOKEN gh_xyxyxyxyxyx --redacted REDACTED_GITHUB_TOKEN --domains "github.com","api.github.com","raw.githubusercontent.com"
 
 # You set GITHUB_TOKEN with its real value and provide the redacted name REDACTED_GITHUB_TOKEN which will be sent to anthropic in case claude tries to send your secret to the API
 # the 3 domains are whitelisted and allow to have sent Payload ( and auth )
-# Only the domains from ~/.claude-secure/profiles/<name>/profile.json are whitelisted and allowed to receive payload
+# Only the domains from ~/.claude-pod/profiles/<name>/profile.json are whitelisted and allowed to receive payload
 
 ```
 
 **5. Start a session**
 
 ```bash
-claude-secure start myapp
+claude-pod start myapp
 ```
 
 Claude Code is now running inside the Docker sandbox — no secret can leave without passing through the security layers.
@@ -65,10 +65,10 @@ Claude Code is now running inside the Docker sandbox — no secret can leave wit
 
 ```bash
 # Task prompt (required) — what Claude should do. Passed as -p on start/spawn.
-nano ~/.claude-secure/profiles/myapp/tasks/default.md
+nano ~/.claude-pod/profiles/myapp/tasks/default.md
 
 # System prompt (optional) — Claude's persona and constraints.
-nano ~/.claude-secure/profiles/myapp/system_prompts/default.md
+nano ~/.claude-pod/profiles/myapp/system_prompts/default.md
 ```
 
 For event-driven spawns you can add per-event overrides (`push.md`, `issues-opened.md`, …). The full webhook event JSON is always appended to the task prompt automatically — Claude receives the raw payload without needing to call any API.
@@ -85,11 +85,11 @@ Then register the connection and verify the listener:
 
 ```bash
 # Link the GitHub repo to the myapp profile
-claude-secure gh-webhook-listener --add-connection \
+claude-pod gh-webhook-listener --add-connection \
   --name myapp --repo org/myapp --webhook-secret mysecretvalue
 
 # Should show: Systemd: active, Health: ok
-claude-secure gh-webhook-listener status
+claude-pod gh-webhook-listener status
 ```
 
 Register the webhook on GitHub: **Settings → Webhooks → Add webhook**
@@ -108,11 +108,11 @@ Scaffold a standard documentation structure into a remote git repo — runs on t
 
 ```bash
 # Register the target repo once
-claude-secure bootstrap-docs --add-connection --name work-docs \
+claude-pod bootstrap-docs --add-connection --name work-docs \
   --repo https://github.com/you/vault.git --token ghp_...
 
 # Scaffold a new project inside it
-claude-secure bootstrap-docs --connection work-docs projects/myapp
+claude-pod bootstrap-docs --connection work-docs projects/myapp
 ```
 
 Creates `VISION.md`, `GOALS.md`, `AGREEMENTS.md`, `TODOS.md`, `TASKS.md`, `decisions/`, `ideas/`, `done/` under `projects/myapp/`.
@@ -123,16 +123,16 @@ Before relying on real GitHub events, verify the full pipeline locally:
 
 ```bash
 # Dry run — preview which task/system-prompt files resolve and show rendered content
-claude-secure spawn myapp \
+claude-pod spawn myapp \
   --event '{"action":"opened","repository":{"full_name":"org/myapp"}}' \
   --dry-run
 
 # Live test — spawn Claude with a synthetic event
-claude-secure spawn myapp \
+claude-pod spawn myapp \
   --event '{"action":"opened","repository":{"full_name":"org/myapp"}}'
 
 # Follow the output in real time
-claude-secure logs myapp
+claude-pod logs myapp
 ```
 
 Use GitHub's **Redeliver** button (Settings → Webhooks → Recent Deliveries) to replay a real event once everything is wired up.
@@ -149,14 +149,14 @@ Supported platforms: Linux (native), WSL2
 
 ```bash
 git clone <repo-url>
-cd claude-secure
+cd claude-pod
 sudo ./install.sh
 
 # With webhook listener + container reaper (optional)
 sudo ./install.sh --with-webhook
 ```
 
-The installer builds Docker images, installs `claude-secure` to `/usr/local/bin`, copies the project tree to `~/.claude-secure/app/`, and writes a default profile at `~/.claude-secure/profiles/default/`.
+The installer builds Docker images, installs `claude-pod` to `/usr/local/bin`, copies the project tree to `~/.claude-pod/app/`, and writes a default profile at `~/.claude-pod/profiles/default/`.
 
 **Non-interactive install** — export the auth variable before running:
 
@@ -177,17 +177,17 @@ sudo -E ANTHROPIC_API_KEY="$KEY" REAL_ANTHROPIC_BASE_URL="https://yourcompany.co
 
 ```bash
 # Preview what would be removed (no changes made)
-claude-secure uninstall --dry-run
+claude-pod uninstall --dry-run
 
-# Full uninstall — removes binary, systemd services, /opt/claude-secure/, shared templates
-# Prompts before deleting ~/.claude-secure/ (contains your API keys and profiles)
-claude-secure uninstall
+# Full uninstall — removes binary, systemd services, /opt/claude-pod/, shared templates
+# Prompts before deleting ~/.claude-pod/ (contains your API keys and profiles)
+claude-pod uninstall
 
 # Keep user data, remove everything else
-claude-secure uninstall --keep-data
+claude-pod uninstall --keep-data
 
 # Also remove Docker images built by the installer
-claude-secure uninstall --remove-images
+claude-pod uninstall --remove-images
 ```
 
 The uninstaller is idempotent — if something is already absent it warns and continues. Exit code is always 0.
@@ -198,73 +198,73 @@ The uninstaller is idempotent — if something is already absent it warns and co
 
 ```bash
 # Profile setup
-claude-secure profile create <name>   # Create a profile interactively, then exit
-claude-secure profile <name>          # Show profile info (workspace, secrets, status)
+claude-pod profile create <name>   # Create a profile interactively, then exit
+claude-pod profile <name>          # Show profile info (workspace, secrets, status)
 
 # Profile config
-claude-secure profile <name> secret list
-claude-secure profile <name> secret add <KEY> [<value>] [--redacted <TOKEN>] [--domains d1,d2,...]
-claude-secure profile <name> secret remove <KEY>
+claude-pod profile <name> secret list
+claude-pod profile <name> secret add <KEY> [<value>] [--redacted <TOKEN>] [--domains d1,d2,...]
+claude-pod profile <name> secret remove <KEY>
 
 # Task + system prompt: edit files under the profile directory (see "Tasks and system prompts")
-#   ~/.claude-secure/profiles/<name>/tasks/default.md          (task prompt, required)
-#   ~/.claude-secure/profiles/<name>/system_prompts/default.md (system prompt, optional)
+#   ~/.claude-pod/profiles/<name>/tasks/default.md          (task prompt, required)
+#   ~/.claude-pod/profiles/<name>/system_prompts/default.md (system prompt, optional)
 
 # Session
-claude-secure start <name>            # Start an interactive Claude Code session
-claude-secure                         # Superuser mode (all profiles merged)
+claude-pod start <name>            # Start an interactive Claude Code session
+claude-pod                         # Superuser mode (all profiles merged)
 
 # Headless and replay
-claude-secure spawn <name> --event '<json>'
-claude-secure spawn <name> --event-file <path>
-claude-secure replay <name> <delivery-id>
+claude-pod spawn <name> --event '<json>'
+claude-pod spawn <name> --event-file <path>
+claude-pod replay <name> <delivery-id>
 
 # Management
-claude-secure status [name]           # Container status (all if no name given)
-claude-secure stop [name]             # Stop containers (all if no name given)
-claude-secure remove <name>           # Stop containers and delete profile config
-claude-secure logs <name>             # Tail all log files [hook|anthropic|iptables|clear]
-claude-secure list                    # List profiles and running state
+claude-pod status [name]           # Container status (all if no name given)
+claude-pod stop [name]             # Stop containers (all if no name given)
+claude-pod remove <name>           # Stop containers and delete profile config
+claude-pod logs <name>             # Tail all log files [hook|anthropic|iptables|clear]
+claude-pod list                    # List profiles and running state
 
 # System
-claude-secure update                  # Pull latest source, rebuild, update CLI
-claude-secure upgrade                 # Rebuild Claude image with latest Claude Code
-claude-secure reap                    # Clean up orphaned containers and stale events
-claude-secure uninstall               # Remove claude-secure completely
-claude-secure uninstall --dry-run     # Preview what would be removed
-claude-secure uninstall --keep-data   # Remove binaries/services, preserve ~/.claude-secure/
-claude-secure uninstall --remove-images  # Also remove Docker images
-claude-secure help                    # Show all commands
+claude-pod update                  # Pull latest source, rebuild, update CLI
+claude-pod upgrade                 # Rebuild Claude image with latest Claude Code
+claude-pod reap                    # Clean up orphaned containers and stale events
+claude-pod uninstall               # Remove claude-pod completely
+claude-pod uninstall --dry-run     # Preview what would be removed
+claude-pod uninstall --keep-data   # Remove binaries/services, preserve ~/.claude-pod/
+claude-pod uninstall --remove-images  # Also remove Docker images
+claude-pod help                    # Show all commands
 
 # Webhook listener
-claude-secure gh-webhook-listener status
-claude-secure gh-webhook-listener --add-connection --name <n> --repo owner/repo --webhook-secret <s> [--profile <p>]
-claude-secure gh-webhook-listener --remove-connection <name>
-claude-secure gh-webhook-listener --list-connections
-claude-secure gh-webhook-listener --set-profile <profile> --name <name>
-claude-secure gh-webhook-listener --set-bind <addr>
-claude-secure gh-webhook-listener --set-port <port>
+claude-pod gh-webhook-listener status
+claude-pod gh-webhook-listener --add-connection --name <n> --repo owner/repo --webhook-secret <s> [--profile <p>]
+claude-pod gh-webhook-listener --remove-connection <name>
+claude-pod gh-webhook-listener --list-connections
+claude-pod gh-webhook-listener --set-profile <profile> --name <name>
+claude-pod gh-webhook-listener --set-bind <addr>
+claude-pod gh-webhook-listener --set-port <port>
 
 # Skip filters (loop prevention)
-claude-secure gh-webhook-listener filter add "<value>" --name <connection>
-claude-secure gh-webhook-listener filter list --name <connection>
-claude-secure gh-webhook-listener filter remove "<value>" --name <connection>
+claude-pod gh-webhook-listener filter add "<value>" --name <connection>
+claude-pod gh-webhook-listener filter list --name <connection>
+claude-pod gh-webhook-listener filter remove "<value>" --name <connection>
 
 # Docs bootstrap
-claude-secure bootstrap-docs --add-connection --name <n> --repo <url> --token <pat>
-claude-secure bootstrap-docs --list-connections
-claude-secure bootstrap-docs --remove-connection <name>
-claude-secure bootstrap-docs --connection <name> <path>
+claude-pod bootstrap-docs --add-connection --name <n> --repo <url> --token <pat>
+claude-pod bootstrap-docs --list-connections
+claude-pod bootstrap-docs --remove-connection <name>
+claude-pod bootstrap-docs --connection <name> <path>
 ```
 
 **Log flags** — append to any command:
 
 ```bash
-claude-secure start myapp log:hook        # Hook script decisions
-claude-secure start myapp log:anthropic   # Proxy metadata
-claude-secure start myapp log:bodies      # Proxy full request/response bodies
-claude-secure start myapp log:iptables    # Validator/iptables events
-claude-secure start myapp log:all         # Everything (metadata, no bodies)
+claude-pod start myapp log:hook        # Hook script decisions
+claude-pod start myapp log:anthropic   # Proxy metadata
+claude-pod start myapp log:bodies      # Proxy full request/response bodies
+claude-pod start myapp log:iptables    # Validator/iptables events
+claude-pod start myapp log:all         # Everything (metadata, no bodies)
 ```
 
 ---
@@ -276,7 +276,7 @@ A profile is a named workspace with its own credentials, secrets, and allowed do
 ### Creating a profile
 
 ```bash
-claude-secure profile create myapp
+claude-pod profile create myapp
 ```
 
 Interactive setup prompts:
@@ -294,7 +294,7 @@ Profile names must be lowercase alphanumeric and hyphens, max 63 characters.
 ### Profile directory layout
 
 ```
-~/.claude-secure/profiles/<name>/
+~/.claude-pod/profiles/<name>/
   profile.json            # workspace path, secrets[], optional repo
   .env                    # auth token/key and raw secret values (mode 600)
   tasks/
@@ -331,7 +331,7 @@ Profile names must be lowercase alphanumeric and hyphens, max 63 characters.
 | `secrets[].redacted` | no | Opaque token substituted in LLM context instead of the real value |
 | `secrets[].domains` | no | Outbound domains the hook allows when this secret is in use |
 
-The system prompt is no longer stored in `profile.json`. Existing installations are migrated automatically by `claude-secure update` (`system_prompt` → `system_prompts/default.md`).
+The system prompt is no longer stored in `profile.json`. Existing installations are migrated automatically by `claude-pod update` (`system_prompt` → `system_prompts/default.md`).
 
 `profile.json` is re-read on every request — no restart needed after edits.
 
@@ -340,7 +340,7 @@ The system prompt is no longer stored in `profile.json`. Existing installations 
 Holds the auth credential and any additional secrets:
 
 ```bash
-# ~/.claude-secure/profiles/<name>/.env
+# ~/.claude-pod/profiles/<name>/.env
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # or ANTHROPIC_API_KEY=...
 # REAL_ANTHROPIC_BASE_URL=https://yourcompany.com/v1  # optional
 
@@ -353,14 +353,14 @@ Edit `.env` directly to add or rotate secrets. A container restart (`stop` + `st
 
 ```bash
 # List secrets
-claude-secure profile myapp secret list
+claude-pod profile myapp secret list
 
 # Add or update a secret (value prompted silently if omitted — recommended)
-claude-secure profile myapp secret add GITHUB_TOKEN
-claude-secure profile myapp secret add GITHUB_TOKEN --redacted REDACTED_GITHUB --domains github.com,api.github.com
+claude-pod profile myapp secret add GITHUB_TOKEN
+claude-pod profile myapp secret add GITHUB_TOKEN --redacted REDACTED_GITHUB --domains github.com,api.github.com
 
 # Remove a secret
-claude-secure profile myapp secret remove GITHUB_TOKEN
+claude-pod profile myapp secret remove GITHUB_TOKEN
 ```
 
 - `--redacted` defaults to `REDACTED_<KEY>` if omitted.
@@ -373,7 +373,7 @@ claude-secure profile myapp secret remove GITHUB_TOKEN
 Per-profile markdown files under the profile directory drive what Claude does and how it behaves:
 
 ```
-~/.claude-secure/profiles/<name>/
+~/.claude-pod/profiles/<name>/
   tasks/
     default.md            # required — passed as -p to Claude
     <event_type>.md       # optional — takes precedence for spawn events
@@ -389,7 +389,7 @@ Resolution chain used by `start` and `spawn`:
 
 Files are passed to Claude as-is (no token substitution). The full webhook event JSON is **always appended** to the task prompt as a fenced code block — Claude receives the raw payload directly without needing to call any API. Claude can also run `git show`, `git log`, etc. for additional context.
 
-Edit the files directly — changes take effect on the next `start` or `spawn`, no restart needed. Use `claude-secure spawn <name> --event '<json>' --dry-run` to verify which files resolve and preview the rendered content.
+Edit the files directly — changes take effect on the next `start` or `spawn`, no restart needed. Use `claude-pod spawn <name> --event '<json>' --dry-run` to verify which files resolve and preview the rendered content.
 
 ---
 
@@ -399,7 +399,7 @@ A single webhook listener handles all repos. GitHub webhooks from every repo hit
 
 ### Connections
 
-Connections are stored in `~/.claude-secure/webhooks/connections.json` (mode 600).
+Connections are stored in `~/.claude-pod/webhooks/connections.json` (mode 600).
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -410,27 +410,27 @@ Connections are stored in `~/.claude-secure/webhooks/connections.json` (mode 600
 
 ```bash
 # Add a connection (profile defaults to name)
-claude-secure gh-webhook-listener --add-connection \
+claude-pod gh-webhook-listener --add-connection \
   --name myrepo --repo org/myrepo --webhook-secret <secret>
 
 # Add a connection with a different profile name
-claude-secure gh-webhook-listener --add-connection \
+claude-pod gh-webhook-listener --add-connection \
   --name myrepo --repo org/myrepo --webhook-secret <secret> --profile myrepo-docs
 
 # Change the profile for an existing connection
-claude-secure gh-webhook-listener --set-profile myrepo-docs --name myrepo
+claude-pod gh-webhook-listener --set-profile myrepo-docs --name myrepo
 
 # List connections (secret redacted; profile shown when it differs from name)
-claude-secure gh-webhook-listener --list-connections
+claude-pod gh-webhook-listener --list-connections
 
 # Remove a connection
-claude-secure gh-webhook-listener --remove-connection myrepo
+claude-pod gh-webhook-listener --remove-connection myrepo
 ```
 
 ### Status
 
 ```bash
-claude-secure gh-webhook-listener status
+claude-pod gh-webhook-listener status
 ```
 
 ```
@@ -443,17 +443,17 @@ Webhook Listener Status
 ### Configuration
 
 ```bash
-claude-secure gh-webhook-listener --set-bind <addr>   # default: 127.0.0.1
-claude-secure gh-webhook-listener --set-port <port>   # default: 9000
+claude-pod gh-webhook-listener --set-bind <addr>   # default: 127.0.0.1
+claude-pod gh-webhook-listener --set-port <port>   # default: 9000
 ```
 
-Settings persisted to `~/.claude-secure/webhooks/webhook.json`.
+Settings persisted to `~/.claude-pod/webhooks/webhook.json`.
 
 ### Adding a repo
 
 1. Add a connection:
    ```bash
-   claude-secure gh-webhook-listener --add-connection \
+   claude-pod gh-webhook-listener --add-connection \
      --name myrepo --repo org/myrepo --webhook-secret <secret>
    ```
 2. Register a GitHub webhook on the repo:
@@ -465,12 +465,12 @@ No new listener, no new port — the existing systemd service routes by `repo` f
 
 ### Loop prevention / skip filters
 
-When claude-secure acts on a GitHub event (pushes, comments, labels), it can trigger new webhook deliveries and re-spawn itself. Skip filters prevent this by matching events before the spawn decision.
+When claude-pod acts on a GitHub event (pushes, comments, labels), it can trigger new webhook deliveries and re-spawn itself. Skip filters prevent this by matching events before the spawn decision.
 
 **Add a filter** (applies to all applicable event types automatically):
 
 ```bash
-claude-secure gh-webhook-listener filter add "[skip-claude]" --name myrepo
+claude-pod gh-webhook-listener filter add "[skip-claude]" --name myrepo
 ```
 
 Output shows which mechanisms the filter applies to:
@@ -495,15 +495,15 @@ Filter "[skip-claude]" added to connection "myrepo":
 **List and remove:**
 
 ```bash
-claude-secure gh-webhook-listener filter list --name myrepo
-claude-secure gh-webhook-listener filter remove "[skip-claude]" --name myrepo
+claude-pod gh-webhook-listener filter list --name myrepo
+claude-pod gh-webhook-listener filter remove "[skip-claude]" --name myrepo
 ```
 
 Skipped events return HTTP 200 and a `skipped` entry is written to `webhook.jsonl`. Multiple filter values can be active on a connection simultaneously.
 
 ### Docs-oriented profiles
 
-Profiles for documentation tools (e.g. an Obsidian vault) can live under `~/.claude-secure/docs/<name>/` instead of `~/.claude-secure/profiles/<name>/`. The structure is identical. The listener and CLI probe both directories; `profiles/` takes priority on name collision.
+Profiles for documentation tools (e.g. an Obsidian vault) can live under `~/.claude-pod/docs/<name>/` instead of `~/.claude-pod/profiles/<name>/`. The structure is identical. The listener and CLI probe both directories; `profiles/` takes priority on name collision.
 
 ---
 
@@ -548,7 +548,7 @@ The listener stays on `127.0.0.1` — never exposed directly to the internet.
 
 ```bash
 # Change bind address
-claude-secure gh-webhook-listener --set-bind 0.0.0.0
+claude-pod gh-webhook-listener --set-bind 0.0.0.0
 
 # Open the firewall
 sudo ufw allow 9000/tcp
@@ -579,15 +579,15 @@ Scaffold a standard project documentation structure into a remote git repo — n
 
 ```bash
 # Register a named connection
-claude-secure bootstrap-docs --add-connection --name work-docs \
+claude-pod bootstrap-docs --add-connection --name work-docs \
   --repo https://github.com/you/vault.git --token ghp_... [--branch main]
 
 # Manage connections
-claude-secure bootstrap-docs --list-connections
-claude-secure bootstrap-docs --remove-connection work-docs
+claude-pod bootstrap-docs --list-connections
+claude-pod bootstrap-docs --remove-connection work-docs
 
 # Scaffold a new project
-claude-secure bootstrap-docs --connection work-docs projects/myproject
+claude-pod bootstrap-docs --connection work-docs projects/myproject
 ```
 
 Creates under `<path>/`:
@@ -597,7 +597,7 @@ TODOS.md    TASKS.md
 decisions/  ideas/     done/
 ```
 
-Each file is seeded from `scripts/templates/`. Connections stored in `~/.claude-secure/docs-bootstrap/connections.json` (mode 600) — tokens never touch Claude or Docker.
+Each file is seeded from `scripts/templates/`. Connections stored in `~/.claude-pod/docs-bootstrap/connections.json` (mode 600) — tokens never touch Claude or Docker.
 
 ---
 
@@ -629,16 +629,16 @@ GITHUB_TOKEN=ghp_xxx
 
 | Path | Owner | Purpose |
 |------|-------|---------|
-| `~/.claude-secure/profiles/<name>/` | user | Per-profile secrets (`.env`) and config (`profile.json`) |
-| `~/.claude-secure/docs/<name>/` | user | Docs-oriented profiles; same structure as `profiles/` |
-| `~/.claude-secure/app/` | user | Copy of the project tree (updated by `claude-secure update`) |
-| `~/.claude-secure/logs/` | user | Structured logs written by services |
-| `~/.claude-secure/webhooks/webhook.json` | user (600) | Webhook listener runtime config |
-| `~/.claude-secure/webhooks/connections.json` | user (600) | Webhook connections |
-| `~/.claude-secure/docs-bootstrap/connections.json` | user (600) | Docs-bootstrap connections |
-| `/etc/systemd/system/claude-secure-webhook.service` | root | Systemd unit for the webhook listener |
-| `/opt/claude-secure/` | root | Installed app files: `webhook/listener.py`, templates, reaper script |
-| `/usr/local/bin/claude-secure` | root | CLI wrapper |
+| `~/.claude-pod/profiles/<name>/` | user | Per-profile secrets (`.env`) and config (`profile.json`) |
+| `~/.claude-pod/docs/<name>/` | user | Docs-oriented profiles; same structure as `profiles/` |
+| `~/.claude-pod/app/` | user | Copy of the project tree (updated by `claude-pod update`) |
+| `~/.claude-pod/logs/` | user | Structured logs written by services |
+| `~/.claude-pod/webhooks/webhook.json` | user (600) | Webhook listener runtime config |
+| `~/.claude-pod/webhooks/connections.json` | user (600) | Webhook connections |
+| `~/.claude-pod/docs-bootstrap/connections.json` | user (600) | Docs-bootstrap connections |
+| `/etc/systemd/system/claude-pod-webhook.service` | root | Systemd unit for the webhook listener |
+| `/opt/claude-pod/` | root | Installed app files: `webhook/listener.py`, templates, reaper script |
+| `/usr/local/bin/claude-pod` | root | CLI wrapper |
 
 ---
 
@@ -707,7 +707,7 @@ The `secrets[]` array in `profile.json` drives both redaction and domain enforce
 
 ### PreToolUse hook
 
-Every `Bash`, `WebFetch`, and `WebSearch` tool call passes through a hook script at `/etc/claude-secure/hooks/pre-tool-use.sh` inside the Claude container (root-owned, not writable by the Claude process).
+Every `Bash`, `WebFetch`, and `WebSearch` tool call passes through a hook script at `/etc/claude-pod/hooks/pre-tool-use.sh` inside the Claude container (root-owned, not writable by the Claude process).
 
 The hook:
 1. Extracts the target domain from the tool call payload

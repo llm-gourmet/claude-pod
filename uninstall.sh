@@ -30,7 +30,7 @@ if [ -z "${_invoking_home:-}" ]; then
   exit 1
 fi
 
-CONFIG_DIR="$_invoking_home/.claude-secure"
+CONFIG_DIR="$_invoking_home/.claude-pod"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -59,7 +59,7 @@ parse_args() {
         echo "Usage: $0 [--dry-run] [--keep-data] [--remove-images]"
         echo ""
         echo "  --dry-run        Preview removals without making changes"
-        echo "  --keep-data      Preserve ~/.claude-secure/ while removing binaries and services"
+        echo "  --keep-data      Preserve ~/.claude-pod/ while removing binaries and services"
         echo "  --remove-images  Also remove Docker images built by the installer"
         exit 0
         ;;
@@ -90,8 +90,8 @@ load_config() {
 }
 
 remove_cli_binary() {
-  local system_bin="/usr/local/bin/claude-secure"
-  local user_bin="$_invoking_home/.local/bin/claude-secure"
+  local system_bin="/usr/local/bin/claude-pod"
+  local user_bin="$_invoking_home/.local/bin/claude-pod"
 
   if [ -f "$system_bin" ]; then
     log_info "Removing CLI binary: $system_bin"
@@ -108,12 +108,12 @@ remove_cli_binary() {
     else log_warn "Failed to remove $user_bin"; _skipped+=("$user_bin (removal failed)"); fi
   else
     log_warn "CLI binary not found at $system_bin or $user_bin, skipping"
-    _skipped+=("claude-secure binary (not found in known locations)")
+    _skipped+=("claude-pod binary (not found in known locations)")
   fi
 }
 
 remove_shared_templates() {
-  local share_dir="/usr/local/share/claude-secure"
+  local share_dir="/usr/local/share/claude-pod"
 
   if [ -d "$share_dir" ]; then
     log_info "Removing shared templates: $share_dir"
@@ -131,7 +131,7 @@ remove_shared_templates() {
 }
 
 remove_opt_dir() {
-  local opt_dir="/opt/claude-secure"
+  local opt_dir="/opt/claude-pod"
 
   if [ -d "$opt_dir" ]; then
     log_info "Removing /opt directory: $opt_dir"
@@ -152,14 +152,14 @@ remove_systemd_services() {
   if ! command -v systemctl >/dev/null 2>&1; then
     log_warn "systemctl not available — skipping service removal"
     log_warn "If services were installed, remove manually:"
-    log_warn "  /etc/systemd/system/claude-secure-webhook.service"
-    log_warn "  /etc/systemd/system/claude-secure-reaper.service"
-    log_warn "  /etc/systemd/system/claude-secure-reaper.timer"
+    log_warn "  /etc/systemd/system/claude-pod-webhook.service"
+    log_warn "  /etc/systemd/system/claude-pod-reaper.service"
+    log_warn "  /etc/systemd/system/claude-pod-reaper.timer"
     _skipped+=("systemd services (systemctl not available)")
     return 0
   fi
 
-  local -a unit_names=("claude-secure-webhook.service" "claude-secure-reaper.service" "claude-secure-reaper.timer")
+  local -a unit_names=("claude-pod-webhook.service" "claude-pod-reaper.service" "claude-pod-reaper.timer")
   local daemon_reload_needed=0
 
   for unit in "${unit_names[@]}"; do
@@ -201,7 +201,7 @@ remove_docker_images() {
   fi
 
   local images
-  images="$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep '^claude-secure' || true)"
+  images="$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep '^claude-pod' || true)"
 
   if [ -z "$images" ]; then
     _skipped+=("Docker images (none found)")
@@ -209,7 +209,7 @@ remove_docker_images() {
   fi
 
   if [ "$REMOVE_IMAGES" -eq 0 ]; then
-    log_warn "claude-secure Docker images found (pass --remove-images to delete):"
+    log_warn "claude-pod Docker images found (pass --remove-images to delete):"
     while IFS= read -r img; do
       log_warn "  $img"
     done <<< "$images"
@@ -306,7 +306,7 @@ print_summary() {
 main() {
   parse_args "$@"
 
-  echo "=== claude-secure uninstaller ==="
+  echo "=== claude-pod uninstaller ==="
   echo ""
 
   [ "$DRY_RUN" -eq 1 ] && log_info "Dry-run mode — no changes will be made"

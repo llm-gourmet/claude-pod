@@ -1,12 +1,12 @@
-# /etc/systemd/system/claude-secure-reaper.timer
+# /etc/systemd/system/claude-pod-reaper.timer
 # Installed by install.sh --with-webhook (Phase 17 step 5d).
-# Source of truth: webhook/claude-secure-reaper.timer in the claude-secure repo.
+# Source of truth: webhook/claude-pod-reaper.timer in the claude-pod repo.
 #
-# Triggers claude-secure-reaper.service every 5 minutes after a 2-minute boot warmup.
+# Triggers claude-pod-reaper.service every 5 minutes after a 2-minute boot warmup.
 # Locked by .planning/phases/17-operational-hardening/17-CONTEXT.md D-01..D-02.
 
 [Unit]
-Description=claude-secure reaper periodic timer
+Description=claude-pod reaper periodic timer
 Documentation=https://github.com/llm-gourmet/claude-pod
 
 [Timer]
@@ -26,7 +26,7 @@ AccuracySec=30s
 # monotonic timers too.
 Persistent=true
 
-Unit=claude-secure-reaper.service
+Unit=claude-pod-reaper.service
 
 [Install]
 WantedBy=timers.target

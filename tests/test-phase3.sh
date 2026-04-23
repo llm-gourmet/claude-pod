@@ -92,8 +92,8 @@ echo "Building and starting containers with test overrides..."
 _TMP_WS_P3=$(mktemp -d)
 export WORKSPACE_PATH="$_TMP_WS_P3"
 docker compose -f docker-compose.yml -f "$OVERRIDE_FILE" build --quiet proxy >/dev/null 2>&1 || true
-docker image inspect claude-secure-proxy >/dev/null 2>&1 || { echo "FATAL: proxy build failed"; exit 1; }
-docker volume rm -f claude-secure_workspace >/dev/null 2>&1 || true
+docker image inspect claude-pod-proxy >/dev/null 2>&1 || { echo "FATAL: proxy build failed"; exit 1; }
+docker volume rm -f claude-pod_workspace >/dev/null 2>&1 || true
 docker compose -f docker-compose.yml -f "$OVERRIDE_FILE" up -d || { echo "FATAL: docker compose up failed"; exit 1; }
 
 # Wait for proxy container to be ready

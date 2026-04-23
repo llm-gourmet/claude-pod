@@ -1,5 +1,5 @@
 #!/bin/bash
-# test-update-cmd.sh -- Unit tests for `claude-secure update` and `upgrade` subcommands
+# test-update-cmd.sh -- Unit tests for `claude-pod update` and `upgrade` subcommands
 #
 # Regression tests for the two bugs fixed in fix-update-cmd:
 #   UPD-01: update/upgrade skip load_superuser_config (no merge_env_files →
@@ -8,7 +8,7 @@
 #
 # Strategy:
 #   - UPD-01a/b: static grep of source to verify both invariants are present
-#   - UPD-02/03: behaviour tests — run `bin/claude-secure update` against a
+#   - UPD-02/03: behaviour tests — run `bin/claude-pod update` against a
 #     synthetic CONFIG_DIR with an unreadable .env and mock git/docker binaries;
 #     assert exit 0 and no "Permission denied" in output
 #
@@ -22,7 +22,7 @@ TOTAL=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CLI="$PROJECT_DIR/bin/claude-secure"
+CLI="$PROJECT_DIR/bin/claude-pod"
 
 run_test() {
   local name="$1"; shift
@@ -60,7 +60,7 @@ _make_config_dir() {
   local tmpdir="$1"
   local mode="${2:-readable}"     # readable | unreadable
 
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles/default" "$cfg/logs"
 
   # config.sh – tells the CLI where APP_DIR is
@@ -155,7 +155,7 @@ test_upd03_unreadable_env_no_permission_denied() {
   local output
   output=$(
     HOME="$tmpdir" \
-    CONFIG_DIR="$tmpdir/.claude-secure" \
+    CONFIG_DIR="$tmpdir/.claude-pod" \
     PATH="$tmpdir/bin:$PATH" \
     bash "$CLI" update 2>&1
   )
@@ -279,7 +279,7 @@ test_upd05_no_toplevel_local() {
     return 1
   fi
 }
-run_test "UPD-05: no 'local' used outside a function in bin/claude-secure" \
+run_test "UPD-05: no 'local' used outside a function in bin/claude-pod" \
   test_upd05_no_toplevel_local
 
 echo ""

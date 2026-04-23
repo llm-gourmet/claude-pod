@@ -2,8 +2,8 @@
 # test-phase13.sh -- Integration tests for Phase 13: Headless CLI Path
 # Tests HEAD-01 through HEAD-05 (spawn subcommand, output, max-turns, ephemeral lifecycle, templates)
 #
-# Strategy: Use temp directories for all config to avoid touching real ~/.claude-secure.
-# Source bin/claude-secure functions with __CLAUDE_SECURE_SOURCE_ONLY=1.
+# Strategy: Use temp directories for all config to avoid touching real ~/.claude-pod.
+# Source bin/claude-pod functions with __CLAUDE_POD_SOURCE_ONLY=1.
 # Functions not yet implemented are guarded with `type` checks and SKIP gracefully.
 #
 # Usage: bash tests/test-phase13.sh
@@ -44,29 +44,29 @@ echo "========================================"
 echo ""
 
 # =========================================================================
-# Helper: Source profile functions from bin/claude-secure
-# We source the script with __CLAUDE_SECURE_SOURCE_ONLY=1 to skip execution
+# Helper: Source profile functions from bin/claude-pod
+# We source the script with __CLAUDE_POD_SOURCE_ONLY=1 to skip execution
 # and only load function definitions.
 # =========================================================================
 
 # Set up a minimal config environment so sourcing works
 _setup_source_env() {
   local tmpdir="$1"
-  mkdir -p "$tmpdir/.claude-secure/profiles"
-  cat > "$tmpdir/.claude-secure/config.sh" <<EOF
+  mkdir -p "$tmpdir/.claude-pod/profiles"
+  cat > "$tmpdir/.claude-pod/config.sh" <<EOF
 APP_DIR="$PROJECT_DIR"
 PLATFORM="linux"
 EOF
   export HOME="$tmpdir"
-  export CONFIG_DIR="$tmpdir/.claude-secure"
+  export CONFIG_DIR="$tmpdir/.claude-pod"
 }
 
-# Source bin/claude-secure functions
+# Source bin/claude-pod functions
 _source_functions() {
   local tmpdir="$1"
   _setup_source_env "$tmpdir"
   # shellcheck source=/dev/null
-  __CLAUDE_SECURE_SOURCE_ONLY=1 source "$PROJECT_DIR/bin/claude-secure"
+  __CLAUDE_POD_SOURCE_ONLY=1 source "$PROJECT_DIR/bin/claude-pod"
 }
 
 # Helper: Create a valid test profile directory
@@ -115,7 +115,7 @@ test_spawn_requires_event() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
-  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  create_test_profile "testprof" "$tmpdir/.claude-pod" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
   if ! type do_spawn &>/dev/null; then
     echo "SKIP (do_spawn not yet implemented)"
@@ -135,7 +135,7 @@ test_spawn_rejects_invalid_json() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
-  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  create_test_profile "testprof" "$tmpdir/.claude-pod" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
   if ! type do_spawn &>/dev/null; then
     echo "SKIP (do_spawn not yet implemented)"
@@ -154,7 +154,7 @@ test_spawn_accepts_event_file() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
-  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  create_test_profile "testprof" "$tmpdir/.claude-pod" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
   if ! type do_spawn &>/dev/null; then
     echo "SKIP (do_spawn not yet implemented)"
@@ -179,7 +179,7 @@ test_spawn_parses_prompt_template() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
-  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  create_test_profile "testprof" "$tmpdir/.claude-pod" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
   if ! type do_spawn &>/dev/null; then
     echo "SKIP (do_spawn not yet implemented)"
@@ -273,15 +273,15 @@ test_resolve_template_by_event_type() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
-  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  create_test_profile "testprof" "$tmpdir/.claude-pod" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
   if ! type resolve_template &>/dev/null; then
     echo "SKIP (resolve_template not yet implemented)"
     return 0
   fi
 
-  mkdir -p "$tmpdir/.claude-secure/profiles/testprof/prompts"
-  echo "Handle this issue: {{ISSUE_TITLE}}" > "$tmpdir/.claude-secure/profiles/testprof/prompts/issue-opened.md"
+  mkdir -p "$tmpdir/.claude-pod/profiles/testprof/prompts"
+  echo "Handle this issue: {{ISSUE_TITLE}}" > "$tmpdir/.claude-pod/profiles/testprof/prompts/issue-opened.md"
 
   PROFILE="testprof"
   local result
@@ -296,15 +296,15 @@ test_resolve_template_explicit_override() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
-  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  create_test_profile "testprof" "$tmpdir/.claude-pod" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
   if ! type resolve_template &>/dev/null; then
     echo "SKIP (resolve_template not yet implemented)"
     return 0
   fi
 
-  mkdir -p "$tmpdir/.claude-secure/profiles/testprof/prompts"
-  echo "Custom prompt: {{REPO_NAME}}" > "$tmpdir/.claude-secure/profiles/testprof/prompts/custom.md"
+  mkdir -p "$tmpdir/.claude-pod/profiles/testprof/prompts"
+  echo "Custom prompt: {{REPO_NAME}}" > "$tmpdir/.claude-pod/profiles/testprof/prompts/custom.md"
 
   PROFILE="testprof"
   local result
@@ -319,7 +319,7 @@ test_resolve_template_missing_fails() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
-  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  create_test_profile "testprof" "$tmpdir/.claude-pod" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
   if ! type resolve_template &>/dev/null; then
     echo "SKIP (resolve_template not yet implemented)"
@@ -336,7 +336,7 @@ test_resolve_template_from_docs_dir() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
-  create_test_profile "docsprof" "$tmpdir/.claude-secure" "$tmpdir/ws-docsprof"
+  create_test_profile "docsprof" "$tmpdir/.claude-pod" "$tmpdir/ws-docsprof"
   _source_functions "$tmpdir"
   if ! type resolve_template &>/dev/null; then
     echo "SKIP (resolve_template not yet implemented)"
@@ -344,8 +344,8 @@ test_resolve_template_from_docs_dir() {
   fi
 
   # Profile lives under docs/ not profiles/ — simulate by placing prompt there.
-  mkdir -p "$tmpdir/.claude-secure/docs/docsprof/prompts"
-  echo "Docs prompt: {{REPO_NAME}}" > "$tmpdir/.claude-secure/docs/docsprof/prompts/push.md"
+  mkdir -p "$tmpdir/.claude-pod/docs/docsprof/prompts"
+  echo "Docs prompt: {{REPO_NAME}}" > "$tmpdir/.claude-pod/docs/docsprof/prompts/push.md"
 
   PROFILE="docsprof"
   local result
@@ -366,12 +366,12 @@ test_resolve_profile_dir_finds_docs() {
     return 0
   fi
 
-  mkdir -p "$tmpdir/.claude-secure/docs/obsidian"
-  echo '{"workspace":"'$tmpdir'"}' > "$tmpdir/.claude-secure/docs/obsidian/profile.json"
+  mkdir -p "$tmpdir/.claude-pod/docs/obsidian"
+  echo '{"workspace":"'$tmpdir'"}' > "$tmpdir/.claude-pod/docs/obsidian/profile.json"
 
   local result
   result=$(resolve_profile_dir "obsidian")
-  [ "$result" = "$tmpdir/.claude-secure/docs/obsidian" ] || return 1
+  [ "$result" = "$tmpdir/.claude-pod/docs/obsidian" ] || return 1
   return 0
 }
 run_test "DOCS-01: resolve_profile_dir returns docs/ path when profile absent from profiles/" test_resolve_profile_dir_finds_docs
@@ -430,7 +430,7 @@ test_dry_run_flag_parsed() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _setup_source_env "$tmpdir"
-  create_test_profile "testprof" "$tmpdir/.claude-secure" "$tmpdir/ws-testprof"
+  create_test_profile "testprof" "$tmpdir/.claude-pod" "$tmpdir/ws-testprof"
   _source_functions "$tmpdir"
   if ! type do_spawn &>/dev/null; then
     echo "SKIP (do_spawn not yet implemented)"

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""claude-secure webhook listener.
+"""claude-pod webhook listener.
 
 Receives GitHub webhook POSTs, verifies HMAC-SHA256 against the raw body,
-persists the payload, and hands off to `claude-secure spawn` via subprocess.
+persists the payload, and hands off to `claude-pod spawn` via subprocess.
 
 Locked decisions: see .planning/phases/14-webhook-listener/14-CONTEXT.md D-01..D-27.
 
@@ -119,8 +119,8 @@ class Config:
         self.webhooks_dir = pathlib.Path(data["webhooks_dir"]) if data.get("webhooks_dir") else None
         self.events_dir = pathlib.Path(data["events_dir"])
         self.logs_dir = pathlib.Path(data["logs_dir"])
-        self.claude_secure_bin = data.get(
-            "claude_secure_bin", "/usr/local/bin/claude-secure"
+        self.claude_pod_bin = data.get(
+            "claude_pod_bin", "/usr/local/bin/claude-pod"
         )
         self.config_dir = data.get("config_dir") or ""
 
@@ -180,7 +180,7 @@ def log_event(**kwargs):
 
 
 # ---------------------------------------------------------------------------
-# Connection resolution — reads ~/.claude-secure/webhooks/connections.json
+# Connection resolution — reads ~/.claude-pod/webhooks/connections.json
 # ---------------------------------------------------------------------------
 def resolve_connection_by_repo(
     webhooks_dir: "pathlib.Path | None",
@@ -316,7 +316,7 @@ def spawn_async(connection_name: str, event_path: pathlib.Path, delivery_id: str
 
 
 def _spawn_worker(connection_name: str, event_path: pathlib.Path, delivery_id: str):
-    """Worker thread: acquire semaphore, call claude-secure spawn, log outcome."""
+    """Worker thread: acquire semaphore, call claude-pod spawn, log outcome."""
     global _active_spawns
     _spawn_semaphore.acquire()  # may block if saturated (D-15)
     with _active_lock:
@@ -326,7 +326,7 @@ def _spawn_worker(connection_name: str, event_path: pathlib.Path, delivery_id: s
         log_path = _config.logs_dir / f"spawn-{delivery_id[:12]}.log"
         try:
             result = subprocess.run(
-                [_config.claude_secure_bin, "spawn", connection_name, "--event-file", str(event_path)],
+                [_config.claude_pod_bin, "spawn", connection_name, "--event-file", str(event_path)],
                 capture_output=True,
                 text=True,
             )
@@ -359,7 +359,7 @@ def _spawn_worker(connection_name: str, event_path: pathlib.Path, delivery_id: s
 class WebhookHandler(BaseHTTPRequestHandler):
     """HTTP handler for /webhook and /health endpoints."""
 
-    server_version = "claude-secure-webhook/1.0"
+    server_version = "claude-pod-webhook/1.0"
 
     # Silence default stderr access log; we use structured JSONL logging.
     def log_message(self, fmt, *args):
@@ -564,7 +564,7 @@ def _sigterm_handler(signum, frame):
 def main():
     global _server, _spawn_semaphore, _config
 
-    ap = argparse.ArgumentParser(description="claude-secure webhook listener")
+    ap = argparse.ArgumentParser(description="claude-pod webhook listener")
     ap.add_argument("--config", required=True, type=pathlib.Path)
     args = ap.parse_args()
 

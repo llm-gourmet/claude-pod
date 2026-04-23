@@ -5,11 +5,11 @@ const dns = require('dns');
 const fs = require('fs');
 
 const UPSTREAM = process.env.REAL_ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
-const PROFILE_PATH = process.env.PROFILE_PATH || '/etc/claude-secure/profile.json';
+const PROFILE_PATH = process.env.PROFILE_PATH || '/etc/claude-pod/profile.json';
 const warnedEnvVars = new Set();
 
 const LOG_PREFIX = process.env.LOG_PREFIX || '';
-const LOG_PATH = `/var/log/claude-secure/${LOG_PREFIX}anthropic.jsonl`;
+const LOG_PATH = `/var/log/claude-pod/${LOG_PREFIX}anthropic.jsonl`;
 const LOG_ENABLED = process.env.LOG_ANTHROPIC === '1';
 const LOG_BODIES = process.env.LOG_ANTHROPIC_BODIES === '1';
 

@@ -2,8 +2,8 @@
 # test-phase9.sh -- Integration tests for Phase 9: Multi-Instance Support
 # Tests MULTI-01 through MULTI-09
 #
-# Strategy: Use temp directories for all config to avoid touching real ~/.claude-secure.
-# Test bin/claude-secure functions by invoking with controlled environments.
+# Strategy: Use temp directories for all config to avoid touching real ~/.claude-pod.
+# Test bin/claude-pod functions by invoking with controlled environments.
 # For Docker-dependent tests, skip gracefully if Docker is unavailable.
 #
 # Usage: bash tests/test-phase9.sh
@@ -42,7 +42,7 @@ echo ""
 # =========================================================================
 test_profile_required_for_spawn() {
   local output
-  output=$(bash "$PROJECT_DIR/bin/claude-secure" spawn 2>&1) && return 1
+  output=$(bash "$PROJECT_DIR/bin/claude-pod" spawn 2>&1) && return 1
   echo "$output" | grep -qi "profile" || return 1
   return 0
 }
@@ -84,7 +84,7 @@ test_load_profile_config_exports_core_vars() {
   tmpdir=$(mktemp -d)
   trap "rm -rf '$tmpdir'" RETURN
 
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   local pdir="$cfg/profiles/myproj"
   mkdir -p "$pdir" "$tmpdir/workspace"
 
@@ -97,20 +97,20 @@ EOF
 
   local workspace compose_name
   workspace=$(
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$cfg"
-    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "myproj"
     echo "$WORKSPACE_PATH"
   )
   compose_name=$(
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$cfg"
-    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "myproj"
     echo "$COMPOSE_PROJECT_NAME"
   )
@@ -159,7 +159,7 @@ test_per_instance_config() {
   tmpdir=$(mktemp -d)
   trap "rm -rf '$tmpdir'" RETURN
 
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles/foo" "$cfg/profiles/bar"
 
   # Profile foo
@@ -221,7 +221,7 @@ test_list_command() {
   tmpdir=$(mktemp -d)
   trap "rm -rf '$tmpdir'" RETURN
 
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles/foo" "$cfg/profiles/bar" \
            "$tmpdir/ws-foo" "$tmpdir/ws-bar"
 
@@ -234,7 +234,7 @@ test_list_command() {
   printf 'ANTHROPIC_API_KEY=test\n' > "$cfg/profiles/bar/.env"
 
   local output
-  output=$(HOME="$tmpdir" bash "$PROJECT_DIR/bin/claude-secure" list 2>/dev/null) || true
+  output=$(HOME="$tmpdir" bash "$PROJECT_DIR/bin/claude-pod" list 2>/dev/null) || true
 
   echo "$output" | grep -q 'foo' || { echo "foo not in list output" >&2; return 1; }
   echo "$output" | grep -q 'bar' || { echo "bar not in list output" >&2; return 1; }
@@ -251,7 +251,7 @@ test_auto_creation_structure() {
   tmpdir=$(mktemp -d)
   trap "rm -rf '$tmpdir'" RETURN
 
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   local pdir="$cfg/profiles/testprof"
   local ws="$tmpdir/ws-testprof"
   mkdir -p "$pdir" "$ws"
@@ -282,7 +282,7 @@ test_profile_config_scope() {
   tmpdir=$(mktemp -d)
   trap "rm -rf '$tmpdir'" RETURN
 
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   local pdir="$cfg/profiles/scoped"
   mkdir -p "$pdir" "$tmpdir/ws"
 
@@ -293,11 +293,11 @@ EOF
 
   local ws
   ws=$(
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$cfg"
-    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "scoped"
     echo "$WORKSPACE_PATH"
   )
@@ -305,23 +305,23 @@ EOF
   [ "$ws" = "$tmpdir/ws" ] || { echo "WORKSPACE_PATH wrong: $ws" >&2; return 1; }
 
   # CLI must reference CONFIG_DIR/profiles for profile resolution
-  grep -q 'profiles' "$PROJECT_DIR/bin/claude-secure" || return 1
+  grep -q 'profiles' "$PROJECT_DIR/bin/claude-pod" || return 1
   return 0
 }
 run_test "MULTI-09: Profile config scope (workspace from profile.json)" test_profile_config_scope
 
 # =========================================================================
-# MULTI-10: system_prompts/default.md file sets CLAUDE_SECURE_SYSTEM_PROMPT
-# load_profile_config must export CLAUDE_SECURE_SYSTEM_PROMPT from the file.
-# bin/claude-secure must still reference --system-prompt and
-# CLAUDE_SECURE_SYSTEM_PROMPT when the value is set.
+# MULTI-10: system_prompts/default.md file sets CLAUDE_POD_SYSTEM_PROMPT
+# load_profile_config must export CLAUDE_POD_SYSTEM_PROMPT from the file.
+# bin/claude-pod must still reference --system-prompt and
+# CLAUDE_POD_SYSTEM_PROMPT when the value is set.
 # =========================================================================
 test_system_prompt_field() {
   local tmpdir
   tmpdir=$(mktemp -d)
   trap "rm -rf '$tmpdir'" RETURN
 
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   local pdir="$cfg/profiles/sysprompt"
   mkdir -p "$pdir/system_prompts" "$tmpdir/ws"
 
@@ -332,42 +332,42 @@ EOF
   printf 'You are a helpful assistant with access to REPORT_REPO_TOKEN.' \
     > "$pdir/system_prompts/default.md"
 
-  # Verify load_profile_config exports CLAUDE_SECURE_SYSTEM_PROMPT
+  # Verify load_profile_config exports CLAUDE_POD_SYSTEM_PROMPT
   local got_prompt
   got_prompt=$(
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$cfg"
-    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "sysprompt"
-    echo "$CLAUDE_SECURE_SYSTEM_PROMPT"
+    echo "$CLAUDE_POD_SYSTEM_PROMPT"
   )
 
   [ "$got_prompt" = "You are a helpful assistant with access to REPORT_REPO_TOKEN." ] \
-    || { echo "CLAUDE_SECURE_SYSTEM_PROMPT wrong: $got_prompt" >&2; return 1; }
+    || { echo "CLAUDE_POD_SYSTEM_PROMPT wrong: $got_prompt" >&2; return 1; }
 
-  # Verify bin/claude-secure passes --system-prompt to claude when set
-  grep -q -- '--system-prompt' "$PROJECT_DIR/bin/claude-secure" || return 1
-  grep -q 'CLAUDE_SECURE_SYSTEM_PROMPT' "$PROJECT_DIR/bin/claude-secure" || return 1
+  # Verify bin/claude-pod passes --system-prompt to claude when set
+  grep -q -- '--system-prompt' "$PROJECT_DIR/bin/claude-pod" || return 1
+  grep -q 'CLAUDE_POD_SYSTEM_PROMPT' "$PROJECT_DIR/bin/claude-pod" || return 1
 
-  # Verify missing system_prompts/default.md leaves CLAUDE_SECURE_SYSTEM_PROMPT empty
+  # Verify missing system_prompts/default.md leaves CLAUDE_POD_SYSTEM_PROMPT empty
   rm -f "$pdir/system_prompts/default.md"
   local empty_prompt
   empty_prompt=$(
-    export __CLAUDE_SECURE_SOURCE_ONLY=1
+    export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$cfg"
-    source "$PROJECT_DIR/bin/claude-secure" 2>/dev/null
-    unset __CLAUDE_SECURE_SOURCE_ONLY
+    source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null
+    unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "sysprompt"
-    echo "${CLAUDE_SECURE_SYSTEM_PROMPT:-}"
+    echo "${CLAUDE_POD_SYSTEM_PROMPT:-}"
   )
-  [ -z "$empty_prompt" ] || { echo "Expected empty CLAUDE_SECURE_SYSTEM_PROMPT, got: $empty_prompt" >&2; return 1; }
+  [ -z "$empty_prompt" ] || { echo "Expected empty CLAUDE_POD_SYSTEM_PROMPT, got: $empty_prompt" >&2; return 1; }
 
   return 0
 }
-run_test "MULTI-10: system_prompts/default.md sets CLAUDE_SECURE_SYSTEM_PROMPT" test_system_prompt_field
+run_test "MULTI-10: system_prompts/default.md sets CLAUDE_POD_SYSTEM_PROMPT" test_system_prompt_field
 
 # =========================================================================
 # MULTI-11: profile create <name> exits without starting containers
@@ -376,7 +376,7 @@ test_profile_flag_no_containers() {
   local tmpdir
   tmpdir=$(mktemp -d)
   trap "rm -rf '$tmpdir'" RETURN
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles"
 
   local fake_bin="$tmpdir/bin"
@@ -395,7 +395,7 @@ DOCKER
   # Inputs: workspace path, auth method (2=API key), API key, base URL (empty=default)
   printf '%s\n%s\n%s\n%s\n' "$ws" "2" "test-api-key-dummy" "" | \
     HOME="$tmpdir" CONFIG_DIR="$cfg" PATH="$fake_bin:$PATH" \
-      bash "$PROJECT_DIR/bin/claude-secure" profile create newprof 2>/dev/null
+      bash "$PROJECT_DIR/bin/claude-pod" profile create newprof 2>/dev/null
 
   # Profile should be created
   [ -f "$cfg/profiles/newprof/profile.json" ] || return 1
@@ -415,12 +415,12 @@ test_start_unknown_profile() {
   local tmpdir
   tmpdir=$(mktemp -d)
   trap "rm -rf '$tmpdir'" RETURN
-  local cfg="$tmpdir/.claude-secure"
+  local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles"
 
   local output
   output=$(HOME="$tmpdir" CONFIG_DIR="$cfg" \
-    bash "$PROJECT_DIR/bin/claude-secure" start nonexistent 2>&1) && return 1
+    bash "$PROJECT_DIR/bin/claude-pod" start nonexistent 2>&1) && return 1
   echo "$output" | grep -qi "not found\|does not exist" || return 1
   return 0
 }

@@ -22,7 +22,7 @@ from urllib.parse import urlparse, parse_qs
 DB_PATH = os.environ.get("VALIDATOR_DB_PATH", "/data/validator.db")
 CALL_TTL_SECONDS = 10
 LISTEN_PORT = 8088
-PROFILE_PATH = "/etc/claude-secure/profile.json"
+PROFILE_PATH = "/etc/claude-pod/profile.json"
 CLEANUP_INTERVAL_SECONDS = 5
 
 logger = logging.getLogger("validator")
@@ -410,9 +410,9 @@ if __name__ == "__main__":
 
     if os.environ.get("LOG_IPTABLES") == "1":
         log_prefix = os.environ.get("LOG_PREFIX", "")
-        json_handler = JsonFileHandler(f"/var/log/claude-secure/{log_prefix}iptables.jsonl")
+        json_handler = JsonFileHandler(f"/var/log/claude-pod/{log_prefix}iptables.jsonl")
         logger.addHandler(json_handler)
-        logger.info(f"JSON file logging enabled: /var/log/claude-secure/{log_prefix}iptables.jsonl")
+        logger.info(f"JSON file logging enabled: /var/log/claude-pod/{log_prefix}iptables.jsonl")
 
     # Initialize database
     init_db()
