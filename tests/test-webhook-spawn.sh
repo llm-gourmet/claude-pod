@@ -44,6 +44,7 @@ install_stub() {
   cat > "$TEST_TMPDIR/bin/claude-pod" <<STUB
 #!/bin/bash
 printf '%s\n' "\$*" >> "\${STUB_LOG:-/tmp/stub.log}"
+printf 'CONFIG_DIR=%s\n' "\${CONFIG_DIR:-}" >> "\${STUB_LOG:-/tmp/stub.log}"
 exit ${exit_code}
 STUB
   chmod +x "$TEST_TMPDIR/bin/claude-pod"
@@ -84,7 +85,8 @@ JSON
   "webhooks_dir": "$webhooks_dir",
   "events_dir": "$home_dir/.claude-pod/events",
   "logs_dir": "$home_dir/.claude-pod/logs",
-  "claude_pod_bin": "$TEST_TMPDIR/bin/claude-pod"
+  "claude_pod_bin": "$TEST_TMPDIR/bin/claude-pod",
+  "config_dir": "$home_dir/.claude-pod"
 }
 JSON
 }
@@ -300,6 +302,24 @@ test_filter_empty_filters_spawns() {
 }
 
 # ---------------------------------------------------------------------------
+# config_dir propagated as CONFIG_DIR env to spawn subprocess (regression: VPS
+# service runs as root, $HOME differs from installing user → "not installed")
+# ---------------------------------------------------------------------------
+test_config_dir_passed_to_spawn() {
+  local home_dir="$TEST_TMPDIR/home"
+  local body delivery_id status out
+  body=$(cat "$PROJECT_DIR/tests/fixtures/github-push.json")
+  delivery_id="cfgdir-$(uuidgen)"
+  out=$(post_push "$body" "$delivery_id")
+  status=$(printf '%s' "$out" | head -n1)
+  [ "$status" = "202" ] || { echo "expected 202, got $status" >&2; return 1; }
+  sleep 0.3
+  grep -q "CONFIG_DIR=$home_dir/.claude-pod" "$STUB_LOG" 2>/dev/null || \
+    { echo "CONFIG_DIR not set or wrong in stub log" >&2; cat "$STUB_LOG" >&2; return 1; }
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
@@ -317,6 +337,7 @@ main() {
               test_spawn_exit_0_logs_spawn_done \
               test_spawn_exit_nonzero_logs_spawn_error \
               test_spawn_log_file_written \
+              test_config_dir_passed_to_spawn \
               test_filter_all_prefixed_skips_spawn \
               test_filter_mixed_commits_spawns \
               test_filter_empty_filters_spawns; do
@@ -327,6 +348,7 @@ main() {
     run_test "spawn exit 0 → spawn_done"           test_spawn_exit_0_logs_spawn_done
     run_test "spawn exit 1 → spawn_error"          test_spawn_exit_nonzero_logs_spawn_error
     run_test "spawn log file written"              test_spawn_log_file_written
+    run_test "config_dir propagated as CONFIG_DIR" test_config_dir_passed_to_spawn
     run_test "filter: all prefixed → skipped"      test_filter_all_prefixed_skips_spawn
     run_test "filter: mixed commits → spawns"      test_filter_mixed_commits_spawns
     run_test "filter: empty filters → spawns"      test_filter_empty_filters_spawns
