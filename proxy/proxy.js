@@ -236,6 +236,7 @@ server.on('connect', (req, clientSocket, head) => {
   if (!isDomainAllowed(hostname, config)) {
     console.warn('CONNECT blocked: ' + hostname + ' (not in profile secrets)');
     logJson('warn', 'Blocked CONNECT to domain not in profile secrets', { domain: hostname });
+    clientSocket.on('error', () => {});
     clientSocket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
     clientSocket.end();
     return;
