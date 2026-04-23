@@ -1237,9 +1237,9 @@ write_audit_entry() {
   local cost_usd="$9" duration_ms="${10}" session_id="${11}"
   local status="${12}" report_url="${13}" error_short="${14:-}"
 
-  LOG_DIR="${LOG_DIR:-$CONFIG_DIR/logs}"
-  mkdir -p "$LOG_DIR"
-  local audit_file="$LOG_DIR/${LOG_PREFIX:-}executions.jsonl"
+  local _audit_log_dir="${CONFIG_DIR}/logs"
+  mkdir -p "$_audit_log_dir"
+  local audit_file="$_audit_log_dir/${LOG_PREFIX:-}executions.jsonl"
 
   # jq_cost / jq_duration normalize: "" -> null, numeric -> number.
   local jq_cost="null" jq_duration="null"
@@ -1315,9 +1315,8 @@ _spawn_error_audit() {
   local _ts _did
   _ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   _did="manual-$(uuidgen 2>/dev/null | tr -d - | head -c 32 || echo unknown)"
-  LOG_DIR="${LOG_DIR:-$CONFIG_DIR/logs}" \
-    write_audit_entry "$_ts" "$_did" "" "unknown" "${PROFILE:-unknown}" \
-      "" "" "" "" "" "" "spawn_error" "" "${err_msg:0:200}" 2>/dev/null || true
+  write_audit_entry "$_ts" "$_did" "" "unknown" "${PROFILE:-unknown}" \
+    "" "" "" "" "" "" "spawn_error" "" "${err_msg:0:200}" 2>/dev/null || true
 }
 
 do_spawn() {
