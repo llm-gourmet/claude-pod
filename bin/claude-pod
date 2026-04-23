@@ -103,16 +103,6 @@ validate_profile() {
     echo "ERROR: Profile '$name' has invalid profile.json (not valid JSON)" >&2
     return 1
   fi
-  local ws
-  ws=$(jq -r '.workspace // empty' "$pdir/profile.json")
-  if [ -z "$ws" ]; then
-    echo "ERROR: Profile '$name' profile.json missing required 'workspace' field" >&2
-    return 1
-  fi
-  if [ ! -d "$ws" ]; then
-    echo "ERROR: Profile '$name' workspace path does not exist: $ws" >&2
-    return 1
-  fi
   if [ ! -f "$pdir/.env" ]; then
     echo "ERROR: Profile '$name' is missing .env (auth credentials required)" >&2
     return 1
@@ -189,14 +179,8 @@ create_profile() {
 
   echo "Creating profile '$name'..."
 
-  # Workspace
-  read -rp "Workspace path [$HOME/claude-workspace-$name]: " ws_path
-  ws_path="${ws_path:-$HOME/claude-workspace-$name}"
-  ws_path="$(realpath -m "$ws_path")"
-  mkdir -p "$ws_path"
-
   # Build profile.json
-  jq -n --arg ws "$ws_path" '{"workspace": $ws, "secrets": []}' > "$tmpdir/profile.json"
+  jq -n '{"secrets": []}' > "$tmpdir/profile.json"
 
   # Scaffold tasks/ and system_prompts/ with self-describing stub files.
   mkdir -p "$tmpdir/tasks" "$tmpdir/system_prompts"
@@ -438,11 +422,8 @@ load_profile_config() {
   local pdir
   pdir=$(resolve_profile_dir "$name")
 
-  WORKSPACE_PATH=$(jq -r '.workspace' "$pdir/profile.json")
-
   export COMPOSE_PROJECT_NAME="claude-${name}"
   export COMPOSE_FILE="$APP_DIR/docker-compose.yml"
-  export WORKSPACE_PATH
   if [ -f "$pdir/.env" ]; then
     SECRETS_FILE=$(project_env_for_containers "$pdir/.env")
     export SECRETS_FILE
@@ -455,7 +436,6 @@ load_profile_config() {
   fi
   export CLAUDE_POD_SYSTEM_PROMPT
   export PROFILE_PATH="$pdir/profile.json"
-  export LOG_DIR="$CONFIG_DIR/logs"
   export LOG_PREFIX="${name}-"
 
   # .env is required by full profile validation (`validate_profile`), but
@@ -494,16 +474,6 @@ require_profile_arg() {
 }
 
 load_superuser_config() {
-  # Default workspace
-  local default_ws="${DEFAULT_WORKSPACE:-}"
-  if [ -z "$default_ws" ]; then
-    read -rp "Default workspace for superuser mode [$HOME/claude-workspace]: " default_ws
-    default_ws="${default_ws:-$HOME/claude-workspace}"
-    default_ws="$(realpath -m "$default_ws")"
-    mkdir -p "$default_ws"
-    echo "DEFAULT_WORKSPACE=\"$default_ws\"" >> "$CONFIG_DIR/config.sh"
-  fi
-
   # Merge profile secrets to temp file
   local merged_wl
   merged_wl=$(mktemp)
@@ -517,10 +487,8 @@ load_superuser_config() {
 
   export COMPOSE_PROJECT_NAME="claude-superuser"
   export COMPOSE_FILE="$APP_DIR/docker-compose.yml"
-  export WORKSPACE_PATH="$default_ws"
   export SECRETS_FILE="$merged_env"
   export PROFILE_PATH="$merged_wl"
-  export LOG_DIR="$CONFIG_DIR/logs"
   export LOG_PREFIX="superuser-"
 
   # Source merged env for docker compose variable substitution
@@ -533,8 +501,8 @@ load_superuser_config() {
 }
 
 list_profiles() {
-  printf "%-20s %-10s %-5s %s\n" "PROFILE" "STATUS" "KEYS" "WORKSPACE"
-  printf "%-20s %-10s %-5s %s\n" "-------" "------" "----" "---------"
+  printf "%-20s %-10s %s\n" "PROFILE" "STATUS" "KEYS"
+  printf "%-20s %-10s %s\n" "-------" "------" "----"
 
   if [ ! -d "$CONFIG_DIR/profiles" ]; then
     echo "No profiles configured."
@@ -545,9 +513,8 @@ list_profiles() {
   local found=0
   for pdir in "$CONFIG_DIR/profiles"/*/; do
     found=1
-    local name ws status project keys
+    local name status project keys
     name=$(basename "$pdir")
-    ws=$(jq -r '.workspace // "-"' "$pdir/profile.json" 2>/dev/null || echo "-")
     keys=$(jq -r '(.secrets // []) | length' "$pdir/profile.json" 2>/dev/null || echo "0")
     project="claude-${name}"
     if docker compose ls --format json 2>/dev/null | jq -e ".[] | select(.Name == \"$project\")" >/dev/null 2>&1; then
@@ -555,7 +522,7 @@ list_profiles() {
     else
       status="stopped"
     fi
-    printf "%-20s %-10s %-5s %s\n" "$name" "$status" "$keys" "$ws"
+    printf "%-20s %-10s %s\n" "$name" "$status" "$keys"
   done
   shopt -u nullglob
 
@@ -1507,13 +1474,6 @@ ${EVENT_JSON}
     echo "$rendered_prompt"
     return 0
   fi
-
-  # Ensure LOG_DIR is set (normally set by load_profile_config, but defensive)
-  LOG_DIR="${LOG_DIR:-$CONFIG_DIR/logs}"
-
-  # Start ephemeral containers (per D-06)
-  mkdir -p "$LOG_DIR"
-  chmod 777 "$LOG_DIR"
 
   # Build claude command flags
   # NOTE: --bare is intentionally OMITTED. Per RESEARCH.md Open Question 3,
