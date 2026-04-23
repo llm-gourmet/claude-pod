@@ -80,8 +80,8 @@ create_test_profile() {
   mkdir -p "$config_dir/profiles/$name"
   mkdir -p "$ws_path"
 
-  # Build profile.json (new schema: workspace + secrets[])
-  jq -n --arg ws "$ws_path" '{"workspace": $ws, "secrets": []}' \
+  # Build profile.json (schema: secrets[] only, no workspace)
+  jq -n '{"secrets": []}' \
     > "$config_dir/profiles/$name/profile.json"
 
   # Create .env
@@ -107,7 +107,7 @@ test_prof_01a() {
 run_test "PROF-01a: Profile directory contains profile.json and .env (no whitelist.json)" test_prof_01a
 
 # =========================================================================
-# PROF-01b: profile.json is valid JSON with required workspace field
+# PROF-01b: profile.json is valid JSON with secrets[] array (no workspace required)
 # =========================================================================
 test_prof_01b() {
   local tmpdir
@@ -118,13 +118,12 @@ test_prof_01b() {
   local pdir="$tmpdir/.claude-pod/profiles/myproj"
   # Valid JSON
   jq empty "$pdir/profile.json" || return 1
-  # Has workspace field
-  local ws
-  ws=$(jq -r '.workspace // empty' "$pdir/profile.json")
-  [ -n "$ws" ] || return 1
+  # Has secrets array
+  jq -e '.secrets | type == "array"' "$pdir/profile.json" >/dev/null || return 1
+  # workspace field is not required
   return 0
 }
-run_test "PROF-01b: profile.json is valid JSON with workspace field" test_prof_01b
+run_test "PROF-01b: profile.json is valid JSON with secrets[] array" test_prof_01b
 
 # =========================================================================
 # PROF-01c: validate_profile_name accepts/rejects correctly
@@ -160,26 +159,25 @@ test_prof_01c_invalid() {
 run_test "PROF-01c: validate_profile_name rejects invalid names" test_prof_01c_invalid
 
 # =========================================================================
-# PROF-02a: create_profile writes workspace and empty secrets[] to profile.json
+# PROF-02a: create_profile writes secrets[] to profile.json (no workspace)
 # =========================================================================
 test_prof_02a() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _source_functions "$tmpdir"
 
-  # Stdin sequence: workspace default, auth=OAuth, token
-  printf '\n1\noauth-token-xyz\n' | create_profile "myproj-d" >/dev/null 2>&1
+  # Stdin sequence: auth=OAuth, token (no workspace prompt anymore)
+  printf '1\noauth-token-xyz\n' | create_profile "myproj-d" >/dev/null 2>&1
 
   local pdir="$CONFIG_DIR/profiles/myproj-d"
   [ -f "$pdir/profile.json" ] || return 1
-  local ws
-  ws=$(jq -r '.workspace // empty' "$pdir/profile.json")
-  [ -n "$ws" ] || return 1
   jq -e '.secrets | type == "array"' "$pdir/profile.json" >/dev/null || return 1
+  # workspace field must not be present
+  jq -e 'has("workspace") | not' "$pdir/profile.json" >/dev/null || return 1
   [ -f "$pdir/.env" ] || return 1
   return 0
 }
-run_test "PROF-02a: create_profile writes workspace and secrets[] to profile.json" test_prof_02a
+run_test "PROF-02a: create_profile writes secrets[] to profile.json (no workspace)" test_prof_02a
 
 # =========================================================================
 # PROF-02b: profile.json secrets[] schema is valid
@@ -246,39 +244,39 @@ test_prof_03c() {
 run_test "PROF-03c: validate_profile fails on invalid JSON in profile.json" test_prof_03c
 
 # =========================================================================
-# PROF-03d: validate_profile with missing workspace field -> exit 1
+# PROF-03d: validate_profile succeeds without workspace field
 # =========================================================================
 test_prof_03d() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _source_functions "$tmpdir"
 
-  mkdir -p "$tmpdir/.claude-pod/profiles/badprof"
-  echo '{}' > "$tmpdir/.claude-pod/profiles/badprof/profile.json"
-  echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-pod/profiles/badprof/.env"
+  mkdir -p "$tmpdir/.claude-pod/profiles/goodprof"
+  echo '{}' > "$tmpdir/.claude-pod/profiles/goodprof/profile.json"
+  echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-pod/profiles/goodprof/.env"
 
-  validate_profile "badprof" && return 1
+  validate_profile "goodprof" || return 1
   return 0
 }
-run_test "PROF-03d: validate_profile fails on missing workspace field" test_prof_03d
+run_test "PROF-03d: validate_profile succeeds without workspace field" test_prof_03d
 
 # =========================================================================
-# PROF-03e: validate_profile with nonexistent workspace path -> exit 1
+# PROF-03e: validate_profile ignores nonexistent workspace path
 # =========================================================================
 test_prof_03e() {
   local tmpdir
   tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   _source_functions "$tmpdir"
 
-  mkdir -p "$tmpdir/.claude-pod/profiles/badprof"
+  mkdir -p "$tmpdir/.claude-pod/profiles/goodprof"
   jq -n --arg ws "/nonexistent/path/$$" '{"workspace":$ws}' \
-    > "$tmpdir/.claude-pod/profiles/badprof/profile.json"
-  echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-pod/profiles/badprof/.env"
+    > "$tmpdir/.claude-pod/profiles/goodprof/profile.json"
+  echo "ANTHROPIC_API_KEY=test" > "$tmpdir/.claude-pod/profiles/goodprof/.env"
 
-  validate_profile "badprof" && return 1
+  validate_profile "goodprof" || return 1
   return 0
 }
-run_test "PROF-03e: validate_profile fails on nonexistent workspace path" test_prof_03e
+run_test "PROF-03e: validate_profile ignores nonexistent workspace path" test_prof_03e
 
 # =========================================================================
 # PROF-03f: validate_profile with missing .env -> exit 1
@@ -430,11 +428,10 @@ test_list_01() {
 
   echo "$output" | grep -q "PROFILE" || return 1
   echo "$output" | grep -q "KEYS" || return 1
-  echo "$output" | grep -q "WORKSPACE" || return 1
   echo "$output" | grep -q "STATUS" || return 1
   return 0
 }
-run_test "LIST-01: list command shows PROFILE, KEYS, STATUS, WORKSPACE columns" test_list_01
+run_test "LIST-01: list command shows PROFILE, KEYS, STATUS columns" test_list_01
 
 # =========================================================================
 # NOINSTANCE-01: --instance flag produces error

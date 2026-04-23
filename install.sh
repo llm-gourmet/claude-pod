@@ -307,15 +307,10 @@ setup_directories() {
   chmod 700 "$CONFIG_DIR/webhooks"
   log_info "Created webhooks directory: $CONFIG_DIR/webhooks"
 
-  # Create logs directory for service logging (LOG_DIR in docker-compose)
-  # chmod 755: owner has full access, others can read/traverse.
-  # Container processes write via the bind mount where Docker maps UIDs.
-  # If container UID mismatch causes write failures, the CLI wrapper's
-  # mkdir -p at launch time can adjust permissions as needed.
-  mkdir -p "$CONFIG_DIR/logs"
-  # 777 required: three containers write as different UIDs (claude:1001, node:1000, root:0)
-  chmod 777 "$CONFIG_DIR/logs"
-  log_info "Created logs directory: $CONFIG_DIR/logs"
+  # Write global config (APP_DIR appended later by copy_app_files)
+  cat > "$CONFIG_DIR/config.sh" <<CONF
+PLATFORM="$PLATFORM"
+CONF
 }
 
 setup_auth() {
@@ -418,28 +413,6 @@ setup_auth() {
       log_info "OAuth token saved"
       ;;
   esac
-}
-
-setup_workspace() {
-  read -rp "Workspace path [$_invoking_home/claude-workspace]: " ws_path
-  ws_path="${ws_path:-$_invoking_home/claude-workspace}"
-
-  # Resolve to absolute path
-  ws_path="$(realpath -m "$ws_path")"
-
-  mkdir -p "$ws_path"
-  chown "$_invoking_user:$_invoking_group" "$ws_path"
-
-  # Write global config (APP_DIR written later by copy_app_files)
-  cat > "$CONFIG_DIR/config.sh" <<CONF
-PLATFORM="$PLATFORM"
-CONF
-
-  # Write profile config (workspace is per-profile)
-  mkdir -p "$CONFIG_DIR/profiles/default"
-  jq -n --arg ws "$ws_path" '{"workspace": $ws, "secrets": []}' > "$CONFIG_DIR/profiles/default/profile.json"
-
-  log_info "Workspace: $ws_path"
 }
 
 copy_app_files() {
@@ -744,7 +717,6 @@ main() {
   check_existing
   setup_directories
   setup_auth
-  setup_workspace
   copy_app_files
   build_images
   install_cli
@@ -755,7 +727,6 @@ main() {
   # install_cli + install_git_hooks + install_webhook_service deliberately leave
   # system paths (/usr/local/bin, /etc/systemd, /opt/claude-pod) as root.
   chown -R "$_invoking_user:$_invoking_group" "$CONFIG_DIR"
-  chmod 777 "$CONFIG_DIR/logs"
 
   install_webhook_service
 

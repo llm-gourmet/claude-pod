@@ -28,9 +28,7 @@ services:
       - LOG_HOOK=${LOG_HOOK:-0}
       - LOG_PREFIX=${LOG_PREFIX:-}
     volumes:
-      - workspace:/workspace
       - ${PROFILE_PATH:-./config/profile.json}:/etc/claude-pod/profile.json:ro
-      - ${LOG_DIR:-./logs}:/var/log/claude-pod
     networks:
       - claude-internal
     cap_drop:
@@ -61,7 +59,6 @@ services:
       - LOG_PREFIX=${LOG_PREFIX:-}
     volumes:
       - ${PROFILE_PATH:-./config/profile.json}:/etc/claude-pod/profile.json:ro
-      - ${LOG_DIR:-./logs}:/var/log/claude-pod
     networks:
       claude-internal:
         aliases:
@@ -82,7 +79,6 @@ services:
     volumes:
       - ${PROFILE_PATH:-./config/profile.json}:/etc/claude-pod/profile.json:ro
       - validator-db:/data
-      - ${LOG_DIR:-./logs}:/var/log/claude-pod
     depends_on:
       claude:
         condition: service_started
@@ -93,10 +89,4 @@ networks:
   claude-external: {}
 
 volumes:
-  workspace:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${WORKSPACE_PATH:-./workspace}
   validator-db:

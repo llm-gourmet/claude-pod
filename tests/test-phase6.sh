@@ -32,18 +32,9 @@ report() {
   fi
 }
 
-# Create temp log directories for isolation
-TEST_LOG_DIR=$(mktemp -d)
-TEST_LOG_DIR_DISABLED=$(mktemp -d)
-TEST_WORKSPACE=$(mktemp -d)
-chmod 777 "$TEST_LOG_DIR" "$TEST_LOG_DIR_DISABLED"
-
 cleanup() {
   cd "$PROJECT_DIR"
-  LOG_HOOK=0 LOG_ANTHROPIC=0 LOG_IPTABLES=0 LOG_DIR="$TEST_LOG_DIR" \
-    docker compose down -v 2>/dev/null || true
-  rm -rf "$TEST_LOG_DIR" "$TEST_LOG_DIR_DISABLED" 2>/dev/null || true
-  rm -rf "$TEST_WORKSPACE" 2>/dev/null || true
+  docker compose down -v 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -56,10 +47,7 @@ echo ""
 
 echo "Starting services with logging enabled..."
 cd "$PROJECT_DIR"
-export LOG_DIR="$TEST_LOG_DIR"
 export LOG_HOOK=1 LOG_ANTHROPIC=1 LOG_IPTABLES=1
-export WORKSPACE_PATH="$TEST_WORKSPACE"
-docker volume rm -f claude-pod_workspace >/dev/null 2>&1 || true
 docker compose up -d 2>/dev/null
 sleep 5  # Wait for services to initialize and validator to write startup logs
 
@@ -77,10 +65,7 @@ echo ""
     'echo "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hello\"}}" | bash /etc/claude-pod/hooks/pre-tool-use.sh' \
     >/dev/null 2>&1 || true
   sleep 1
-  if [ -f "$TEST_LOG_DIR/hook.jsonl" ] && [ -s "$TEST_LOG_DIR/hook.jsonl" ]; then
-    exit 0
-  fi
-  exit 1
+  docker compose exec -T claude test -s /var/log/claude-pod/hook.jsonl 2>/dev/null
 )
 report "LOG-01" "Hook writes JSONL when LOG_HOOK=1" $?
 
@@ -94,10 +79,7 @@ report "LOG-01" "Hook writes JSONL when LOG_HOOK=1" $?
     -X POST -H 'Content-Type: application/json' \
     -d '{"model":"test","messages":[]}' >/dev/null 2>&1 || true
   sleep 1
-  if [ -f "$TEST_LOG_DIR/anthropic.jsonl" ] && [ -s "$TEST_LOG_DIR/anthropic.jsonl" ]; then
-    exit 0
-  fi
-  exit 1
+  docker compose exec -T proxy test -s /var/log/claude-pod/anthropic.jsonl 2>/dev/null
 )
 report "LOG-02" "Proxy writes JSONL when LOG_ANTHROPIC=1" $?
 
@@ -105,40 +87,43 @@ report "LOG-02" "Proxy writes JSONL when LOG_ANTHROPIC=1" $?
 # LOG-03: Validator writes JSON log when LOG_IPTABLES=1
 # =========================================================================
 (
+  cd "$PROJECT_DIR"
   # Validator logs on startup (iptables setup, DB init)
-  if [ -f "$TEST_LOG_DIR/iptables.jsonl" ] && [ -s "$TEST_LOG_DIR/iptables.jsonl" ]; then
-    exit 0
-  fi
-  exit 1
+  docker compose exec -T validator test -s /var/log/claude-pod/iptables.jsonl 2>/dev/null
 )
 report "LOG-03" "Validator writes JSONL when LOG_IPTABLES=1" $?
 
 # =========================================================================
-# LOG-04: All logs in unified host directory
+# LOG-04: All three JSONL files exist inside their respective containers
 # =========================================================================
 (
+  cd "$PROJECT_DIR"
   RESULT=0
-  [ -f "$TEST_LOG_DIR/hook.jsonl" ] || RESULT=1
-  [ -f "$TEST_LOG_DIR/anthropic.jsonl" ] || RESULT=1
-  [ -f "$TEST_LOG_DIR/iptables.jsonl" ] || RESULT=1
+  docker compose exec -T claude   test -s /var/log/claude-pod/hook.jsonl     2>/dev/null || RESULT=1
+  docker compose exec -T proxy    test -s /var/log/claude-pod/anthropic.jsonl 2>/dev/null || RESULT=1
+  docker compose exec -T validator test -s /var/log/claude-pod/iptables.jsonl  2>/dev/null || RESULT=1
   exit "$RESULT"
 )
-report "LOG-04" "All three JSONL files in unified host directory" $?
+report "LOG-04" "All three JSONL files exist inside their containers" $?
 
 # =========================================================================
 # LOG-05: JSON structure -- all entries have ts, svc, level, msg fields
 # =========================================================================
 (
+  cd "$PROJECT_DIR"
   LOG05_OK=0
-  for f in hook.jsonl anthropic.jsonl iptables.jsonl; do
-    if [ -f "$TEST_LOG_DIR/$f" ]; then
-      if ! head -1 "$TEST_LOG_DIR/$f" | jq -e '.ts and .svc and .level and .msg' >/dev/null 2>&1; then
-        LOG05_OK=1
-      fi
-    else
-      LOG05_OK=1
-    fi
-  done
+  if ! docker compose exec -T claude head -1 /var/log/claude-pod/hook.jsonl 2>/dev/null \
+      | jq -e '.ts and .svc and .level and .msg' >/dev/null 2>&1; then
+    LOG05_OK=1
+  fi
+  if ! docker compose exec -T proxy head -1 /var/log/claude-pod/anthropic.jsonl 2>/dev/null \
+      | jq -e '.ts and .svc and .level and .msg' >/dev/null 2>&1; then
+    LOG05_OK=1
+  fi
+  if ! docker compose exec -T validator head -1 /var/log/claude-pod/iptables.jsonl 2>/dev/null \
+      | jq -e '.ts and .svc and .level and .msg' >/dev/null 2>&1; then
+    LOG05_OK=1
+  fi
   exit "$LOG05_OK"
 )
 report "LOG-05" "Log entries have ts, svc, level, msg fields" $?
@@ -154,10 +139,7 @@ docker compose down -v 2>/dev/null || true
 # =========================================================================
 (
   cd "$PROJECT_DIR"
-  export LOG_DIR="$TEST_LOG_DIR_DISABLED"
   export LOG_HOOK=0 LOG_ANTHROPIC=0 LOG_IPTABLES=0
-  export WORKSPACE_PATH="$TEST_WORKSPACE"
-  docker volume rm -f claude-pod_workspace >/dev/null 2>&1 || true
   docker compose up -d 2>/dev/null
   sleep 5
   # Trigger a proxy request to give services a chance to log
@@ -166,11 +148,15 @@ docker compose down -v 2>/dev/null || true
     -d '{"model":"test","messages":[]}' >/dev/null 2>&1 || true
   sleep 2
   FOUND_LOGS=false
-  for f in hook.jsonl anthropic.jsonl iptables.jsonl; do
-    if [ -f "$TEST_LOG_DIR_DISABLED/$f" ] && [ -s "$TEST_LOG_DIR_DISABLED/$f" ]; then
-      FOUND_LOGS=true
-    fi
-  done
+  if docker compose exec -T claude test -s /var/log/claude-pod/hook.jsonl 2>/dev/null; then
+    FOUND_LOGS=true
+  fi
+  if docker compose exec -T proxy test -s /var/log/claude-pod/anthropic.jsonl 2>/dev/null; then
+    FOUND_LOGS=true
+  fi
+  if docker compose exec -T validator test -s /var/log/claude-pod/iptables.jsonl 2>/dev/null; then
+    FOUND_LOGS=true
+  fi
   docker compose down -v 2>/dev/null || true
   if [ "$FOUND_LOGS" = "false" ]; then
     exit 0

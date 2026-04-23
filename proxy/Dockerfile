@@ -4,6 +4,8 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends openssl && \
     rm -rf /var/lib/apt/lists/*
 
+RUN mkdir -p /var/log/claude-pod
+
 WORKDIR /app
 
 # Generate self-signed cert so the proxy can serve HTTPS on port 443

@@ -77,7 +77,7 @@ test_dns_validation() {
 run_test "MULTI-02: DNS-safe instance name validation" test_dns_validation
 
 # =========================================================================
-# MULTI-03: load_profile_config exports core vars (WORKSPACE_PATH, COMPOSE_PROJECT_NAME)
+# MULTI-03: load_profile_config exports COMPOSE_PROJECT_NAME (no WORKSPACE_PATH)
 # =========================================================================
 test_load_profile_config_exports_core_vars() {
   local tmpdir
@@ -86,25 +86,12 @@ test_load_profile_config_exports_core_vars() {
 
   local cfg="$tmpdir/.claude-pod"
   local pdir="$cfg/profiles/myproj"
-  mkdir -p "$pdir" "$tmpdir/workspace"
+  mkdir -p "$pdir"
 
-  cat > "$pdir/profile.json" <<EOF
-{
-  "workspace": "$tmpdir/workspace"
-}
-EOF
+  printf '{"secrets":[]}\n' > "$pdir/profile.json"
   printf 'ANTHROPIC_API_KEY=test\n' > "$pdir/.env"
 
-  local workspace compose_name
-  workspace=$(
-    export __CLAUDE_POD_SOURCE_ONLY=1
-    export APP_DIR="$PROJECT_DIR"
-    export CONFIG_DIR="$cfg"
-    source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null
-    unset __CLAUDE_POD_SOURCE_ONLY
-    load_profile_config "myproj"
-    echo "$WORKSPACE_PATH"
-  )
+  local compose_name workspace_unset
   compose_name=$(
     export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
@@ -114,12 +101,22 @@ EOF
     load_profile_config "myproj"
     echo "$COMPOSE_PROJECT_NAME"
   )
+  workspace_unset=$(
+    export __CLAUDE_POD_SOURCE_ONLY=1
+    export APP_DIR="$PROJECT_DIR"
+    export CONFIG_DIR="$cfg"
+    unset WORKSPACE_PATH
+    source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null
+    unset __CLAUDE_POD_SOURCE_ONLY
+    load_profile_config "myproj"
+    [ -z "${WORKSPACE_PATH:-}" ] && echo "unset" || echo "set:$WORKSPACE_PATH"
+  )
 
-  [ "$workspace" = "$tmpdir/workspace" ] || { echo "WORKSPACE_PATH wrong: $workspace" >&2; return 1; }
-  [ "$compose_name" = "claude-myproj" ]  || { echo "COMPOSE_PROJECT_NAME wrong: $compose_name" >&2; return 1; }
+  [ "$compose_name" = "claude-myproj" ] || { echo "COMPOSE_PROJECT_NAME wrong: $compose_name" >&2; return 1; }
+  [ "$workspace_unset" = "unset" ] || { echo "WORKSPACE_PATH should not be exported: $workspace_unset" >&2; return 1; }
   return 0
 }
-run_test "MULTI-03: load_profile_config exports WORKSPACE_PATH + COMPOSE_PROJECT_NAME" test_load_profile_config_exports_core_vars
+run_test "MULTI-03: load_profile_config exports COMPOSE_PROJECT_NAME (no WORKSPACE_PATH)" test_load_profile_config_exports_core_vars
 
 # =========================================================================
 # MULTI-04: COMPOSE_PROJECT_NAME isolation
@@ -140,8 +137,8 @@ test_compose_isolation() {
 
   # Verify different project names produce different container names
   local out1 out2
-  out1=$(cd "$PROJECT_DIR" && COMPOSE_PROJECT_NAME=claude-test1 WORKSPACE_PATH=/tmp docker compose config 2>/dev/null) || return 1
-  out2=$(cd "$PROJECT_DIR" && COMPOSE_PROJECT_NAME=claude-test2 WORKSPACE_PATH=/tmp docker compose config 2>/dev/null) || return 1
+  out1=$(cd "$PROJECT_DIR" && COMPOSE_PROJECT_NAME=claude-test1 docker compose config 2>/dev/null) || return 1
+  out2=$(cd "$PROJECT_DIR" && COMPOSE_PROJECT_NAME=claude-test2 docker compose config 2>/dev/null) || return 1
 
   # The config output uses project name as prefix - verify they differ
   [ "$out1" != "$out2" ] || return 1
@@ -271,24 +268,18 @@ test_auto_creation_structure() {
 run_test "MULTI-08: Profile auto-creation directory structure" test_auto_creation_structure
 
 # =========================================================================
-# MULTI-09: Global config.sh contains only APP_DIR and PLATFORM
-# After installation, global config.sh should NOT have WORKSPACE_PATH
+# MULTI-09: load_profile_config does not export WORKSPACE_PATH
 # =========================================================================
 test_profile_config_scope() {
-  # Profile workspace comes from profile.json, not a global config.
-  # Verify that load_profile_config reads workspace from the profile's own
-  # profile.json, not from a shared global file.
   local tmpdir
   tmpdir=$(mktemp -d)
   trap "rm -rf '$tmpdir'" RETURN
 
   local cfg="$tmpdir/.claude-pod"
   local pdir="$cfg/profiles/scoped"
-  mkdir -p "$pdir" "$tmpdir/ws"
+  mkdir -p "$pdir"
 
-  cat > "$pdir/profile.json" <<EOF
-{"workspace":"$tmpdir/ws","secrets":[]}
-EOF
+  printf '{"secrets":[]}\n' > "$pdir/profile.json"
   printf 'ANTHROPIC_API_KEY=test\n' > "$pdir/.env"
 
   local ws
@@ -296,19 +287,20 @@ EOF
     export __CLAUDE_POD_SOURCE_ONLY=1
     export APP_DIR="$PROJECT_DIR"
     export CONFIG_DIR="$cfg"
+    unset WORKSPACE_PATH
     source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null
     unset __CLAUDE_POD_SOURCE_ONLY
     load_profile_config "scoped"
-    echo "$WORKSPACE_PATH"
+    echo "${WORKSPACE_PATH:-unset}"
   )
 
-  [ "$ws" = "$tmpdir/ws" ] || { echo "WORKSPACE_PATH wrong: $ws" >&2; return 1; }
+  [ "$ws" = "unset" ] || { echo "WORKSPACE_PATH should not be exported, got: $ws" >&2; return 1; }
 
   # CLI must reference CONFIG_DIR/profiles for profile resolution
   grep -q 'profiles' "$PROJECT_DIR/bin/claude-pod" || return 1
   return 0
 }
-run_test "MULTI-09: Profile config scope (workspace from profile.json)" test_profile_config_scope
+run_test "MULTI-09: load_profile_config does not export WORKSPACE_PATH" test_profile_config_scope
 
 # =========================================================================
 # MULTI-10: system_prompts/default.md file sets CLAUDE_POD_SYSTEM_PROMPT
