@@ -419,6 +419,41 @@ test_start_unknown_profile() {
 run_test "MULTI-12: start with unknown profile exits non-zero with error" test_start_unknown_profile
 
 # =========================================================================
+# MULTI-13: load_profile_config does not export LOG_DIR
+# Regression guard: removing the log bind-mount also removed the
+# `export LOG_DIR` from load_profile_config. If it ever comes back it
+# would leak into test subshells and break the audit-log path.
+# =========================================================================
+test_profile_config_no_log_dir() {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap "rm -rf '$tmpdir'" RETURN
+
+  local cfg="$tmpdir/.claude-pod"
+  local pdir="$cfg/profiles/logtest"
+  mkdir -p "$pdir"
+
+  printf '{"secrets":[]}\n' > "$pdir/profile.json"
+  printf 'ANTHROPIC_API_KEY=test\n' > "$pdir/.env"
+
+  local result
+  result=$(
+    unset LOG_DIR 2>/dev/null || true
+    export __CLAUDE_POD_SOURCE_ONLY=1
+    export APP_DIR="$PROJECT_DIR"
+    export CONFIG_DIR="$cfg"
+    source "$PROJECT_DIR/bin/claude-pod" 2>/dev/null
+    unset __CLAUDE_POD_SOURCE_ONLY
+    load_profile_config "logtest"
+    echo "${LOG_DIR:-unset}"
+  )
+
+  [ "$result" = "unset" ] || { echo "LOG_DIR should not be exported, got: $result" >&2; return 1; }
+  return 0
+}
+run_test "MULTI-13: load_profile_config does not export LOG_DIR" test_profile_config_no_log_dir
+
+# =========================================================================
 # Summary
 # =========================================================================
 echo ""
