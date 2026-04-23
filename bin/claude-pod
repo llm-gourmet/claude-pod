@@ -1237,6 +1237,7 @@ write_audit_entry() {
   local cost_usd="$9" duration_ms="${10}" session_id="${11}"
   local status="${12}" report_url="${13}" error_short="${14:-}"
 
+  LOG_DIR="${LOG_DIR:-$CONFIG_DIR/logs}"
   mkdir -p "$LOG_DIR"
   local audit_file="$LOG_DIR/${LOG_PREFIX:-}executions.jsonl"
 
