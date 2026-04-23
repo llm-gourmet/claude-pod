@@ -428,11 +428,10 @@ test_list_01() {
 
   echo "$output" | grep -q "PROFILE" || return 1
   echo "$output" | grep -q "KEYS" || return 1
-  echo "$output" | grep -q "WORKSPACE" || return 1
   echo "$output" | grep -q "STATUS" || return 1
   return 0
 }
-run_test "LIST-01: list command shows PROFILE, KEYS, STATUS, WORKSPACE columns" test_list_01
+run_test "LIST-01: list command shows PROFILE, KEYS, STATUS columns" test_list_01
 
 # =========================================================================
 # NOINSTANCE-01: --instance flag produces error

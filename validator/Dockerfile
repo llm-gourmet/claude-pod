@@ -7,7 +7,7 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-RUN mkdir -p /data
+RUN mkdir -p /data && mkdir -p /var/log/claude-pod
 
 COPY validator.py .
 
