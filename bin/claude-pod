@@ -2718,22 +2718,20 @@ case "$CMD" in
     require_profile_arg
     LOG_SVC="${REMAINING_ARGS[2]:-}"
     case "$LOG_SVC" in
-      hook)       tail -f "$LOG_DIR/${LOG_PREFIX}hook.jsonl" 2>/dev/null ;;
-      anthropic)  tail -f "$LOG_DIR/${LOG_PREFIX}anthropic.jsonl" 2>/dev/null ;;
-      iptables)   tail -f "$LOG_DIR/${LOG_PREFIX}iptables.jsonl" 2>/dev/null ;;
+      hook)       docker compose exec -T claude tail -f /var/log/claude-pod/hook.jsonl ;;
+      anthropic)  docker compose exec -T proxy tail -f /var/log/claude-pod/anthropic.jsonl ;;
+      iptables)   docker compose exec -T validator tail -f /var/log/claude-pod/iptables.jsonl ;;
       clear)
-        rm -f "$LOG_DIR/${LOG_PREFIX}"*.jsonl
+        docker compose exec -T claude rm -f /var/log/claude-pod/hook.jsonl 2>/dev/null || true
+        docker compose exec -T proxy rm -f /var/log/claude-pod/anthropic.jsonl 2>/dev/null || true
+        docker compose exec -T validator rm -f /var/log/claude-pod/iptables.jsonl 2>/dev/null || true
         echo "Logs cleared for profile '$PROFILE'."
         ;;
       "")
-        shopt -s nullglob
-        LOG_FILES=("$LOG_DIR/${LOG_PREFIX}"*.jsonl)
-        shopt -u nullglob
-        if [ ${#LOG_FILES[@]} -eq 0 ]; then
-          echo "No log files found for profile '$PROFILE'. Start services with log:* flags first."
-          exit 0
-        fi
-        tail -f "${LOG_FILES[@]}"
+        docker compose exec -T claude tail -f /var/log/claude-pod/hook.jsonl &
+        docker compose exec -T proxy tail -f /var/log/claude-pod/anthropic.jsonl &
+        docker compose exec -T validator tail -f /var/log/claude-pod/iptables.jsonl &
+        wait
         ;;
       *)
         echo "Unknown log service: $LOG_SVC"
@@ -2822,9 +2820,6 @@ case "$CMD" in
     ;;
   start)
     require_profile_arg
-    mkdir -p "$LOG_DIR"
-    # 777 required: three containers write as different UIDs (claude:1001, node:1000, root:0)
-    chmod 777 "$LOG_DIR"
     cleanup_containers
     docker compose up -d
     _interactive_args=(--dangerously-skip-permissions)
@@ -2841,9 +2836,6 @@ case "$CMD" in
       exit 1
     fi
     # No command, no --profile: superuser interactive session (merged all profiles)
-    mkdir -p "$LOG_DIR"
-    # 777 required: three containers write as different UIDs (claude:1001, node:1000, root:0)
-    chmod 777 "$LOG_DIR"
     cleanup_containers
     docker compose up -d
     _interactive_args=(--dangerously-skip-permissions)
