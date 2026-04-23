@@ -442,10 +442,10 @@ load_profile_config() {
   # spawn/replay dry-runs skip that check. Source defensively so test
   # harnesses and dry-run invocations don't fail on a missing secrets file.
   if [ -f "$pdir/.env" ]; then
-    set -a
+    set -a +u
     # shellcheck source=/dev/null
     source "$pdir/.env"
-    set +a
+    set +a -u
     # Transparent remap: if the user wrote ANTHROPIC_BASE_URL in .env (common
     # mistake) and REAL_ANTHROPIC_BASE_URL is not set, promote it so that
     # docker-compose variable substitution in the proxy service works correctly.
