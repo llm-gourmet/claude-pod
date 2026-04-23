@@ -325,10 +325,15 @@ def _spawn_worker(connection_name: str, event_path: pathlib.Path, delivery_id: s
         log_event(event="spawn_start", connection=connection_name, delivery_id=delivery_id)
         log_path = _config.logs_dir / f"spawn-{delivery_id[:12]}.log"
         try:
+            spawn_env = None
+            if _config.config_dir:
+                spawn_env = os.environ.copy()
+                spawn_env["CONFIG_DIR"] = _config.config_dir
             result = subprocess.run(
                 [_config.claude_pod_bin, "spawn", connection_name, "--event-file", str(event_path)],
                 capture_output=True,
                 text=True,
+                env=spawn_env,
             )
             log_path.write_text(result.stdout + result.stderr)
             if result.returncode == 0:
