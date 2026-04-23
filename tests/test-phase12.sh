@@ -587,6 +587,24 @@ test_sess_01() {
 run_test "SESS-01: docker compose down follows exec in interactive session block" test_sess_01
 
 # =========================================================================
+# START-01: no unguarded $LOG_DIR in bin/claude-pod
+# Regression guard: the log bind-mount removal removed LOG_DIR from
+# load_profile_config. Any bare $LOG_DIR reference (without :-) in the
+# dispatch blocks causes "unbound variable" on production installs.
+# =========================================================================
+test_start_no_bare_log_dir() {
+  local bin="$PROJECT_DIR/bin/claude-pod"
+  # Any $LOG_DIR that isn't wrapped in ${LOG_DIR:-...} and isn't in a comment
+  if grep -n '\$LOG_DIR' "$bin" | grep -v ':-' | grep -qv '^[^:]*:#'; then
+    echo "Unguarded \$LOG_DIR reference found:" >&2
+    grep -n '\$LOG_DIR' "$bin" | grep -v ':-' | grep -v '^[^:]*:#' >&2
+    return 1
+  fi
+  return 0
+}
+run_test "START-01: no unguarded \$LOG_DIR in bin/claude-pod" test_start_no_bare_log_dir
+
+# =========================================================================
 # Summary
 # =========================================================================
 echo ""
