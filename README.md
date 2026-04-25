@@ -644,6 +644,8 @@ GITHUB_TOKEN=ghp_xxx
 
 ## Architecture
 
+See [docs/architecture.md](docs/architecture.md) for Mermaid diagrams covering the container topology and the full call chain from tool invocation through secret redaction and iptables enforcement.
+
 ```
                         +---------------------------+
                         |     claude-external       |
