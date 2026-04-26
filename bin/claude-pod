@@ -1930,7 +1930,6 @@ _bootstrap_docs_scaffold() {
   mkdir -p "$project_dir/decisions" "$project_dir/ideas" "$project_dir/done"
 
   cp "$templates_dir/VISION.md"      "$project_dir/VISION.md"
-  cp "$templates_dir/GOALS.md"       "$project_dir/GOALS.md"
   cp "$templates_dir/AGREEMENTS.md"  "$project_dir/AGREEMENTS.md"
   cp "$templates_dir/TODOS.md"       "$project_dir/TODOS.md"
   cp "$templates_dir/TASKS.md"       "$project_dir/TASKS.md"
