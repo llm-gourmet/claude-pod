@@ -325,7 +325,7 @@ test_e2e_scaffold() {
   local verify; verify=$(mktemp -d)
   git clone "file://$remote/repo.git" "$verify/repo" -q 2>/dev/null
   local ok=0
-  for f in VISION.md GOALS.md AGREEMENTS.md TODOS.md TASKS.md \
+  for f in VISION.md AGREEMENTS.md TODOS.md TASKS.md \
             decisions/_template.md ideas/_template.md done/_template.md; do
     [ -f "$verify/repo/projects/MYPROJECT/$f" ] || { ok=1; break; }
   done

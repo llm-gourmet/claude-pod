@@ -1,0 +1,34 @@
+name: Sync docs to obsidian
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - README.md
+      - ARCHITECTURE.md
+      - VISION.md
+      - INDEX.md
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone obsidian repo
+        run: |
+          git clone https://x-access-token:${{ secrets.OBSIDIAN_SYNC_PAT }}@github.com/llm-gourmet/obsidian.git /tmp/obsidian
+
+      - name: Copy files
+        run: |
+          mkdir -p /tmp/obsidian/projects/claude-pod
+          cp README.md ARCHITECTURE.md VISION.md INDEX.md /tmp/obsidian/projects/claude-pod/
+
+      - name: Commit and push
+        working-directory: /tmp/obsidian
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add projects/claude-pod/
+          git diff --staged --quiet || git commit -m "[skip-claude] sync: update claude-pod docs from source repo"
+          git push origin master
