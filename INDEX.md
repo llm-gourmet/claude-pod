@@ -2,6 +2,11 @@
 
 > **Maintenance note:** Update this file whenever a source file is added, renamed, or removed.
 
+## Context to the repository
+- [README.md](README.md) — CLI and repo summary
+- [ARCHITECTURE.md](ARCHITECTURE.md) — Architecture, Call Chain Sequence
+- [VISION.md](VISION.md) — The reason for this repository
+
 ## Orchestration Scripts
 
 - [install.sh](install.sh) — Installs claude-pod: builds Docker images, generates config, installs Claude Code hooks, and creates the CLI shortcut
