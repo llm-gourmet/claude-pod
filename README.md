@@ -1,6 +1,6 @@
 # claude-pod
 
-Run Claude Code inside a Docker sandbox where no secret can leave without your permission.
+Run Claude Code inside a Docker sandbox where no secret can leave without your permission
 
 ---
 
