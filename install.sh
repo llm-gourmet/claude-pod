@@ -303,6 +303,8 @@ setup_directories() {
   log_info "Created profiles directory: $CONFIG_DIR/profiles"
   mkdir -p "$CONFIG_DIR/docs"
   log_info "Created docs directory: $CONFIG_DIR/docs"
+  mkdir -p "$CONFIG_DIR/docs-templates"
+  log_info "Created docs-templates directory: $CONFIG_DIR/docs-templates"
   mkdir -p "$CONFIG_DIR/webhooks"
   chmod 700 "$CONFIG_DIR/webhooks"
   log_info "Created webhooks directory: $CONFIG_DIR/webhooks"
@@ -485,21 +487,11 @@ install_cli() {
     fi
   fi
 
-  # Install bootstrap-docs templates and script to share directory.
-  local share_dir="/usr/local/share/claude-pod"
+  # Install bootstrap-docs templates to user config directory.
   local templates_src="$CONFIG_DIR/app/scripts/templates"
-  local script_src="$CONFIG_DIR/app/scripts/new-project.sh"
   if [ -d "$templates_src" ]; then
-    if [ -w /usr/local/share ] || command -v sudo >/dev/null 2>&1; then
-      local install_cmd=""
-      [ -w /usr/local/share ] && install_cmd="" || install_cmd="sudo"
-      $install_cmd mkdir -p "$share_dir/scripts/templates"
-      $install_cmd cp -r "$templates_src/." "$share_dir/scripts/templates/"
-      [ -f "$script_src" ] && $install_cmd cp "$script_src" "$share_dir/scripts/new-project.sh"
-      log_info "Installed bootstrap-docs templates to $share_dir/scripts/templates/"
-    else
-      log_warn "Cannot install bootstrap-docs templates to $share_dir (no write access, no sudo)"
-    fi
+    cp -r "$templates_src/." "$CONFIG_DIR/docs-templates/"
+    log_info "Installed bootstrap-docs templates to $CONFIG_DIR/docs-templates/"
   fi
 }
 

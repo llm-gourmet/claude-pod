@@ -1903,21 +1903,13 @@ _bootstrap_docs_find_connection() {
   echo "$conn"
 }
 
-# Resolve the templates directory (dev-layout or installed-layout).
+# Resolve the templates directory from the user config dir.
 _bootstrap_docs_find_templates() {
-  local self_dir
-  self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  local dev_templates="$self_dir/../scripts/templates"
-  local app_templates="${APP_DIR:-}/scripts/templates"
-  local installed_templates="/usr/local/share/claude-pod/scripts/templates"
-  if [ -d "$dev_templates" ]; then
-    echo "$dev_templates"
-  elif [ -n "${APP_DIR:-}" ] && [ -d "$app_templates" ]; then
-    echo "$app_templates"
-  elif [ -d "$installed_templates" ]; then
-    echo "$installed_templates"
+  local templates_dir="${CONFIG_DIR}/docs-templates"
+  if [ -d "$templates_dir" ]; then
+    echo "$templates_dir"
   else
-    echo "Error: bootstrap templates not found. Re-run install.sh to restore them." >&2
+    echo "Error: bootstrap-docs templates not found at $templates_dir. Re-run install.sh to restore them." >&2
     return 1
   fi
 }
@@ -1927,15 +1919,8 @@ _bootstrap_docs_scaffold() {
   local target_path="$1" repo_dir="$2" templates_dir="$3"
   local project_dir="$repo_dir/$target_path"
 
-  mkdir -p "$project_dir/decisions" "$project_dir/ideas" "$project_dir/done"
-
-  cp "$templates_dir/VISION.md"      "$project_dir/VISION.md"
-  cp "$templates_dir/AGREEMENTS.md"  "$project_dir/AGREEMENTS.md"
-  cp "$templates_dir/TODOS.md"       "$project_dir/TODOS.md"
-  cp "$templates_dir/TASKS.md"       "$project_dir/TASKS.md"
-  cp "$templates_dir/decisions/_template.md" "$project_dir/decisions/_template.md"
-  cp "$templates_dir/ideas/_template.md"     "$project_dir/ideas/_template.md"
-  cp "$templates_dir/done/_template.md"      "$project_dir/done/_template.md"
+  mkdir -p "$project_dir"
+  cp -r "$templates_dir/." "$project_dir/"
 }
 
 cmd_bootstrap_docs() {
@@ -2033,9 +2018,6 @@ cmd_bootstrap_docs() {
   local branch; branch=$(printf '%s' "$conn_json" | jq -r '.branch // "main"')
   local pat; pat=$(printf '%s' "$conn_json" | jq -r '.token // ""')
 
-  local templates_dir
-  templates_dir=$(_bootstrap_docs_find_templates) || return 1
-
   local clone_dir
   clone_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-bootstrap-XXXXXXXX")
   _CLEANUP_FILES+=("$clone_dir")
@@ -2075,6 +2057,9 @@ ASKPASS
     echo "Error: $path_arg already exists in remote repo" >&2
     return 1
   fi
+
+  local templates_dir
+  templates_dir=$(_bootstrap_docs_find_templates) || return 1
 
   echo "Scaffolding $path_arg..."
   _bootstrap_docs_scaffold "$path_arg" "$repo_dir" "$templates_dir"
