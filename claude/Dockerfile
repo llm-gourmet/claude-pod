@@ -1,12 +1,21 @@
 FROM node:22-slim
 
+# Add GitHub CLI apt repository
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list && \
+    rm -rf /var/lib/apt/lists/*
+
 # Install claude-code CLI and required tools
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         curl jq uuid-runtime dnsutils \
         git build-essential ca-certificates openssh-client wget \
         python3 python3-pip python3-venv \
-        ripgrep fd-find && \
+        ripgrep fd-find gh && \
     rm -rf /var/lib/apt/lists/* && \
     npm install -g @anthropic-ai/claude-code
 
