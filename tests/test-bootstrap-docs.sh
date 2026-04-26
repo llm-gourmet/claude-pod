@@ -302,6 +302,10 @@ test_e2e_scaffold() {
   local cfg; cfg=$(mktemp -d)
   local remote; remote=$(mktemp -d)
 
+  # Seed docs-templates so _bootstrap_docs_find_templates resolves correctly.
+  mkdir -p "$cfg/docs-templates/decisions" "$cfg/docs-templates/ideas" "$cfg/docs-templates/done"
+  cp -r "$PROJECT_DIR/scripts/templates/." "$cfg/docs-templates/"
+
   git -c init.defaultBranch=main init --bare "$remote/repo.git" -q
   local work; work=$(mktemp -d)
   git -c init.defaultBranch=main init "$work" -q
@@ -321,7 +325,7 @@ test_e2e_scaffold() {
     cmd_bootstrap_docs --connection testconn projects/MYPROJECT >/dev/null 2>&1
   "
 
-  # Verify files in remote
+  # Verify files in remote — check all files present in docs-templates/.
   local verify; verify=$(mktemp -d)
   git clone "file://$remote/repo.git" "$verify/repo" -q 2>/dev/null
   local ok=0
