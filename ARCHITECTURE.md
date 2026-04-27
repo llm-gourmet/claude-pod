@@ -136,7 +136,9 @@ flowchart TD
     ConnFail["404 — no matching connection"]
     Filter{"skip_filters\nevaluation"}
     FilterSkip["discard — no spawn"]
-    Persist["persist event JSON to disk"]
+    PayloadFilter{"payload filter\nevent-type subset"}
+    PayloadFilterSkip["discard — unknown event type"]
+    Persist["persist filtered payload to disk"]
     Spawn["claude-pod spawn &lt;connection&gt;\n--event-file &lt;path&gt;"]
     SysPrompt{"resolve system prompt\nfrom profile dir"}
     SP1["system_prompts/&lt;event_type&gt;.md"]
@@ -150,7 +152,9 @@ flowchart TD
     Conn -->|not found| ConnFail
     Conn -->|found| Filter
     Filter -->|filter matches| FilterSkip
-    Filter -->|no match| Persist
+    Filter -->|no match| PayloadFilter
+    PayloadFilter -->|unknown event type| PayloadFilterSkip
+    PayloadFilter -->|known event type| Persist
     Persist --> Spawn
     Spawn --> SysPrompt
     SysPrompt -->|event-specific file exists| SP1 --> Claude
@@ -168,13 +172,15 @@ flowchart TD
 
 4. **Skip-filter evaluation** — Each commit message in the payload is checked against the connection's `skip_filters` list (e.g., `[skip-claude]`). If every commit matches a filter pattern the event is discarded without spawning. Spawn proceeds only when no filter matches.
 
-5. **Event persistence** — The full event JSON is written to a file on disk. This file path is passed to the spawn subprocess and is the authoritative source of the event payload.
+5. **Payload filter** — The payload is reduced to an event-type-specific subset before being written to disk. Fields that carry no value for an agent (API URL templates, `node_id`, repository statistics, setting flags, VCS URLs, `avatar_url`, etc.) are stripped. If the event type is not in the supported set (`push`, `issues`, `pull_request`, `issue_comment`, `pull_request_review_comment`, `workflow_run`) the event is discarded without spawning. The HMAC check and skip-filter evaluation operate on the full raw payload; only the persisted file and the spawned agent receive the filtered subset.
 
-6. **Spawn** — The listener calls `claude-pod spawn <connection_name> --event-file <path>` as a blocking subprocess. The spawn command resolves the profile named by the connection, starts the Docker containers if needed, and prepares the invocation of `claude -p`.
+6. **Event persistence** — The filtered event JSON is written to a file on disk. This file path is passed to the spawn subprocess and is the authoritative source of the event payload.
 
-7. **System prompt resolution** — Before invoking `claude -p`, spawn walks the resolution chain: first `system_prompts/<event_type>.md`, then `system_prompts/default.md`. The content of the resolved file is passed as `--system-prompt`. If neither file exists the flag is omitted entirely — spawn does not fail.
+7. **Spawn** — The listener calls `claude-pod spawn <connection_name> --event-file <path>` as a blocking subprocess. The spawn command resolves the profile named by the connection, starts the Docker containers if needed, and prepares the invocation of `claude -p`.
 
-8. **Event payload injection** — If `--event-file` was provided, the full event JSON is appended to the human-turn prompt after a `---` separator, labeled with the event type and wrapped in a fenced `json` block:
+8. **System prompt resolution** — Before invoking `claude -p`, spawn walks the resolution chain: first `system_prompts/<event_type>.md`, then `system_prompts/default.md`. The content of the resolved file is passed as `--system-prompt`. If neither file exists the flag is omitted entirely — spawn does not fail.
+
+9. **Event payload injection** — If `--event-file` was provided, the filtered event JSON is appended to the human-turn prompt after a `---` separator, labeled with the event type and wrapped in a fenced `json` block:
 
    ```
    ---
@@ -186,7 +192,7 @@ flowchart TD
 
    Manual spawns invoked without `--event-file` receive no appended payload block — the prompt contains only the task file content.
 
-9. **Headless Claude execution** — `claude -p` runs non-interactively inside the container. All four security layers remain active: the PreToolUse hook, the Anthropic proxy, the iptables call validator, and Docker network isolation apply identically to headless sessions as they do to interactive ones.
+10. **Headless Claude execution** — `claude -p` runs non-interactively inside the container. All four security layers remain active: the PreToolUse hook, the Anthropic proxy, the iptables call validator, and Docker network isolation apply identically to headless sessions as they do to interactive ones.
 
 ---
 
