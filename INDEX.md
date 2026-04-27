@@ -69,3 +69,4 @@
 - [tests/test-uninstall-cmd.sh](tests/test-uninstall-cmd.sh) — Unit tests for the `claude-pod uninstall` subcommand
 - [tests/test-update-cmd.sh](tests/test-update-cmd.sh) — Unit tests for `claude-pod update` and `upgrade` subcommands
 - [tests/test-webhook-spawn.sh](tests/test-webhook-spawn.sh) — Tests that the webhook listener correctly calls `claude-pod spawn` and logs events
+- [tests/test-payload-filter.sh](tests/test-payload-filter.sh) — Unit and integration tests for event-type-specific webhook payload filtering (PAY-01–PAY-10)

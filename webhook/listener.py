@@ -105,6 +105,268 @@ def evaluate_skip_filters(
 
 
 # ---------------------------------------------------------------------------
+# Payload filter (issue #67): event-type-specific field subsets
+# ---------------------------------------------------------------------------
+
+def _pick_commits(commits) -> list:
+    """Extract per-commit subset fields for push events."""
+    if not isinstance(commits, list):
+        return []
+    result = []
+    for c in commits:
+        if not isinstance(c, dict):
+            continue
+        entry: dict = {}
+        for k in ("id", "message", "timestamp"):
+            if c.get(k) is not None:
+                entry[k] = c[k]
+        for k in ("added", "modified", "removed"):
+            if isinstance(c.get(k), list):
+                entry[k] = c[k]
+        author = c.get("author")
+        if isinstance(author, dict):
+            a: dict = {}
+            for k in ("name", "username"):
+                if author.get(k) is not None:
+                    a[k] = author[k]
+            if a:
+                entry["author"] = a
+        result.append(entry)
+    return result
+
+
+def _repo_subset(repo, include_default_branch: bool = False) -> dict:
+    """Extract repository subset (full_name always, default_branch optional)."""
+    if not isinstance(repo, dict):
+        return {}
+    result: dict = {}
+    if repo.get("full_name"):
+        result["full_name"] = repo["full_name"]
+    if include_default_branch and repo.get("default_branch"):
+        result["default_branch"] = repo["default_branch"]
+    return result
+
+
+def _labels_subset(labels) -> list:
+    """Extract label names from a labels array."""
+    if not isinstance(labels, list):
+        return []
+    return [
+        {"name": lbl["name"]}
+        for lbl in labels
+        if isinstance(lbl, dict) and lbl.get("name")
+    ]
+
+
+def filter_payload(base: str, payload: dict) -> "dict | None":
+    """Return an event-type-specific subset of the payload, or None for unknown types.
+
+    Decision D-01 (issue #67): apply generous field selection per supported
+    GitHub event type. Strips API URL templates, node_ids, repository
+    statistics, setting flags, VCS URLs, and any other fields that carry
+    no value for an agent acting on the event.
+
+    Returns None for event types not in the supported set — callers must
+    treat None as "discard, do not spawn". The _meta and event_type keys
+    are NOT present in the input; persist_event() injects them afterward.
+
+    Supported base types: push, issues, pull_request, issue_comment,
+    pull_request_review_comment, workflow_run.
+    """
+    if not isinstance(payload, dict):
+        return None
+
+    result: dict = {}
+
+    if base == "push":
+        for k in ("ref", "before", "after", "forced"):
+            if k in payload:
+                result[k] = payload[k]
+        commits = _pick_commits(payload.get("commits"))
+        if commits:
+            result["commits"] = commits
+        repo_sub = _repo_subset(payload.get("repository") or {}, include_default_branch=True)
+        if repo_sub:
+            result["repository"] = repo_sub
+        pusher = payload.get("pusher")
+        if isinstance(pusher, dict) and pusher.get("name"):
+            result["pusher"] = {"name": pusher["name"]}
+
+    elif base == "issues":
+        action = payload.get("action")
+        if action:
+            result["action"] = action
+        issue = payload.get("issue") or {}
+        if isinstance(issue, dict):
+            issue_sub: dict = {}
+            for k in ("number", "title", "body", "state"):
+                if k in issue:
+                    issue_sub[k] = issue[k]
+            user = issue.get("user")
+            if isinstance(user, dict) and user.get("login"):
+                issue_sub["user"] = {"login": user["login"]}
+            labels = _labels_subset(issue.get("labels"))
+            if labels:
+                issue_sub["labels"] = labels
+            assignees = issue.get("assignees")
+            if isinstance(assignees, list):
+                a_list = [
+                    {"login": a["login"]}
+                    for a in assignees
+                    if isinstance(a, dict) and a.get("login")
+                ]
+                if a_list:
+                    issue_sub["assignees"] = a_list
+            milestone = issue.get("milestone")
+            if isinstance(milestone, dict) and milestone.get("title"):
+                issue_sub["milestone"] = {"title": milestone["title"]}
+            if issue_sub:
+                result["issue"] = issue_sub
+        repo_sub = _repo_subset(payload.get("repository") or {})
+        if repo_sub:
+            result["repository"] = repo_sub
+        sender = payload.get("sender")
+        if isinstance(sender, dict) and sender.get("login"):
+            result["sender"] = {"login": sender["login"]}
+
+    elif base == "pull_request":
+        action = payload.get("action")
+        if action:
+            result["action"] = action
+        pr = payload.get("pull_request") or {}
+        if isinstance(pr, dict):
+            pr_sub: dict = {}
+            for k in ("number", "title", "body", "state", "merged"):
+                if k in pr:
+                    pr_sub[k] = pr[k]
+            head = pr.get("head")
+            if isinstance(head, dict):
+                h = {k: head[k] for k in ("ref", "sha") if head.get(k)}
+                if h:
+                    pr_sub["head"] = h
+            base_branch = pr.get("base")
+            if isinstance(base_branch, dict):
+                b = {k: base_branch[k] for k in ("ref", "sha") if base_branch.get(k)}
+                if b:
+                    pr_sub["base"] = b
+            user = pr.get("user")
+            if isinstance(user, dict) and user.get("login"):
+                pr_sub["user"] = {"login": user["login"]}
+            labels = _labels_subset(pr.get("labels"))
+            if labels:
+                pr_sub["labels"] = labels
+            reviewers = pr.get("requested_reviewers")
+            if isinstance(reviewers, list):
+                r_list = [
+                    {"login": r["login"]}
+                    for r in reviewers
+                    if isinstance(r, dict) and r.get("login")
+                ]
+                if r_list:
+                    pr_sub["requested_reviewers"] = r_list
+            if pr_sub:
+                result["pull_request"] = pr_sub
+        repo_sub = _repo_subset(payload.get("repository") or {})
+        if repo_sub:
+            result["repository"] = repo_sub
+        sender = payload.get("sender")
+        if isinstance(sender, dict) and sender.get("login"):
+            result["sender"] = {"login": sender["login"]}
+
+    elif base == "issue_comment":
+        action = payload.get("action")
+        if action:
+            result["action"] = action
+        comment = payload.get("comment") or {}
+        if isinstance(comment, dict):
+            c_sub: dict = {}
+            if "body" in comment:
+                c_sub["body"] = comment["body"]
+            user = comment.get("user")
+            if isinstance(user, dict) and user.get("login"):
+                c_sub["user"] = {"login": user["login"]}
+            if c_sub:
+                result["comment"] = c_sub
+        issue = payload.get("issue") or {}
+        if isinstance(issue, dict):
+            issue_sub = {}
+            for k in ("number", "title", "state"):
+                if k in issue:
+                    issue_sub[k] = issue[k]
+            if issue_sub:
+                result["issue"] = issue_sub
+        repo_sub = _repo_subset(payload.get("repository") or {})
+        if repo_sub:
+            result["repository"] = repo_sub
+        sender = payload.get("sender")
+        if isinstance(sender, dict) and sender.get("login"):
+            result["sender"] = {"login": sender["login"]}
+
+    elif base == "pull_request_review_comment":
+        action = payload.get("action")
+        if action:
+            result["action"] = action
+        comment = payload.get("comment") or {}
+        if isinstance(comment, dict):
+            c_sub = {}
+            if "body" in comment:
+                c_sub["body"] = comment["body"]
+            user = comment.get("user")
+            if isinstance(user, dict) and user.get("login"):
+                c_sub["user"] = {"login": user["login"]}
+            if c_sub:
+                result["comment"] = c_sub
+        # issue.state is NOT included for pull_request_review_comment (spec §6)
+        issue = payload.get("issue") or {}
+        if isinstance(issue, dict):
+            issue_sub = {}
+            for k in ("number", "title"):
+                if k in issue:
+                    issue_sub[k] = issue[k]
+            if issue_sub:
+                result["issue"] = issue_sub
+        repo_sub = _repo_subset(payload.get("repository") or {})
+        if repo_sub:
+            result["repository"] = repo_sub
+        sender = payload.get("sender")
+        if isinstance(sender, dict) and sender.get("login"):
+            result["sender"] = {"login": sender["login"]}
+
+    elif base == "workflow_run":
+        action = payload.get("action")
+        if action:
+            result["action"] = action
+        wr = payload.get("workflow_run") or {}
+        if isinstance(wr, dict):
+            wr_sub: dict = {}
+            for k in ("id", "name", "head_branch", "head_sha", "status", "conclusion", "event", "workflow_id"):
+                if k in wr:
+                    wr_sub[k] = wr[k]
+            if wr_sub:
+                result["workflow_run"] = wr_sub
+        workflow = payload.get("workflow") or {}
+        if isinstance(workflow, dict):
+            wf_sub: dict = {}
+            for k in ("id", "name", "path"):
+                if k in workflow:
+                    wf_sub[k] = workflow[k]
+            if wf_sub:
+                result["workflow"] = wf_sub
+        repo_sub = _repo_subset(payload.get("repository") or {})
+        if repo_sub:
+            result["repository"] = repo_sub
+        sender = payload.get("sender")
+        if isinstance(sender, dict) and sender.get("login"):
+            result["sender"] = {"login": sender["login"]}
+
+    else:
+        # Unknown event type — do not spawn
+        return None
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 class Config:
@@ -267,23 +529,23 @@ def resolve_profile_by_repo(
 # ---------------------------------------------------------------------------
 def persist_event(
     events_dir: pathlib.Path,
-    raw_body: bytes,
+    payload: dict,
     profile_name: str,
     event_type: str,
     delivery_id: str,
 ) -> pathlib.Path:
-    """Write the raw github payload + _meta sidecar to events_dir.
+    """Write the filtered payload + _meta sidecar to events_dir.
 
     Filename: <ISO8601Z>-<uuid8>.json
-    The raw_body was already used for HMAC verification; here we parse it
-    ONLY to inject the _meta key. We never re-serialize for HMAC.
+    `payload` is the already-filtered dict returned by filter_payload().
+    HMAC verification was performed against the raw bytes upstream; this
+    function never sees or re-serializes the raw body.
     """
     events_dir.mkdir(parents=True, exist_ok=True)
     now = datetime.datetime.now(datetime.UTC)
     ts = now.strftime("%Y%m%dT%H%M%SZ")
     suffix = uuid.uuid4().hex[:8]
     path = events_dir / f"{ts}-{suffix}.json"
-    payload = json.loads(raw_body)
     payload["event_type"] = event_type           # D-02: canonical top-level field
     payload["_meta"] = {
         "received_at": now.isoformat().replace("+00:00", "Z"),
@@ -496,10 +758,24 @@ class WebhookHandler(BaseHTTPRequestHandler):
             )
             return self._send_json(200, {"status": "skipped", "filter_value": filter_value})
 
+        # Apply event-type-specific payload filter (issue #67).
+        # Unknown event types are dropped here — no persist, no spawn.
+        base_event = event_type.split("-")[0]
+        filtered = filter_payload(base_event, payload)
+        if filtered is None:
+            log_event(
+                event="skipped",
+                connection=profile["name"],
+                delivery_id=delivery_id,
+                reason="unknown_event_type",
+                event_type=event_type,
+            )
+            return self._send_json(200, {"status": "skipped", "reason": "unknown_event_type"})
+
         try:
             event_path = persist_event(
                 _config.events_dir,
-                raw_body,
+                filtered,
                 profile["name"],
                 event_type,
                 delivery_id,
