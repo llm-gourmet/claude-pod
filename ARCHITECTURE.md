@@ -109,7 +109,7 @@ Each spawned Claude instance is configured by a named profile at `~/.claude-pod/
 ├── profile.json          # workspace path and secret definitions
 ├── .env                  # raw secret values (env vars)
 └── system_prompts/
-    ├── default.md        # fallback system prompt
+    ├── default.md        # fallback system prompt (optional)
     └── <event_type>.md   # event-specific system prompt (optional)
 ```
 
@@ -119,11 +119,16 @@ Each spawned Claude instance is configured by a named profile at `~/.claude-pod/
 
 ### System Prompt Resolution
 
-When spawning, the system prompt passed to `claude -p` is resolved from the profile directory in this order:
+When spawning, the system prompt passed via `--system-prompt` is resolved from the profile directory in this order:
 
 1. `system_prompts/<event_type>.md` — if the spawn was triggered by an event (e.g., `push`, `issues`), the event-specific file is checked first
 2. `system_prompts/default.md` — if no event-specific file exists, the default is used as a fallback
 3. Omit `--system-prompt` — if neither file exists, spawn proceeds without a system prompt; this is not an error and Claude runs with no injected persona or instructions
+
+The human-turn `-p` prompt is always the hardcoded string:
+> Review the event payload and follow the instructions in the system prompt.
+
+The full event JSON is appended to this prompt as a fenced `json` block so Claude receives the raw payload directly.
 
 ### Webhook-to-Spawn Pipeline
 
@@ -144,7 +149,7 @@ flowchart TD
     SP1["system_prompts/&lt;event_type&gt;.md"]
     SP2["system_prompts/default.md"]
     SP3["omit --system-prompt"]
-    Claude["claude -p (headless)\nfour-layer security active"]
+    Claude["claude -p hardcoded-text (headless)\nfour-layer security active"]
 
     GH --> HMAC
     HMAC -->|invalid| HMACFail
@@ -180,7 +185,7 @@ flowchart TD
 
 8. **System prompt resolution** — Before invoking `claude -p`, spawn walks the resolution chain: first `system_prompts/<event_type>.md`, then `system_prompts/default.md`. The content of the resolved file is passed as `--system-prompt`. If neither file exists the flag is omitted entirely — spawn does not fail.
 
-9. **Event payload injection** — If `--event-file` was provided, the filtered event JSON is appended to the human-turn prompt after a `---` separator, labeled with the event type and wrapped in a fenced `json` block:
+9. **Human-turn prompt** — The `-p` argument is always the hardcoded string: `"Review the event payload and follow the instructions in the system prompt."` If `--event-file` was provided, the filtered event JSON is appended to this prompt after a `---` separator, labeled with the event type and wrapped in a fenced `json` block:
 
    ```
    ---
@@ -190,7 +195,7 @@ flowchart TD
    ```
    ```
 
-   Manual spawns invoked without `--event-file` receive no appended payload block — the prompt contains only the task file content.
+   Manual spawns invoked without `--event-file` receive no appended payload block — the prompt contains only the hardcoded fallback text.
 
 10. **Headless Claude execution** — `claude -p` runs non-interactively inside the container. All four security layers remain active: the PreToolUse hook, the Anthropic proxy, the iptables call validator, and Docker network isolation apply identically to headless sessions as they do to interactive ones.
 

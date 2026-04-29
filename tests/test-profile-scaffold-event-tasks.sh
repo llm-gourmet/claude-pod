@@ -1,12 +1,12 @@
 #!/bin/bash
-# test-profile-scaffold-event-tasks.sh -- Tests for the profile-scaffold-event-tasks change:
-# scaffold files produced by `profile create`, system_prompts/default.md content,
+# test-profile-scaffold-event-tasks.sh -- Tests for the profile scaffold:
+# files produced by `profile create`, system_prompts/default.md content,
 # spawn --dry-run on a fresh profile, and removal of system-prompt subcommand.
 #
 # Tests:
-#   PSET-01: profile create produces all eight scaffold files
+#   PSET-01: profile create does NOT produce a tasks/ directory
 #   PSET-02: system_prompts/default.md contains the profile name in the host path
-#   PSET-03: spawn --dry-run resolves tasks/push.md for a push event on a fresh profile
+#   PSET-03: spawn --dry-run on a fresh profile uses hardcoded fallback text
 #   PSET-04: profile <name> system-prompt set exits non-zero with unknown-subcommand error
 set -uo pipefail
 
@@ -79,27 +79,23 @@ echo "========================================"
 echo ""
 
 # =========================================================================
-# PSET-01: profile create produces all eight scaffold files
+# PSET-01: profile create does NOT produce a tasks/ directory
 # =========================================================================
-echo "--- PSET-01: scaffold files ---"
+echo "--- PSET-01: no tasks/ directory scaffolded ---"
 
-test_pset01_scaffold_files() {
+test_pset01_no_tasks_directory() {
   local tmpdir; tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles"
   _create_profile "$cfg" newprof || true
 
   local pdir="$cfg/profiles/newprof"
-  [ -f "$pdir/tasks/default.md" ]              || return 1
-  [ -f "$pdir/tasks/push.md" ]                 || return 1
-  [ -f "$pdir/tasks/issues-opened.md" ]        || return 1
-  [ -f "$pdir/tasks/issues-labeled.md" ]       || return 1
-  [ -f "$pdir/tasks/pull-request-opened.md" ]  || return 1
-  [ -f "$pdir/tasks/pull-request-merged.md" ]  || return 1
-  [ -f "$pdir/tasks/workflow-run-completed.md" ] || return 1
-  [ -f "$pdir/system_prompts/default.md" ]     || return 1
+  # tasks/ must NOT be created
+  [ ! -d "$pdir/tasks" ]                        || return 1
+  # system_prompts/default.md must still be created
+  [ -f "$pdir/system_prompts/default.md" ]      || return 1
 }
-run_test "PSET-01: profile create produces all eight scaffold files" test_pset01_scaffold_files
+run_test "PSET-01: profile create does not produce tasks/ directory" test_pset01_no_tasks_directory
 
 echo ""
 
@@ -122,11 +118,11 @@ run_test "PSET-02: system_prompts/default.md contains profile name in host path"
 echo ""
 
 # =========================================================================
-# PSET-03: spawn --dry-run on a fresh profile resolves tasks/push.md
+# PSET-03: spawn --dry-run on a fresh profile uses hardcoded fallback text
 # =========================================================================
-echo "--- PSET-03: spawn --dry-run resolves tasks/push.md ---"
+echo "--- PSET-03: spawn --dry-run uses hardcoded fallback text ---"
 
-test_pset03_spawn_dry_run_push() {
+test_pset03_spawn_dry_run_hardcoded() {
   local tmpdir; tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
   local cfg="$tmpdir/.claude-pod"
   mkdir -p "$cfg/profiles"
@@ -137,10 +133,10 @@ test_pset03_spawn_dry_run_push() {
   local out
   out=$(CONFIG_DIR="$cfg" HOME="$tmpdir" bash "$CLI" spawn freshprof \
     --event "$event_json" --dry-run 2>&1)
-  echo "$out" | grep -q "task_file: $cfg/profiles/freshprof/tasks/push.md"
+  echo "$out" | grep -q 'Review the event payload and follow the instructions in the system prompt'
 }
-run_test "PSET-03: spawn --dry-run on fresh profile resolves tasks/push.md" \
-  test_pset03_spawn_dry_run_push
+run_test "PSET-03: spawn --dry-run on fresh profile uses hardcoded fallback text" \
+  test_pset03_spawn_dry_run_hardcoded
 
 echo ""
 

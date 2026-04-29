@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # migrate-profile-prompts.sh -- One-shot migration to the file-based
-# task/system-prompt layout introduced by the profile-task-prompts change.
+# system-prompt layout.
 #
 # For each profile directory under $CONFIG_DIR/profiles/:
 #   1. If profile.json has `system_prompt`, write it to
 #      system_prompts/default.md (only if that file does not already exist),
 #      then strip the field from profile.json.
-#   2. If profile has a legacy prompts/ directory, move its files into
-#      tasks/ and remove the old directory.
+#   2. If profile has a legacy prompts/ directory, remove it (tasks/ are no
+#      longer used; spawn uses a hardcoded fallback prompt instead).
+#   3. If profile has a tasks/ directory, remove it (no longer used).
 #
 # Idempotent: re-running on already-migrated profiles is a no-op.
 set -euo pipefail
@@ -51,21 +52,17 @@ for pdir in "$PROFILES_DIR"/*/; do
     touched=1
   fi
 
-  # 2. prompts/ -> tasks/
+  # 2. Remove legacy prompts/ directory (tasks/ are no longer used).
   if [ -d "${pdir}prompts" ]; then
-    mkdir -p "${pdir}tasks"
-    shopt -s nullglob
-    for f in "${pdir}prompts"/*; do
-      fname=$(basename "$f")
-      if [ -e "${pdir}tasks/$fname" ]; then
-        echo "  [$pname] tasks/$fname already exists — skipping move"
-      else
-        mv "$f" "${pdir}tasks/$fname"
-      fi
-    done
-    shopt -u nullglob
-    rmdir "${pdir}prompts" 2>/dev/null || true
-    echo "  [$pname] migrated prompts/ -> tasks/"
+    rm -rf "${pdir}prompts"
+    echo "  [$pname] removed legacy prompts/ directory"
+    touched=1
+  fi
+
+  # 3. Remove tasks/ directory (spawn now uses a hardcoded fallback prompt).
+  if [ -d "${pdir}tasks" ]; then
+    rm -rf "${pdir}tasks"
+    echo "  [$pname] removed tasks/ directory (spawn uses hardcoded fallback)"
     touched=1
   fi
 

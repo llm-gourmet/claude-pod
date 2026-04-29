@@ -36,7 +36,6 @@ claude-pod profile create myapp
 # ~/.claude-pod/profiles/myapp/.env
 # ~/.claude-pod/profiles/myapp/profile.json
 # ~/.claude-pod/profiles/myapp/system_prompts/
-# ~/.claude-pod/profiles/myapp/tasks/
 ```
 
 **4. Add a secret**
@@ -59,19 +58,16 @@ claude-pod start myapp
 
 Claude Code is now running inside the Docker sandbox — no secret can leave without passing through the security layers.
 
-**6. Edit tasks and system prompt**
+**6. Edit the system prompt**
 
-`profile create` scaffolds stub files that drive Claude's behavior on every session and spawn:
+`profile create` scaffolds a system prompt stub that drives Claude's behavior on every session and spawn:
 
 ```bash
-# Task prompt (required) — what Claude should do. Passed as -p on start/spawn.
-nano ~/.claude-pod/profiles/myapp/tasks/default.md
-
 # System prompt (optional) — Claude's persona and constraints.
 nano ~/.claude-pod/profiles/myapp/system_prompts/default.md
 ```
 
-For event-driven spawns you can add per-event overrides (`push.md`, `issues-opened.md`, …). The full webhook event JSON is always appended to the task prompt automatically — Claude receives the raw payload without needing to call any API.
+For event-driven spawns you can add per-event overrides (`push.md`, `issues-opened.md`, …). The full webhook event JSON is always appended to the human-turn prompt automatically — Claude receives the raw payload without needing to call any API.
 
 **7. Set up a GitHub webhook**
 
@@ -122,7 +118,7 @@ Creates `VISION.md`, `GOALS.md`, `AGREEMENTS.md`, `TODOS.md`, `TASKS.md`, `decis
 Before relying on real GitHub events, verify the full pipeline locally:
 
 ```bash
-# Dry run — preview which task/system-prompt files resolve and show rendered content
+# Dry run — preview which system-prompt file resolves and show rendered content
 claude-pod spawn myapp \
   --event '{"action":"opened","repository":{"full_name":"org/myapp"}}' \
   --dry-run
@@ -206,8 +202,7 @@ claude-pod profile <name> secret list
 claude-pod profile <name> secret add <KEY> [<value>] [--redacted <TOKEN>] [--domains d1,d2,...]
 claude-pod profile <name> secret remove <KEY>
 
-# Task + system prompt: edit files under the profile directory (see "Tasks and system prompts")
-#   ~/.claude-pod/profiles/<name>/tasks/default.md          (task prompt, required)
+# System prompt: edit files under the profile directory (see "System prompts")
 #   ~/.claude-pod/profiles/<name>/system_prompts/default.md (system prompt, optional)
 
 # Session
@@ -297,15 +292,12 @@ Profile names must be lowercase alphanumeric and hyphens, max 63 characters.
 ~/.claude-pod/profiles/<name>/
   profile.json            # workspace path, secrets[], optional repo
   .env                    # auth token/key and raw secret values (mode 600)
-  tasks/
-    default.md            # task prompt passed to Claude as -p (required)
-    <event_type>.md       # optional per-event override (e.g. push.md, issues-opened.md)
   system_prompts/
     default.md            # system prompt passed as --system-prompt (optional)
     <event_type>.md       # optional per-event override
 ```
 
-`tasks/default.md` and `system_prompts/default.md` are scaffolded automatically by `profile create`.
+`system_prompts/default.md` is scaffolded automatically by `profile create`.
 
 ### `profile.json` schema
 
@@ -368,15 +360,12 @@ claude-pod profile myapp secret remove GITHUB_TOKEN
 - `secret add` writes the raw value to `.env` (mode 600) and upserts the metadata in `profile.json secrets[]`.
 - Redaction changes take effect immediately (no restart). A container restart is required for the new env var to be visible inside Claude.
 
-### Tasks and system prompts
+### System prompts
 
-Per-profile markdown files under the profile directory drive what Claude does and how it behaves:
+The system prompt drives Claude's persona, role, and constraints. It is optional: if no file is found, `--system-prompt` is omitted and Claude runs with no injected persona.
 
 ```
 ~/.claude-pod/profiles/<name>/
-  tasks/
-    default.md            # required — passed as -p to Claude
-    <event_type>.md       # optional — takes precedence for spawn events
   system_prompts/
     default.md            # optional — passed as --system-prompt
     <event_type>.md       # optional — takes precedence for spawn events
@@ -384,12 +373,17 @@ Per-profile markdown files under the profile directory drive what Claude does an
 
 Resolution chain used by `start` and `spawn`:
 
-- **Task prompt** — `tasks/<event_type>.md` → `tasks/default.md`. If neither exists, spawn fails with the checked paths printed.
 - **System prompt** — `system_prompts/<event_type>.md` → `system_prompts/default.md`. If neither exists, `--system-prompt` is omitted.
 
-Files are passed to Claude as-is (no token substitution). The full webhook event JSON is **always appended** to the task prompt as a fenced code block — Claude receives the raw payload directly without needing to call any API. Claude can also run `git show`, `git log`, etc. for additional context.
+**Spawn human-turn prompt** — `spawn` always passes the following hardcoded text as the human-turn `-p` argument:
 
-Edit the files directly — changes take effect on the next `start` or `spawn`, no restart needed. Use `claude-pod spawn <name> --event '<json>' --dry-run` to verify which files resolve and preview the rendered content.
+> Review the event payload and follow the instructions in the system prompt.
+
+The full webhook event JSON is **always appended** to the human-turn prompt as a fenced code block — Claude receives the raw payload directly without needing to call any API. Claude can also run `git show`, `git log`, etc. for additional context.
+
+**Interactive sessions** — `start` opens a Claude Code session without any `-p` argument; the user interacts directly.
+
+Edit `system_prompts/` files directly — changes take effect on the next `start` or `spawn`, no restart needed. Use `claude-pod spawn <name> --event '<json>' --dry-run` to preview the resolved system prompt and rendered content.
 
 ---
 

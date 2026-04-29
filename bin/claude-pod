@@ -182,102 +182,8 @@ create_profile() {
   # Build profile.json
   jq -n '{"secrets": []}' > "$tmpdir/profile.json"
 
-  # Scaffold tasks/ and system_prompts/ with self-describing stub files.
-  mkdir -p "$tmpdir/tasks" "$tmpdir/system_prompts"
-  cat > "$tmpdir/tasks/default.md" <<'STUBEOF'
-Respond to the webhook event described in the payload below.
-
-<!-- spawn always appends the full webhook event JSON at the end of this prompt
-     as a fenced ```json block labeled "Event Payload (<event_type>)".
-     You can reference any field from the payload directly.
-     Example: the repository name is in .repository.full_name -->
-
-Review the event payload and take whatever action is appropriate for this repository.
-STUBEOF
-  cat > "$tmpdir/tasks/push.md" <<'STUBEOF'
-A push was made to this repository. Review the commits and take appropriate action.
-
-<!-- The full push event payload is appended below by spawn.
-     Useful fields:
-       .commits[]          — array of commit objects
-       .commits[].message  — commit message
-       .commits[].added[]  — files added in that commit
-       .commits[].modified[] — files modified
-       .ref                — branch ref (e.g. refs/heads/main)
-       .repository.full_name — "owner/repo" -->
-
-Summarize what changed across all commits and flag any concerns.
-STUBEOF
-  cat > "$tmpdir/tasks/issues-opened.md" <<'STUBEOF'
-A new issue was opened. Triage it based on the title and body.
-
-<!-- The full issues event payload is appended below by spawn.
-     Useful fields:
-       .issue.title        — issue title
-       .issue.body         — issue body text
-       .issue.labels[]     — labels already on the issue
-       .issue.user.login   — author
-       .repository.full_name — "owner/repo" -->
-
-Read the issue title and body from the payload. Add an appropriate label (bug, enhancement, question, etc.) and post a brief acknowledgement comment.
-STUBEOF
-  cat > "$tmpdir/tasks/issues-labeled.md" <<'STUBEOF'
-A label was added to an issue. React to the label if needed.
-
-<!-- The full issues event payload is appended below by spawn.
-     Useful fields:
-       .label.name         — the label that was just added
-       .issue.title        — issue title
-       .issue.body         — issue body
-       .issue.number       — issue number
-       .repository.full_name — "owner/repo" -->
-
-Check .label.name from the payload. If the label requires an automated response (e.g. "needs-repro", "help-wanted"), take the appropriate action.
-STUBEOF
-  cat > "$tmpdir/tasks/pull-request-opened.md" <<'STUBEOF'
-A pull request was opened. Review it and provide feedback.
-
-<!-- The full pull_request event payload is appended below by spawn.
-     Useful fields:
-       .pull_request.title       — PR title
-       .pull_request.body        — PR description
-       .pull_request.head.sha    — head commit SHA (use with git diff)
-       .pull_request.base.ref    — base branch name
-       .pull_request.head.ref    — head branch name
-       .pull_request.user.login  — author
-       .repository.full_name     — "owner/repo" -->
-
-Read the PR title and body from the payload. Run `git diff origin/<base_ref>...origin/<head_ref>` to see the changes. Post a review comment summarizing what the PR does and any concerns.
-STUBEOF
-  cat > "$tmpdir/tasks/pull-request-merged.md" <<'STUBEOF'
-A pull request was merged. Perform any post-merge housekeeping.
-
-<!-- The full pull_request event payload is appended below by spawn.
-     Useful fields:
-       .pull_request.title         — PR title
-       .pull_request.body          — PR description
-       .pull_request.merged_by.login — who merged it
-       .pull_request.merge_commit_sha — merge commit SHA
-       .pull_request.head.ref      — source branch (now merged)
-       .pull_request.base.ref      — target branch
-       .repository.full_name       — "owner/repo" -->
-
-The PR described in the payload was just merged. Update the changelog, close any linked issues, or run any post-merge tasks appropriate for this repository.
-STUBEOF
-  cat > "$tmpdir/tasks/workflow-run-completed.md" <<'STUBEOF'
-A workflow run completed. Respond based on the outcome.
-
-<!-- The full workflow_run event payload is appended below by spawn.
-     Useful fields:
-       .workflow_run.name        — workflow name (e.g. "CI")
-       .workflow_run.conclusion  — "success", "failure", "cancelled", etc.
-       .workflow_run.html_url    — link to the run logs
-       .workflow_run.head_branch — branch the workflow ran on
-       .workflow_run.head_sha    — commit SHA
-       .repository.full_name     — "owner/repo" -->
-
-Check .workflow_run.conclusion from the payload. If "failure", investigate the failure and open an issue or comment with findings. If "success", no action needed unless there are follow-up tasks.
-STUBEOF
+  # Scaffold system_prompts/ with a self-describing stub file.
+  mkdir -p "$tmpdir/system_prompts"
   cat > "$tmpdir/system_prompts/default.md" <<EOF
 # System prompt placeholder for profile '$name'
 
@@ -804,37 +710,9 @@ build_error_envelope() {
 }
 
 # =========================================================================
-# Profile task-file resolvers: the spawn task prompt and system prompt are
-# resolved from the profile directory (tasks/ and system_prompts/).
+# Profile system-prompt resolver: the spawn system prompt is resolved from
+# the profile directory (system_prompts/).
 # =========================================================================
-
-# Print the path to the task file for a given event_type in the current
-# profile. Checks tasks/<event_type>.md, then tasks/default.md. Emits an
-# error listing the checked paths and returns 1 if neither exists.
-resolve_task_file() {
-  local event_type="$1"
-  local profile_dir
-  profile_dir=$(resolve_profile_dir "$PROFILE")
-  local tasks_dir="$profile_dir/tasks"
-
-  local event_path="$tasks_dir/${event_type}.md"
-  local default_path="$tasks_dir/default.md"
-
-  if [ -f "$event_path" ]; then
-    echo "$event_path"
-    return 0
-  fi
-  if [ -f "$default_path" ]; then
-    echo "$default_path"
-    return 0
-  fi
-
-  echo "ERROR: No task file found for event_type '$event_type'" >&2
-  echo "  Checked: $event_path" >&2
-  echo "  Checked: $default_path" >&2
-  echo "  Create one of the above to enable spawn." >&2
-  return 1
-}
 
 # Print the path to the system-prompt file for a given event_type in the
 # current profile. Checks system_prompts/<event_type>.md, then
@@ -1438,12 +1316,10 @@ do_spawn() {
   audit_branch=$(echo "$EVENT_JSON" | jq -r '.pull_request.head.ref // (.ref // empty | sub("^refs/heads/"; ""))')
   [ "$audit_branch" = "null" ] && audit_branch=""
 
-  # Resolve task file from profile-local tasks/ directory.
-  local task_file
-  task_file=$(resolve_task_file "$event_type") || return 1
-
+  # Hardcoded human-turn prompt for headless (spawn) mode.
+  # The full event payload is appended below.
   local rendered_prompt
-  rendered_prompt=$(cat "$task_file")
+  rendered_prompt="Review the event payload and follow the instructions in the system prompt."
 
   if [ -n "${EVENT_JSON:-}" ]; then
     rendered_prompt+="
@@ -1468,7 +1344,6 @@ ${EVENT_JSON}
 
   # --dry-run: print resolved paths + content and exit.
   if [ "$DRY_RUN" -eq 1 ]; then
-    echo "task_file: $task_file"
     echo "system_prompt: $system_prompt_source"
     echo "---"
     echo "$rendered_prompt"
