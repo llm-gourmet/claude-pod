@@ -437,6 +437,80 @@ list_profiles() {
   fi
 }
 
+# Issue #72: calculate human-readable running time from an ISO-8601 UTC
+# timestamp (e.g. 2025-06-01T14:32:00Z) to now.
+# Output: "42s", "3m 12s", "1h 5m"
+calculate_running_time() {
+  local started_at="$1"
+  local started_ts
+  started_ts=$(date -d "$started_at" +%s 2>/dev/null) || { echo "?"; return; }
+  local now_ts
+  now_ts=$(date -u +%s)
+  local diff=$(( now_ts - started_ts ))
+  if [ "$diff" -lt 0 ]; then diff=0; fi
+  if [ "$diff" -lt 60 ]; then
+    echo "${diff}s"
+  elif [ "$diff" -lt 3600 ]; then
+    local mins=$(( diff / 60 ))
+    local secs=$(( diff % 60 ))
+    printf "%dm %ds" "$mins" "$secs"
+  else
+    local hrs=$(( diff / 3600 ))
+    local mins=$(( (diff % 3600) / 60 ))
+    printf "%dh %dm" "$hrs" "$mins"
+  fi
+}
+
+# Issue #72: list running claude-pod instances (interactive + headless) by
+# querying Docker containers that carry the claude-pod.profile label.
+# Docker container state IS the instance state — no separate registry needed.
+list_instances() {
+  local container_ids
+  container_ids=$(docker ps --filter "label=claude-pod.profile" --format '{{.ID}}' 2>/dev/null) || true
+
+  if [ -z "$container_ids" ]; then
+    echo "No running instances."
+    return 0
+  fi
+
+  printf "%-16s %-12s %-20s %-10s %-12s %s\n" "PROFILE" "TYPE" "STARTED" "RUNNING" "EVENT" "ID"
+  printf "%-16s %-12s %-20s %-10s %-12s %s\n" "-------" "----" "-------" "-------" "-----" "--"
+
+  while IFS= read -r cid; do
+    [ -z "$cid" ] && continue
+    local labels_json
+    labels_json=$(docker inspect "$cid" --format '{{json .Config.Labels}}' 2>/dev/null) || continue
+
+    local profile type event_type event_id started_at
+    profile=$(printf '%s' "$labels_json" | jq -r '."claude-pod.profile" // ""')
+    type=$(printf '%s' "$labels_json" | jq -r '."claude-pod.type" // ""')
+    event_type=$(printf '%s' "$labels_json" | jq -r '."claude-pod.event-type" // ""')
+    event_id=$(printf '%s' "$labels_json" | jq -r '."claude-pod.event-id" // ""')
+    started_at=$(printf '%s' "$labels_json" | jq -r '."claude-pod.started-at" // ""')
+
+    # Calculate running time from started-at label
+    local running="?"
+    if [ -n "$started_at" ] && [ "$started_at" != "null" ]; then
+      running=$(calculate_running_time "$started_at")
+    fi
+
+    # Format started-at as human-readable date (YYYY-MM-DD HH:MM)
+    local started_display
+    if [ -n "$started_at" ] && [ "$started_at" != "null" ]; then
+      started_display=$(date -d "$started_at" +"%Y-%m-%d %H:%M" 2>/dev/null || printf '%s' "$started_at")
+    else
+      started_display="—"
+    fi
+
+    # Use em-dash for empty event fields (interactive sessions have no event)
+    if [ -z "$event_type" ] || [ "$event_type" = "null" ]; then event_type="—"; fi
+    if [ -z "$event_id" ] || [ "$event_id" = "null" ]; then event_id="—"; fi
+
+    printf "%-16s %-12s %-20s %-10s %-12s %s\n" \
+      "$profile" "$type" "$started_display" "$running" "$event_type" "$event_id"
+  done <<< "$container_ids"
+}
+
 cmd_profile() {
   local first="${1:-}"
 
@@ -1360,6 +1434,39 @@ ${EVENT_JSON}
   if [ -n "${CLAUDE_POD_SYSTEM_PROMPT:-}" ]; then
     claude_args+=("--system-prompt" "$CLAUDE_POD_SYSTEM_PROMPT")
   fi
+
+  # Issue #72: compute event-id from event payload for Docker label.
+  # event-id identifies the specific event that triggered this spawn:
+  #   push        → first 7 chars of commit SHA (Pure-ASCII hex, byte truncation safe)
+  #   issues/issue_comment → "#<number>"
+  #   pull_request/pull_request_review_comment → "#<number>"
+  #   workflow_run → run ID (numeric string)
+  local _spawn_event_id=""
+  case "$event_type" in
+    push)
+      local _sha
+      _sha=$(printf '%s' "$EVENT_JSON" | jq -r '.after // .head_commit.id // ""')
+      # Pure-ASCII SHA hex — byte-based truncation is safe here.
+      if [ ${#_sha} -ge 7 ]; then _spawn_event_id="${_sha:0:7}"; fi
+      ;;
+    issues|issue_comment)
+      _spawn_event_id=$(printf '%s' "$EVENT_JSON" | jq -r '(.issue.number // empty | if . then "#\(.)" else "" end)' 2>/dev/null || true)
+      ;;
+    pull_request|pull_request_review_comment)
+      _spawn_event_id=$(printf '%s' "$EVENT_JSON" | jq -r '(.pull_request.number // empty | if . then "#\(.)" else "" end)' 2>/dev/null || true)
+      ;;
+    workflow_run)
+      _spawn_event_id=$(printf '%s' "$EVENT_JSON" | jq -r '(.workflow_run.id // empty | if . then tostring else "" end)' 2>/dev/null || true)
+      ;;
+  esac
+
+  # Issue #72: set Docker labels before docker compose up so running instances
+  # are discoverable via `docker ps --filter label=claude-pod.profile`.
+  export CLAUDE_POD_LABEL_PROFILE="${PROFILE:-}"
+  export CLAUDE_POD_LABEL_TYPE="headless"
+  export CLAUDE_POD_LABEL_EVENT_TYPE="${event_type:-}"
+  export CLAUDE_POD_LABEL_EVENT_ID="${_spawn_event_id:-}"
+  export CLAUDE_POD_LABEL_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
   # Execute headless Claude Code (per D-06, D-09)
   local claude_stdout claude_stderr_file claude_exit=0
@@ -2410,7 +2517,9 @@ ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile)
-      if [[ " ${ARGS[*]} " == *" gh-webhook-listener "* ]]; then
+      if [[ " ${ARGS[*]} " == *" gh-webhook-listener "* ]] || [[ " ${ARGS[*]} " == *" list "* ]]; then
+        # --profile is valid for gh-webhook-listener and for `list --profile`
+        # (list --profile shows configured profiles instead of running instances)
         ARGS+=("$1"); shift
       else
         _profile_hint="${2:-<name>}"
@@ -2553,7 +2662,17 @@ case "$CMD" in
     echo "Upgrade complete. ${_upgrade_count} profile image(s) upgraded."
     ;;
   list)
-    list_profiles
+    # Issue #72: bare `list` shows running instances; `list --profile` shows
+    # configured profiles (preserves old behavior under the new flag).
+    _list_show_profile=0
+    for _larg in "${REMAINING_ARGS[@]:1}"; do
+      [ "$_larg" = "--profile" ] && _list_show_profile=1
+    done
+    if [ "$_list_show_profile" -eq 1 ]; then
+      list_profiles
+    else
+      list_instances
+    fi
     ;;
   remove)
     require_profile_arg
@@ -2622,7 +2741,8 @@ case "$CMD" in
     echo "  stop [name]        Stop containers (all profiles if no name given)"
     echo "  remove <name>      Remove profile config and stop containers"
     echo "  logs <name>        Tail log files [hook|anthropic|iptables|clear]"
-    echo "  list               List all profiles and their status"
+    echo "  list               List running instances (interactive + headless)"
+    echo "  list --profile     List configured profiles and their status"
     echo ""
     echo "System:"
     echo "  update             Pull latest claude-pod, rebuild all images"
@@ -2679,6 +2799,14 @@ case "$CMD" in
     ;;
   start)
     require_profile_arg
+    # Issue #72: set Docker labels for instance tracking before docker compose up.
+    # These are consumed by the labels section in docker-compose.yml and allow
+    # `claude-pod list` to discover running instances via docker ps label filter.
+    export CLAUDE_POD_LABEL_PROFILE="${PROFILE:-}"
+    export CLAUDE_POD_LABEL_TYPE="interactive"
+    export CLAUDE_POD_LABEL_EVENT_TYPE=""
+    export CLAUDE_POD_LABEL_EVENT_ID=""
+    export CLAUDE_POD_LABEL_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     cleanup_containers
     docker compose up -d
     _interactive_args=(--dangerously-skip-permissions)
@@ -2695,6 +2823,12 @@ case "$CMD" in
       exit 1
     fi
     # No command, no --profile: superuser interactive session (merged all profiles)
+    # Issue #72: set Docker labels for instance tracking (superuser mode).
+    export CLAUDE_POD_LABEL_PROFILE="superuser"
+    export CLAUDE_POD_LABEL_TYPE="interactive"
+    export CLAUDE_POD_LABEL_EVENT_TYPE=""
+    export CLAUDE_POD_LABEL_EVENT_ID=""
+    export CLAUDE_POD_LABEL_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     cleanup_containers
     docker compose up -d
     _interactive_args=(--dangerously-skip-permissions)
