@@ -177,6 +177,8 @@ flowchart TD
 
 4. **Skip-filter evaluation** — Each commit message in the payload is checked against the connection's `skip_filters` list (e.g., `[skip-claude]`). If every commit matches a filter pattern the event is discarded without spawning. Spawn proceeds only when no filter matches.
 
+   Each connection may also carry an optional `max_turns` integer field (default `20`). This value is read by `claude-pod spawn` and forwarded as `--max-turns` to `claude -p`, capping the number of agentic rounds for that headless session. Use `claude-pod set-max-turns <connection> <value>` to update the field without manual JSON editing.
+
 5. **Payload filter** — The payload is reduced to an event-type-specific subset before being written to disk. Fields that carry no value for an agent (API URL templates, `node_id`, repository statistics, setting flags, VCS URLs, `avatar_url`, etc.) are stripped. If the event type is not in the supported set (`push`, `issues`, `pull_request`, `issue_comment`, `pull_request_review_comment`, `workflow_run`) the event is discarded without spawning. The HMAC check and skip-filter evaluation operate on the full raw payload; only the persisted file and the spawned agent receive the filtered subset.
 
 6. **Event persistence** — The filtered event JSON is written to a file on disk. This file path is passed to the spawn subprocess and is the authoritative source of the event payload.

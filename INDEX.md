@@ -71,3 +71,4 @@
 - [tests/test-webhook-spawn.sh](tests/test-webhook-spawn.sh) — Tests that the webhook listener correctly calls `claude-pod spawn` and logs events
 - [tests/test-payload-filter.sh](tests/test-payload-filter.sh) — Unit and integration tests for event-type-specific webhook payload filtering (PAY-01–PAY-10)
 - [tests/test-list-instances.sh](tests/test-list-instances.sh) — Unit tests for `claude-pod list` running-instance view with Docker labels (LIST-01–LIST-08)
+- [tests/test-loop-guard.sh](tests/test-loop-guard.sh) — Unit tests for loop-guard: `--max-turns` per-connection configuration and `set-max-turns` subcommand (GUARD-01–GUARD-04)
