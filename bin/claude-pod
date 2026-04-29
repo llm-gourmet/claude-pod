@@ -1424,13 +1424,28 @@ ${EVENT_JSON}
     return 0
   fi
 
+  # Issue #74: read max_turns from connections.json for this profile (loop-guard).
+  # Look up by connection name == PROFILE first, then by connection.profile == PROFILE.
+  # Default: 20 if no match or connections.json absent.
+  local _connections_file; _connections_file=$(_webhook_connections_file)
+  local _max_turns=20
+  if [ -f "$_connections_file" ]; then
+    local _mt_raw
+    _mt_raw=$(jq -r --arg p "$PROFILE" \
+      'first(.[] | select(.name == $p or .profile == $p) | .max_turns) // 20' \
+      "$_connections_file" 2>/dev/null | head -1)
+    if [[ "$_mt_raw" =~ ^[0-9]+$ ]] && [ "$_mt_raw" -gt 0 ]; then
+      _max_turns="$_mt_raw"
+    fi
+  fi
+
   # Build claude command flags
   # NOTE: --bare is intentionally OMITTED. Per RESEARCH.md Open Question 3,
   # --bare skips hooks/CLAUDE.md/MCP. The PreToolUse security hooks inside the
   # container are critical for enforcing the security whitelist (CLAUDE.md mandate).
   # Until empirical testing confirms hooks survive --bare, we do NOT use it.
   # The small startup time cost is acceptable vs risking security bypass.
-  local claude_args=("$rendered_prompt" "--output-format" "json" "--dangerously-skip-permissions")
+  local claude_args=("$rendered_prompt" "--output-format" "json" "--dangerously-skip-permissions" "--max-turns" "$_max_turns")
   if [ -n "${CLAUDE_POD_SYSTEM_PROMPT:-}" ]; then
     claude_args+=("--system-prompt" "$CLAUDE_POD_SYSTEM_PROMPT")
   fi
@@ -2118,6 +2133,42 @@ _webhook_find_connection() {
 }
 
 # =========================================================================
+# set-max-turns: update max_turns for a connection in connections.json
+# Usage: claude-pod set-max-turns <connection> <value>
+# =========================================================================
+
+cmd_set_max_turns() {
+  local conn_name="${1:-}"
+  local new_value="${2:-}"
+
+  if [ -z "$conn_name" ] || [ -z "$new_value" ]; then
+    echo "Usage: claude-pod set-max-turns <connection> <value>" >&2
+    echo "Example: claude-pod set-max-turns obsidian 30" >&2
+    return 1
+  fi
+
+  if ! [[ "$new_value" =~ ^[0-9]+$ ]] || [ "$new_value" -lt 1 ]; then
+    echo "Error: value must be a positive integer, got: '$new_value'" >&2
+    return 1
+  fi
+
+  local connections; connections=$(_webhook_read_connections)
+  local existing; existing=$(printf '%s' "$connections" | jq -r --arg n "$conn_name" \
+    '.[] | select(.name == $n) | .name' 2>/dev/null)
+  if [ -z "$existing" ]; then
+    echo "Error: connection '$conn_name' not found. Use --list-connections to see available connections." >&2
+    return 1
+  fi
+
+  local updated; updated=$(printf '%s' "$connections" | jq \
+    --arg n "$conn_name" --argjson v "$new_value" \
+    '[.[] | if .name == $n then .max_turns = $v else . end]')
+  _webhook_write_connections "$updated"
+  echo "max_turns for connection '$conn_name' set to $new_value"
+  return 0
+}
+
+# =========================================================================
 # gh-webhook-listener filter subcommands
 # =========================================================================
 
@@ -2538,7 +2589,7 @@ FIRST_ARG="${ARGS[0]:-}"
 # Superuser mode (allowed for most commands). Skip config load for commands
 # that don't need a merged workspace or that manage their own profile resolution.
 case "$FIRST_ARG" in
-  list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs|gh-webhook-listener|start|stop|remove|logs|profile|uninstall)
+  list|help|--help|-h|replay|reap|spawn|update|upgrade|status|bootstrap-docs|gh-webhook-listener|start|stop|remove|logs|profile|uninstall|set-max-turns)
     : # skip superuser load
     ;;
   *)
@@ -2750,6 +2801,7 @@ case "$CMD" in
     echo "  reap               Clean up orphaned spawn containers and stale event files"
     echo "  bootstrap-docs     Scaffold project docs in configured remote repo"
     echo "  gh-webhook-listener   Configure and inspect the webhook listener service"
+    echo "  set-max-turns <connection> <value>  Set --max-turns for a connection's headless sessions"
     echo "  uninstall          Remove claude-pod (binary, services, config dir)"
     echo "  uninstall --dry-run        Preview what would be removed"
     echo "  uninstall --keep-data      Remove binaries/services, preserve ~/.claude-pod/"
@@ -2777,6 +2829,9 @@ case "$CMD" in
     ;;
   gh-webhook-listener)
     cmd_gh_webhook_listener "${REMAINING_ARGS[@]:1}"
+    ;;
+  set-max-turns)
+    cmd_set_max_turns "${REMAINING_ARGS[@]:1}"
     ;;
   spawn)
     do_spawn
