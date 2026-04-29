@@ -1,6 +1,7 @@
 #!/bin/bash
 # test-phase13.sh -- Integration tests for Phase 13: Headless CLI Path
 # Tests HEAD-01 through HEAD-05 (spawn subcommand, output, max-turns, ephemeral lifecycle, templates)
+# Also tests HEAD-06: spawn without task file uses hardcoded fallback text.
 #
 # Strategy: Use temp directories for all config to avoid touching real ~/.claude-pod.
 # Source bin/claude-pod functions with __CLAUDE_POD_SOURCE_ONLY=1.
@@ -444,6 +445,66 @@ test_dry_run_flag_parsed() {
   return 0
 }
 run_test "DRY-RUN: --dry-run flag sets DRY_RUN=1" test_dry_run_flag_parsed
+
+echo ""
+
+# =========================================================================
+# HEAD-06 Tests: Spawn without task file uses hardcoded fallback text
+# =========================================================================
+echo "--- HEAD-06: Hardcoded Fallback Prompt ---"
+
+test_spawn_hardcoded_fallback_text() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  local cfg="$tmpdir/.claude-pod"
+  local ws="$tmpdir/workspace"
+  mkdir -p "$cfg/profiles/testprof" "$ws"
+  cat > "$cfg/config.sh" <<EOF
+APP_DIR="$PROJECT_DIR"
+PLATFORM="linux"
+DEFAULT_WORKSPACE="$ws"
+EOF
+  jq -n --arg ws "$ws" '{"workspace": $ws, "secrets": []}' \
+    > "$cfg/profiles/testprof/profile.json"
+  printf 'CLAUDE_CODE_OAUTH_TOKEN=test-token\n' > "$cfg/profiles/testprof/.env"
+  chmod 600 "$cfg/profiles/testprof/.env"
+
+  # No tasks/ directory — spawn should use hardcoded fallback
+  local event_json='{"event_type":"push","repository":{"full_name":"u/r"}}'
+  local out
+  out=$(CONFIG_DIR="$cfg" HOME="$tmpdir" bash "$PROJECT_DIR/bin/claude-pod" \
+    spawn testprof --event "$event_json" --dry-run 2>&1)
+  echo "$out" | grep -q 'Review the event payload and follow the instructions in the system prompt' || return 1
+  # No task_file line should appear in dry-run output
+  ! echo "$out" | grep -q "^task_file:" || return 1
+  return 0
+}
+run_test "HEAD-06a: spawn without task file uses hardcoded fallback text" \
+  test_spawn_hardcoded_fallback_text
+
+test_spawn_no_task_file_required() {
+  local tmpdir
+  tmpdir=$(mktemp -d -p "$TEST_TMPDIR")
+  local cfg="$tmpdir/.claude-pod"
+  local ws="$tmpdir/workspace"
+  mkdir -p "$cfg/profiles/testprof" "$ws"
+  cat > "$cfg/config.sh" <<EOF
+APP_DIR="$PROJECT_DIR"
+PLATFORM="linux"
+DEFAULT_WORKSPACE="$ws"
+EOF
+  jq -n --arg ws "$ws" '{"workspace": $ws, "secrets": []}' \
+    > "$cfg/profiles/testprof/profile.json"
+  printf 'CLAUDE_CODE_OAUTH_TOKEN=test-token\n' > "$cfg/profiles/testprof/.env"
+  chmod 600 "$cfg/profiles/testprof/.env"
+
+  # Spawn --dry-run must succeed with exit 0 even without any tasks/ directory
+  local event_json='{"event_type":"issues-opened","repository":{"full_name":"u/r"}}'
+  CONFIG_DIR="$cfg" HOME="$tmpdir" bash "$PROJECT_DIR/bin/claude-pod" \
+    spawn testprof --event "$event_json" --dry-run >/dev/null 2>&1
+}
+run_test "HEAD-06b: spawn succeeds without tasks/ directory (exit 0)" \
+  test_spawn_no_task_file_required
 
 echo ""
 

@@ -1,19 +1,18 @@
 #!/bin/bash
-# test-profile-task-prompts.sh -- Unit tests for the profile-task-prompts
-# change: file-based tasks/ + system_prompts/ resolution in the profile dir,
-# plus the migrate-profile-prompts.sh script.
+# test-profile-task-prompts.sh -- Unit tests for spawn prompt behavior and
+# the migrate-profile-prompts.sh script.
 #
-# Tests (one per 6.x task):
-#   PTP-01: spawn with event-specific task file resolves correctly
-#   PTP-02: spawn falls back to tasks/default.md when no event-specific file
-#   PTP-03: spawn fails with clear error when no task file found
+# Tests:
+#   PTP-01: spawn with any event type uses hardcoded fallback text
+#   PTP-02: spawn fallback text is the expected string
+#   PTP-03: spawn succeeds even when no tasks/ directory exists
 #   PTP-04: system prompt resolves from system_prompts/<event_type>.md
 #   PTP-05: system prompt falls back to system_prompts/default.md
 #   PTP-06: spawn proceeds without --system-prompt when no file found
-#   PTP-07: --dry-run shows resolved task path and system prompt source
+#   PTP-07: --dry-run shows hardcoded prompt and system prompt source (no task_file line)
 #   PTP-08: migration script moves system_prompt field to system_prompts/default.md
 #   PTP-09: migration script is idempotent
-#   PTP-10: --event-file appends payload block to prompt
+#   PTP-10: --event-file appends payload block to hardcoded prompt
 #   PTP-11: empty EVENT_JSON produces no payload block (guard unit test)
 #   PTP-12: --dry-run with event file shows payload block in stdout
 set -uo pipefail
@@ -73,48 +72,39 @@ echo "========================================"
 echo ""
 
 # -------------------------------------------------------------------------
-# PTP-01: event-specific task file
+# PTP-01: hardcoded fallback text is used for any event type
 # -------------------------------------------------------------------------
-test_ptp01_event_specific_task() {
+test_ptp01_hardcoded_fallback() {
   local t; t=$(mktemp -d -p "$TEST_TMPDIR"); local cfg; cfg=$(_make_profile "$t")
-  local pdir="$cfg/profiles/testprof"
-  mkdir -p "$pdir/tasks"
-  printf 'PUSH TASK CONTENT\n' > "$pdir/tasks/push.md"
-  printf 'DEFAULT TASK\n' > "$pdir/tasks/default.md"
   local out; out=$(_spawn_dry_run "$cfg" testprof push)
-  echo "$out" | grep -q "task_file: $pdir/tasks/push.md" || return 1
-  echo "$out" | grep -q 'PUSH TASK CONTENT' || return 1
+  echo "$out" | grep -q 'Review the event payload and follow the instructions in the system prompt' || return 1
 }
-run_test "PTP-01: event-specific task file resolves" test_ptp01_event_specific_task
+run_test "PTP-01: hardcoded fallback text used for spawn" test_ptp01_hardcoded_fallback
 
 # -------------------------------------------------------------------------
-# PTP-02: fallback to tasks/default.md
+# PTP-02: hardcoded fallback text is the expected exact string
 # -------------------------------------------------------------------------
-test_ptp02_default_task_fallback() {
+test_ptp02_fallback_exact_text() {
   local t; t=$(mktemp -d -p "$TEST_TMPDIR"); local cfg; cfg=$(_make_profile "$t")
-  local pdir="$cfg/profiles/testprof"
-  mkdir -p "$pdir/tasks"
-  printf 'DEFAULT TASK CONTENT\n' > "$pdir/tasks/default.md"
   local out; out=$(_spawn_dry_run "$cfg" testprof issues-opened)
-  echo "$out" | grep -q "task_file: $pdir/tasks/default.md" || return 1
-  echo "$out" | grep -q 'DEFAULT TASK CONTENT' || return 1
+  echo "$out" | grep -q 'Review the event payload and follow the instructions in the system prompt\.' || return 1
 }
-run_test "PTP-02: falls back to tasks/default.md" test_ptp02_default_task_fallback
+run_test "PTP-02: hardcoded fallback is exact expected string" test_ptp02_fallback_exact_text
 
 # -------------------------------------------------------------------------
-# PTP-03: no task file -> clear error + nonzero exit
+# PTP-03: spawn succeeds even when no tasks/ directory exists
 # -------------------------------------------------------------------------
-test_ptp03_no_task_file_fails() {
+test_ptp03_no_tasks_dir_succeeds() {
   local t; t=$(mktemp -d -p "$TEST_TMPDIR"); local cfg; cfg=$(_make_profile "$t")
   local pdir="$cfg/profiles/testprof"
+  # Explicitly ensure no tasks/ directory exists
+  rm -rf "$pdir/tasks"
   local out rc
   out=$(_spawn_dry_run "$cfg" testprof push); rc=$?
-  [ "$rc" -ne 0 ] || return 1
-  echo "$out" | grep -q 'No task file found' || return 1
-  echo "$out" | grep -q "Checked: $pdir/tasks/push.md" || return 1
-  echo "$out" | grep -q "Checked: $pdir/tasks/default.md" || return 1
+  [ "$rc" -eq 0 ] || return 1
+  echo "$out" | grep -q 'Review the event payload' || return 1
 }
-run_test "PTP-03: spawn fails with checked paths listed" test_ptp03_no_task_file_fails
+run_test "PTP-03: spawn succeeds without tasks/ directory" test_ptp03_no_tasks_dir_succeeds
 
 # -------------------------------------------------------------------------
 # PTP-04: system prompt event-specific file
@@ -122,8 +112,7 @@ run_test "PTP-03: spawn fails with checked paths listed" test_ptp03_no_task_file
 test_ptp04_system_prompt_event_specific() {
   local t; t=$(mktemp -d -p "$TEST_TMPDIR"); local cfg; cfg=$(_make_profile "$t")
   local pdir="$cfg/profiles/testprof"
-  mkdir -p "$pdir/tasks" "$pdir/system_prompts"
-  printf 'task\n' > "$pdir/tasks/default.md"
+  mkdir -p "$pdir/system_prompts"
   printf 'PUSH SYS PROMPT\n' > "$pdir/system_prompts/push.md"
   printf 'DEFAULT SYS PROMPT\n' > "$pdir/system_prompts/default.md"
   local out; out=$(_spawn_dry_run "$cfg" testprof push)
@@ -137,8 +126,7 @@ run_test "PTP-04: system_prompts/<event_type>.md resolves" test_ptp04_system_pro
 test_ptp05_system_prompt_default_fallback() {
   local t; t=$(mktemp -d -p "$TEST_TMPDIR"); local cfg; cfg=$(_make_profile "$t")
   local pdir="$cfg/profiles/testprof"
-  mkdir -p "$pdir/tasks" "$pdir/system_prompts"
-  printf 'task\n' > "$pdir/tasks/default.md"
+  mkdir -p "$pdir/system_prompts"
   printf 'DEFAULT SYS PROMPT\n' > "$pdir/system_prompts/default.md"
   local out; out=$(_spawn_dry_run "$cfg" testprof release)
   echo "$out" | grep -q "system_prompt: $pdir/system_prompts/default.md" || return 1
@@ -150,9 +138,6 @@ run_test "PTP-05: falls back to system_prompts/default.md" test_ptp05_system_pro
 # -------------------------------------------------------------------------
 test_ptp06_no_system_prompt() {
   local t; t=$(mktemp -d -p "$TEST_TMPDIR"); local cfg; cfg=$(_make_profile "$t")
-  local pdir="$cfg/profiles/testprof"
-  mkdir -p "$pdir/tasks"
-  printf 'task\n' > "$pdir/tasks/default.md"
   local out rc
   out=$(_spawn_dry_run "$cfg" testprof push); rc=$?
   [ "$rc" -eq 0 ] || return 1
@@ -161,21 +146,21 @@ test_ptp06_no_system_prompt() {
 run_test "PTP-06: no system prompt -> 'none', spawn succeeds" test_ptp06_no_system_prompt
 
 # -------------------------------------------------------------------------
-# PTP-07: --dry-run shows both resolved paths
+# PTP-07: --dry-run shows hardcoded prompt and system prompt source (no task_file line)
 # -------------------------------------------------------------------------
-test_ptp07_dry_run_prints_paths() {
+test_ptp07_dry_run_output() {
   local t; t=$(mktemp -d -p "$TEST_TMPDIR"); local cfg; cfg=$(_make_profile "$t")
   local pdir="$cfg/profiles/testprof"
-  mkdir -p "$pdir/tasks" "$pdir/system_prompts"
-  printf 'TASK\n' > "$pdir/tasks/default.md"
+  mkdir -p "$pdir/system_prompts"
   printf 'SYS\n' > "$pdir/system_prompts/default.md"
   local out; out=$(_spawn_dry_run "$cfg" testprof anything)
-  echo "$out" | grep -q "task_file: $pdir/tasks/default.md" || return 1
   echo "$out" | grep -q "system_prompt: $pdir/system_prompts/default.md" || return 1
-  echo "$out" | grep -q '^TASK$' || return 1
+  echo "$out" | grep -q 'Review the event payload and follow the instructions in the system prompt' || return 1
+  # No task_file line should appear
+  ! echo "$out" | grep -q "^task_file:" || return 1
 }
-run_test "PTP-07: --dry-run prints task path + system prompt path + content" \
-  test_ptp07_dry_run_prints_paths
+run_test "PTP-07: --dry-run prints hardcoded prompt + system prompt path, no task_file line" \
+  test_ptp07_dry_run_output
 
 # -------------------------------------------------------------------------
 # PTP-08: migration script: system_prompt field -> system_prompts/default.md
@@ -197,10 +182,9 @@ run_test "PTP-08: migration moves system_prompt to system_prompts/default.md" \
   test_ptp08_migration_moves_system_prompt
 
 # -------------------------------------------------------------------------
-# PTP-09: migration is idempotent (pre-existing default.md preserved; field
-# stripped). Also migrates prompts/ -> tasks/ on second pass if re-seeded.
+# PTP-09: migration removes tasks/ and prompts/ directories; is idempotent
 # -------------------------------------------------------------------------
-test_ptp09_migration_idempotent() {
+test_ptp09_migration_removes_tasks() {
   local t; t=$(mktemp -d -p "$TEST_TMPDIR")
   local cfg="$t/.claude-pod"
   mkdir -p "$cfg/profiles/p1/system_prompts"
@@ -208,32 +192,31 @@ test_ptp09_migration_idempotent() {
   jq -n --arg ws "/tmp" --arg sp "new value" \
     '{workspace:$ws, secrets:[], system_prompt:$sp}' > "$cfg/profiles/p1/profile.json"
 
-  # First run: strips field; does NOT overwrite existing default.md.
+  # Add tasks/ and prompts/ directories to test removal
+  mkdir -p "$cfg/profiles/p1/tasks"
+  printf 'TASK\n' > "$cfg/profiles/p1/tasks/default.md"
+  mkdir -p "$cfg/profiles/p1/prompts"
+  printf 'PROMPT\n' > "$cfg/profiles/p1/prompts/push.md"
+
+  # First run: strips system_prompt field, removes tasks/ and prompts/, does NOT overwrite existing default.md.
   CONFIG_DIR="$cfg" HOME="$t" bash "$MIGRATE" >/dev/null 2>&1 || return 1
   grep -q '^EXISTING$' "$cfg/profiles/p1/system_prompts/default.md" || return 1
   ! jq -e 'has("system_prompt")' "$cfg/profiles/p1/profile.json" >/dev/null || return 1
+  [ ! -d "$cfg/profiles/p1/tasks" ] || return 1
+  [ ! -d "$cfg/profiles/p1/prompts" ] || return 1
 
   # Second run: no-op, still exits 0.
   CONFIG_DIR="$cfg" HOME="$t" bash "$MIGRATE" >/dev/null 2>&1 || return 1
   grep -q '^EXISTING$' "$cfg/profiles/p1/system_prompts/default.md" || return 1
-
-  # prompts/ -> tasks/ migration path.
-  mkdir -p "$cfg/profiles/p1/prompts"
-  printf 'PUSH\n' > "$cfg/profiles/p1/prompts/push.md"
-  CONFIG_DIR="$cfg" HOME="$t" bash "$MIGRATE" >/dev/null 2>&1 || return 1
-  [ ! -d "$cfg/profiles/p1/prompts" ] || return 1
-  grep -q '^PUSH$' "$cfg/profiles/p1/tasks/push.md" || return 1
 }
-run_test "PTP-09: migration is idempotent" test_ptp09_migration_idempotent
+run_test "PTP-09: migration removes tasks/ and prompts/ directories; is idempotent" \
+  test_ptp09_migration_removes_tasks
 
 # -------------------------------------------------------------------------
-# PTP-10: --event-file produces prompt with payload block appended
+# PTP-10: --event-file produces prompt with hardcoded text + payload block appended
 # -------------------------------------------------------------------------
 test_ptp10_event_file_appends_payload_block() {
   local t; t=$(mktemp -d -p "$TEST_TMPDIR"); local cfg; cfg=$(_make_profile "$t")
-  local pdir="$cfg/profiles/testprof"
-  mkdir -p "$pdir/tasks"
-  printf 'TASK CONTENT\n' > "$pdir/tasks/push.md"
 
   local event_file="$t/push-event.json"
   printf '{"event_type":"push","repository":{"full_name":"u/r"},"commits":[]}\n' > "$event_file"
@@ -242,19 +225,19 @@ test_ptp10_event_file_appends_payload_block() {
   out=$(CONFIG_DIR="$cfg" HOME="$TEST_TMPDIR" \
     bash "$CLI" spawn testprof --event-file "$event_file" --dry-run 2>&1)
 
-  echo "$out" | grep -q 'TASK CONTENT' || return 1
+  echo "$out" | grep -q 'Review the event payload and follow the instructions in the system prompt' || return 1
   echo "$out" | grep -qF -- '---' || return 1
   echo "$out" | grep -q 'Event Payload' || return 1
   echo "$out" | grep -qF '```json' || return 1
   echo "$out" | grep -q '"event_type"' || return 1
 }
-run_test "PTP-10: --event-file appends payload block to prompt" test_ptp10_event_file_appends_payload_block
+run_test "PTP-10: --event-file appends payload block to hardcoded prompt" test_ptp10_event_file_appends_payload_block
 
 # -------------------------------------------------------------------------
 # PTP-11: no EVENT_JSON -> no payload block appended (unit test of guard)
 # -------------------------------------------------------------------------
 test_ptp11_no_event_no_payload_block() {
-  local content="TASK CONTENT"
+  local content="Review the event payload and follow the instructions in the system prompt."
   local EVENT_JSON=""
   local event_type="unknown"
   local result="$content"
@@ -276,9 +259,6 @@ run_test "PTP-11: empty EVENT_JSON produces no payload block" test_ptp11_no_even
 # -------------------------------------------------------------------------
 test_ptp12_dry_run_shows_payload_block() {
   local t; t=$(mktemp -d -p "$TEST_TMPDIR"); local cfg; cfg=$(_make_profile "$t")
-  local pdir="$cfg/profiles/testprof"
-  mkdir -p "$pdir/tasks"
-  printf 'DRY RUN TASK\n' > "$pdir/tasks/push.md"
 
   local event_file="$t/event.json"
   printf '{"event_type":"push","repository":{"full_name":"u/r"},"ref":"refs/heads/main"}\n' > "$event_file"
@@ -287,7 +267,7 @@ test_ptp12_dry_run_shows_payload_block() {
   out=$(CONFIG_DIR="$cfg" HOME="$TEST_TMPDIR" \
     bash "$CLI" spawn testprof --event-file "$event_file" --dry-run 2>&1)
 
-  echo "$out" | grep -q 'DRY RUN TASK' || return 1
+  echo "$out" | grep -q 'Review the event payload and follow the instructions in the system prompt' || return 1
   echo "$out" | grep -q 'Event Payload (`push`)' || return 1
   echo "$out" | grep -q '"event_type"' || return 1
 }
