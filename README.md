@@ -591,7 +591,7 @@ TODOS.md    TASKS.md
 decisions/  ideas/     done/
 ```
 
-Each file is seeded from `scripts/templates/`. Connections stored in `~/.claude-pod/docs-bootstrap/connections.json` (mode 600) — tokens never touch Claude or Docker.
+Template files are read from `~/.claude-pod/docs-templates/` — populate this directory with your own files before running `bootstrap-docs`. Connections stored in `~/.claude-pod/docs-bootstrap/connections.json` (mode 600) — tokens never touch Claude or Docker.
 
 ---
 

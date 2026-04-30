@@ -303,8 +303,6 @@ setup_directories() {
   log_info "Created profiles directory: $CONFIG_DIR/profiles"
   mkdir -p "$CONFIG_DIR/docs"
   log_info "Created docs directory: $CONFIG_DIR/docs"
-  mkdir -p "$CONFIG_DIR/docs-templates"
-  log_info "Created docs-templates directory: $CONFIG_DIR/docs-templates"
   mkdir -p "$CONFIG_DIR/webhooks"
   chmod 700 "$CONFIG_DIR/webhooks"
   log_info "Created webhooks directory: $CONFIG_DIR/webhooks"
@@ -487,12 +485,6 @@ install_cli() {
     fi
   fi
 
-  # Install bootstrap-docs templates to user config directory.
-  local templates_src="$CONFIG_DIR/app/scripts/templates"
-  if [ -d "$templates_src" ]; then
-    cp -r "$templates_src/." "$CONFIG_DIR/docs-templates/"
-    log_info "Installed bootstrap-docs templates to $CONFIG_DIR/docs-templates/"
-  fi
 }
 
 install_webhook_service() {
