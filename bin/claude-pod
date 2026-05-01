@@ -1903,12 +1903,12 @@ _bootstrap_docs_find_connection() {
 # Resolve the templates directory from the user config dir.
 _bootstrap_docs_find_templates() {
   local templates_dir="${CONFIG_DIR}/docs-templates"
-  if [ -d "$templates_dir" ]; then
-    echo "$templates_dir"
-  else
-    echo "Error: bootstrap-docs templates not found at $templates_dir. Re-run install.sh to restore them." >&2
+  if [ ! -d "$templates_dir" ] || \
+     [ -z "$(find "$templates_dir" -maxdepth 3 -type f 2>/dev/null | head -1)" ]; then
+    echo "No templates found. Add your template files to: $templates_dir/" >&2
     return 1
   fi
+  echo "$templates_dir"
 }
 
 # Scaffold the standard project folder structure at $1 inside the repo at $2.
@@ -2015,6 +2015,9 @@ cmd_bootstrap_docs() {
   local branch; branch=$(printf '%s' "$conn_json" | jq -r '.branch // "main"')
   local pat; pat=$(printf '%s' "$conn_json" | jq -r '.token // ""')
 
+  local templates_dir
+  templates_dir=$(_bootstrap_docs_find_templates) || return 1
+
   local clone_dir
   clone_dir=$(mktemp -d "${TMPDIR:-/tmp}/cs-bootstrap-XXXXXXXX")
   _CLEANUP_FILES+=("$clone_dir")
@@ -2054,9 +2057,6 @@ ASKPASS
     echo "Error: $path_arg already exists in remote repo" >&2
     return 1
   fi
-
-  local templates_dir
-  templates_dir=$(_bootstrap_docs_find_templates) || return 1
 
   echo "Scaffolding $path_arg..."
   _bootstrap_docs_scaffold "$path_arg" "$repo_dir" "$templates_dir"

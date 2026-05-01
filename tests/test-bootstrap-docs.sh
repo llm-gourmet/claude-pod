@@ -45,7 +45,7 @@ _run_cmd() {
 
 echo "========================================"
 echo "  Bootstrap-Docs Tests"
-echo "  (BOOT-01 -- BOOT-15)"
+echo "  (BOOT-01 -- BOOT-17)"
 echo "========================================"
 echo ""
 
@@ -278,6 +278,10 @@ test_path_already_exists_error() {
   git -C "$clone/repo" push origin main -q 2>/dev/null
   rm -rf "$clone" "$work"
 
+  # Seed docs-templates so the guard passes before the clone step.
+  mkdir -p "$cfg/docs-templates"
+  touch "$cfg/docs-templates/template.md"
+
   local out rc=0
   out=$(bash -c "
     __CLAUDE_POD_SOURCE_ONLY=1
@@ -304,7 +308,13 @@ test_e2e_scaffold() {
 
   # Seed docs-templates so _bootstrap_docs_find_templates resolves correctly.
   mkdir -p "$cfg/docs-templates/decisions" "$cfg/docs-templates/ideas" "$cfg/docs-templates/done"
-  cp -r "$PROJECT_DIR/scripts/templates/." "$cfg/docs-templates/"
+  touch "$cfg/docs-templates/VISION.md" \
+        "$cfg/docs-templates/AGREEMENTS.md" \
+        "$cfg/docs-templates/TODOS.md" \
+        "$cfg/docs-templates/TASKS.md" \
+        "$cfg/docs-templates/decisions/_template.md" \
+        "$cfg/docs-templates/ideas/_template.md" \
+        "$cfg/docs-templates/done/_template.md"
 
   git -c init.defaultBranch=main init --bare "$remote/repo.git" -q
   local work; work=$(mktemp -d)
@@ -352,6 +362,10 @@ test_no_tmpdir_after_run() {
   git -C "$work" push "$remote/repo.git" HEAD:main -q 2>/dev/null
   rm -rf "$work"
 
+  # Seed docs-templates so the scaffold path is exercised (tests real tmpdir creation+cleanup).
+  mkdir -p "$cfg/docs-templates"
+  touch "$cfg/docs-templates/template.md"
+
   local before after
   before=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name "cs-bootstrap-*" 2>/dev/null | wc -l)
   bash -c "
@@ -370,6 +384,51 @@ test_no_tmpdir_after_run() {
   [ "$after" -le "$before" ]
 }
 run_test "BOOT-15: no cs-bootstrap-* tmpdir remains after execution" test_no_tmpdir_after_run
+
+# =========================================================================
+# BOOT-16: bootstrap-docs with missing docs-templates/ → message + exit ≠ 0
+# =========================================================================
+test_guard_missing_templates_dir() {
+  local cfg; cfg=$(mktemp -d)
+  local out rc=0
+  out=$(bash -c "
+    __CLAUDE_POD_SOURCE_ONLY=1
+    CONFIG_DIR='$cfg'
+    _CLEANUP_FILES=()
+    cleanup() { for f in \"\${_CLEANUP_FILES[@]:-}\"; do rm -rf \"\$f\"; done; }
+    trap cleanup EXIT
+    source '$PROJECT_DIR/bin/claude-pod'
+    cmd_bootstrap_docs --add-connection --name testconn \
+      --repo 'file:///tmp/norepo' --token dummy-token --branch main >/dev/null
+    cmd_bootstrap_docs --connection testconn projects/X 2>&1
+  ") || rc=$?
+  rm -rf "$cfg"
+  echo "$out" | grep -q "No templates found" && [ "$rc" -ne 0 ]
+}
+run_test "BOOT-16: missing docs-templates/ → 'No templates found' message + exit ≠ 0" test_guard_missing_templates_dir
+
+# =========================================================================
+# BOOT-17: bootstrap-docs with empty docs-templates/ → message + exit ≠ 0
+# =========================================================================
+test_guard_empty_templates_dir() {
+  local cfg; cfg=$(mktemp -d)
+  mkdir -p "$cfg/docs-templates"
+  local out rc=0
+  out=$(bash -c "
+    __CLAUDE_POD_SOURCE_ONLY=1
+    CONFIG_DIR='$cfg'
+    _CLEANUP_FILES=()
+    cleanup() { for f in \"\${_CLEANUP_FILES[@]:-}\"; do rm -rf \"\$f\"; done; }
+    trap cleanup EXIT
+    source '$PROJECT_DIR/bin/claude-pod'
+    cmd_bootstrap_docs --add-connection --name testconn \
+      --repo 'file:///tmp/norepo' --token dummy-token --branch main >/dev/null
+    cmd_bootstrap_docs --connection testconn projects/X 2>&1
+  ") || rc=$?
+  rm -rf "$cfg"
+  echo "$out" | grep -q "No templates found" && [ "$rc" -ne 0 ]
+}
+run_test "BOOT-17: empty docs-templates/ → 'No templates found' message + exit ≠ 0" test_guard_empty_templates_dir
 
 # =========================================================================
 # Summary

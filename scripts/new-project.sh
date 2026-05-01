@@ -16,8 +16,8 @@ if [[ $# -eq 0 ]]; then
   exit 1
 fi
 
-if [[ ! -d "$TEMPLATES_DIR" ]]; then
-  echo "Error: docs-templates not found at $TEMPLATES_DIR. Re-run install.sh to restore them." >&2
+if [[ ! -d "$TEMPLATES_DIR" ]] || [[ -z "$(find "$TEMPLATES_DIR" -maxdepth 3 -type f 2>/dev/null | head -1)" ]]; then
+  echo "No templates found. Add your template files to: $TEMPLATES_DIR/" >&2
   exit 1
 fi
 
